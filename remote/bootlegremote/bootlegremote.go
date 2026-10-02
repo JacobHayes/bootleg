@@ -13,31 +13,24 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"tailscale.com/client/local"
 	"tailscale.com/envknob"
-	"tailscale.com/ipn"
 	"tailscale.com/logtail"
 	"tailscale.com/net/netmon"
-	"tailscale.com/tsnet"
 )
 
 const (
-	listenAddress                   = ":80"
-	localAPITimeoutMs               = 5_000
-	whoIsTimeoutMs                  = 5_000
-	httpReadHeaderTimeout           = 10 * time.Second
-	httpIdleTimeout                 = 60 * time.Second
-	httpShutdownTimeoutMs           = 3_000
-	httpHeaderBytesMax              = 16 << 10
-	watchRetryDelayMs               = 1_000
-	watchConsecutiveFailureCountMax = 60
-	hostnameLengthMax               = 63
-	stateDirectoryLengthMax         = 4096
+	listenAddress           = ":80"
+	whoIsTimeoutMs          = 5_000
+	httpReadHeaderTimeout   = 10 * time.Second
+	httpIdleTimeout         = 60 * time.Second
+	httpShutdownTimeoutMs   = 3_000
+	httpHeaderBytesMax      = 16 << 10
+	hostnameLengthMax       = 63
+	stateDirectoryLengthMax = 4096
 )
 
 // Callbacks is implemented on the Kotlin side.
@@ -50,20 +43,28 @@ type Callbacks interface {
 }
 
 type node struct {
-	server      *tsnet.Server
-	localClient *local.Client
-	httpServer  *http.Server
-	cancel      context.CancelFunc
-	done        sync.WaitGroup
+	backend    backend
+	httpServer *http.Server
+	callbacks  *callbacksHolder
+	cancel     context.CancelFunc
+	done       sync.WaitGroup
 }
 
 type callbacksHolder struct{ callbacks Callbacks }
 
 var (
-	// mutex guards current. It is held across tsnet startup, which calls the
-	// interface getter, so the getter and error recording use their own state.
-	mutex      sync.Mutex
+	// lifecycleMutex serializes Start and Stop end to end, so a Start never
+	// overlaps a node that is still closing. It is held across tsnet startup
+	// and shutdown, which call the interface getter, so nothing on that path
+	// may take it.
+	lifecycleMutex sync.Mutex
+
+	// stateMutex guards current and stopping. It is only held briefly, so
+	// Status and NetworkChanged never wait for a slow Start or Stop.
+	stateMutex sync.Mutex
 	current    *node
+	stopping   bool
+
 	onceGlobal sync.Once
 
 	verboseLogging atomic.Bool
@@ -91,7 +92,8 @@ func initGlobals() {
 // Start brings the node up and starts serving. It returns once the backend is
 // started; it does not wait for the node to reach Running (an interactive
 // login may be needed, reported as loginURL in the status). authKey may be
-// empty once the node is registered or for interactive login.
+// empty once the node is registered or for interactive login. A Start that
+// races a Stop waits for the old node to finish closing.
 func Start(stateDir, hostname, authKey string, cb Callbacks) error {
 	if stateDir == "" || len(stateDir) > stateDirectoryLengthMax {
 		return fmt.Errorf("bootlegremote: invalid state directory length %d", len(stateDir))
@@ -104,57 +106,49 @@ func Start(stateDir, hostname, authKey string, cb Callbacks) error {
 	}
 	onceGlobal.Do(initGlobals)
 
-	mutex.Lock()
-	defer mutex.Unlock()
-	if current != nil {
+	lifecycleMutex.Lock()
+	defer lifecycleMutex.Unlock()
+	stateMutex.Lock()
+	running := current
+	stateMutex.Unlock()
+	if running != nil {
 		return errors.New("bootlegremote: already started")
 	}
-	currentCallbacks.Store(&callbacksHolder{callbacks: cb})
-	clearError()
-	// logpolicy.LogsDir (used by LocalBackend's sockstat logger) otherwise falls
-	// through to os.MkdirTemp, which fails on Android and panics.
-	for variable, directory := range map[string]string{"TS_LOGS_DIR": "logs", "TMPDIR": "tmp"} {
-		path := filepath.Join(stateDir, directory)
-		if err := os.MkdirAll(path, 0o700); err != nil {
-			return setError(fmt.Errorf("create %s: %w", path, err))
-		}
-		if err := os.Setenv(variable, path); err != nil {
-			return setError(fmt.Errorf("set %s: %w", variable, err))
-		}
+	holder := &callbacksHolder{callbacks: cb}
+	currentCallbacks.Store(holder)
+	started, err := startNode(stateDir, hostname, authKey, holder)
+	if err != nil {
+		currentCallbacks.CompareAndSwap(holder, nil)
+		return setError(err)
 	}
+	stateMutex.Lock()
+	current = started
+	stateMutex.Unlock()
+	return nil
+}
 
-	server := &tsnet.Server{
-		Dir:       stateDir,
-		Hostname:  hostname,
-		AuthKey:   strings.TrimSpace(authKey),
-		Ephemeral: false,
-		UserLogf:  log.Printf,
+func startNode(stateDir, hostname, authKey string, holder *callbacksHolder) (*node, error) {
+	clearError()
+	if err := prepareEnvironment(stateDir); err != nil {
+		return nil, err
 	}
-	if verboseLogging.Load() {
-		server.Logf = log.Printf
-	}
-	if err := server.Start(); err != nil {
-		server.Close()
-		return setError(fmt.Errorf("tsnet start: %w", err))
-	}
-	localClient, err := server.LocalClient()
+	running, err := startBackend(backendConfig{stateDir: stateDir, hostname: hostname, authKey: authKey, verbose: verboseLogging.Load()})
 	if err != nil {
-		server.Close()
-		return setError(fmt.Errorf("tsnet local client: %w", err))
+		return nil, err
 	}
-	listener, err := server.Listen("tcp", listenAddress)
+	listener, err := running.Listen(listenAddress)
 	if err != nil {
-		server.Close()
-		return setError(fmt.Errorf("tsnet listen %s: %w", listenAddress, err))
+		running.Close()
+		return nil, fmt.Errorf("tsnet listen %s: %w", listenAddress, err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	started := &node{
-		server:      server,
-		localClient: localClient,
-		cancel:      cancel,
+		backend:   running,
+		callbacks: holder,
+		cancel:    cancel,
 		httpServer: &http.Server{
-			Handler:           newHandler(localClient),
+			Handler:           newHandler(running),
 			ReadHeaderTimeout: httpReadHeaderTimeout,
 			IdleTimeout:       httpIdleTimeout,
 			MaxHeaderBytes:    httpHeaderBytesMax,
@@ -169,9 +163,25 @@ func Start(stateDir, hostname, authKey string, cb Callbacks) error {
 	}()
 	go func() {
 		defer started.done.Done()
-		watchStatus(ctx, localClient, cb)
+		watchStatus(ctx, running, func(snapshot status) { holder.callbacks.OnStatus(encodeStatus(snapshot)) }, sleepContext)
 	}()
-	current = started
+	return started, nil
+}
+
+// prepareEnvironment points TS_LOGS_DIR and TMPDIR into the state directory:
+// logpolicy.LogsDir (used by LocalBackend's sockstat logger) otherwise falls
+// through to os.MkdirTemp, which fails on Android and panics. Tests replace it
+// so the test binary's TMPDIR survives.
+var prepareEnvironment = func(stateDir string) error {
+	for variable, directory := range map[string]string{"TS_LOGS_DIR": "logs", "TMPDIR": "tmp"} {
+		path := filepath.Join(stateDir, directory)
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			return fmt.Errorf("create %s: %w", path, err)
+		}
+		if err := os.Setenv(variable, path); err != nil {
+			return fmt.Errorf("set %s: %w", variable, err)
+		}
+	}
 	return nil
 }
 
@@ -181,25 +191,47 @@ func SetVerboseLogging(enabled bool) {
 	verboseLogging.Store(enabled)
 }
 
-// Stop shuts the node down. The node stays registered (state is kept).
+// Stop shuts the node down and returns once it has fully closed. The node
+// stays registered (state is kept). Status reports Stopping meanwhile.
 func Stop() {
-	mutex.Lock()
-	stopping := current
-	current = nil
-	mutex.Unlock()
-	if stopping == nil {
+	lifecycleMutex.Lock()
+	defer lifecycleMutex.Unlock()
+	stateMutex.Lock()
+	stopped := current
+	if stopped != nil {
+		stopping = true
+	}
+	stateMutex.Unlock()
+	if stopped == nil {
 		return
 	}
-	stopping.cancel()
+	stopNode(stopped)
+	stateMutex.Lock()
+	current = nil
+	stopping = false
+	stateMutex.Unlock()
+	// A newer holder (installed by a later registration) must survive.
+	currentCallbacks.CompareAndSwap(stopped.callbacks, nil)
+}
+
+func stopNode(stopped *node) {
+	stopped.cancel()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeoutMs*time.Millisecond)
 	defer cancel()
-	if err := stopping.httpServer.Shutdown(shutdownCtx); err != nil {
+	if err := stopped.httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Printf("bootlegremote: http shutdown: %v", err)
 	}
-	if err := stopping.server.Close(); err != nil {
+	if err := stopped.backend.Close(); err != nil {
 		log.Printf("bootlegremote: tsnet close: %v", err)
 	}
-	stopping.done.Wait()
+	stopped.done.Wait()
+}
+
+// runningNode returns the node if it is up and not stopping.
+func runningNode() (*node, bool) {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
+	return current, current != nil && !stopping
 }
 
 // NetworkChanged forwards Android's default-network changes (from
@@ -207,116 +239,24 @@ func Stop() {
 // waiting for the next poll. interfaceName is "" when the network is lost.
 func NetworkChanged(interfaceName, gatewayIP string) {
 	updateDefaultRoute(interfaceName, gatewayIP)
-	mutex.Lock()
-	running := current
-	mutex.Unlock()
-	if running == nil {
-		return
+	if running, ok := runningNode(); ok {
+		running.backend.InjectNetworkEvent()
 	}
-	if monitor, ok := running.server.Sys().NetMon.GetOK(); ok {
-		monitor.InjectEvent()
-	}
-}
-
-type status struct {
-	BackendState   string   `json:"backendState"`
-	TailscaleIPs   []string `json:"tailscaleIPs"`
-	LoginURL       string   `json:"loginURL,omitempty"`
-	DNSName        string   `json:"dnsName,omitempty"`
-	MagicDNSSuffix string   `json:"magicDNSSuffix,omitempty"`
-	Health         []string `json:"health,omitempty"`
-	Error          string   `json:"error,omitempty"`
 }
 
 // Status returns the node status as JSON: backend state, tailnet IPs, the
 // login URL if interactive login is needed, and the last error.
 func Status() string {
-	mutex.Lock()
-	running := current
-	mutex.Unlock()
-	if running == nil {
-		return encodeStatus(status{BackendState: ipn.Stopped.String(), TailscaleIPs: []string{}, Error: currentError()})
+	stateMutex.Lock()
+	running, isStopping := current, stopping
+	stateMutex.Unlock()
+	switch {
+	case running == nil:
+		return encodeStatus(status{BackendState: backendStateStopped, Error: currentError()})
+	case isStopping:
+		return encodeStatus(status{BackendState: backendStateStopping, Error: currentError()})
 	}
-	return statusOf(context.Background(), running.localClient)
-}
-
-func statusOf(ctx context.Context, localClient *local.Client) string {
-	ctx, cancel := context.WithTimeout(ctx, localAPITimeoutMs*time.Millisecond)
-	defer cancel()
-	errorText := currentError()
-	tailnetStatus, err := localClient.StatusWithoutPeers(ctx)
-	if err != nil {
-		return encodeStatus(status{BackendState: "Unknown", TailscaleIPs: []string{}, Error: err.Error()})
-	}
-	result := status{
-		BackendState: tailnetStatus.BackendState,
-		TailscaleIPs: []string{},
-		LoginURL:     tailnetStatus.AuthURL,
-		Health:       tailnetStatus.Health,
-		Error:        errorText,
-	}
-	for _, ip := range tailnetStatus.TailscaleIPs {
-		result.TailscaleIPs = append(result.TailscaleIPs, ip.String())
-	}
-	if tailnetStatus.Self != nil {
-		result.DNSName = tailnetStatus.Self.DNSName
-	}
-	if tailnetStatus.CurrentTailnet != nil {
-		result.MagicDNSSuffix = tailnetStatus.CurrentTailnet.MagicDNSSuffix
-	}
-	return encodeStatus(result)
-}
-
-func encodeStatus(value status) string {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		panic(fmt.Sprintf("bootlegremote: status must always encode: %v", err))
-	}
-	return string(encoded)
-}
-
-// watchStatus pushes status JSON to the callback whenever the backend state,
-// login URL or netmap changes, deduplicating identical snapshots.
-func watchStatus(ctx context.Context, localClient *local.Client, cb Callbacks) {
-	lastSent := ""
-	send := func() {
-		snapshot := statusOf(ctx, localClient)
-		if snapshot != lastSent && ctx.Err() == nil {
-			lastSent = snapshot
-			cb.OnStatus(snapshot)
-		}
-	}
-	for retry := 0; retry < watchConsecutiveFailureCountMax && ctx.Err() == nil; retry++ {
-		watcher, err := localClient.WatchIPNBus(ctx, ipn.NotifyInitialState|ipn.NotifyNoPrivateKeys)
-		if err != nil {
-			log.Printf("bootlegremote: watch ipn bus: %v", err)
-			sleepContext(ctx, watchRetryDelayMs*time.Millisecond)
-			continue
-		}
-		retry = 0
-		for {
-			notification, err := watcher.Next()
-			if err != nil {
-				break
-			}
-			if notification.State != nil || notification.BrowseToURL != nil || notification.SelfChange != nil || notification.LoginFinished != nil || notification.Health != nil || notification.ErrMessage != nil {
-				if notification.ErrMessage != nil {
-					setError(errors.New(*notification.ErrMessage))
-				}
-				send()
-			}
-		}
-		watcher.Close()
-	}
-}
-
-func sleepContext(ctx context.Context, duration time.Duration) {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
+	return encodeStatus(statusOf(context.Background(), running.backend))
 }
 
 // setError records err for Status and returns it.
@@ -339,7 +279,7 @@ func currentError() string {
 	return lastError
 }
 
-func newHandler(localClient *local.Client) http.Handler {
+func newHandler(running backend) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -348,33 +288,13 @@ func newHandler(localClient *local.Client) http.Handler {
 	mux.HandleFunc("GET /whoami", func(writer http.ResponseWriter, request *http.Request) {
 		ctx, cancel := context.WithTimeout(request.Context(), whoIsTimeoutMs*time.Millisecond)
 		defer cancel()
-		who, err := localClient.WhoIs(ctx, request.RemoteAddr)
+		who, err := running.WhoIs(ctx, request.RemoteAddr)
 		if err != nil {
 			http.Error(writer, "whois failed: "+err.Error(), http.StatusForbidden)
 			return
 		}
-		type whoAmI struct {
-			RemoteAddress string   `json:"remoteAddress"`
-			NodeName      string   `json:"nodeName"`
-			StableNodeID  string   `json:"stableNodeID"`
-			UserLogin     string   `json:"userLogin,omitempty"`
-			Tags          []string `json:"tags,omitempty"`
-		}
-		response := whoAmI{RemoteAddress: request.RemoteAddr}
-		if who.Node != nil {
-			response.NodeName = who.Node.ComputedName
-			if response.NodeName == "" {
-				response.NodeName = who.Node.Name
-			}
-			response.StableNodeID = string(who.Node.StableID)
-			response.Tags = who.Node.Tags
-		}
-		// Tagged nodes carry a placeholder user profile; report tags instead.
-		if who.UserProfile != nil && len(response.Tags) == 0 {
-			response.UserLogin = who.UserProfile.LoginName
-		}
 		writer.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(writer).Encode(response); err != nil {
+		if err := json.NewEncoder(writer).Encode(who); err != nil {
 			log.Printf("bootlegremote: whoami encode: %v", err)
 		}
 	})
