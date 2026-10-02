@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/coder/websocket v1.8.15
+	golang.org/x/term v0.46.0
 	tailscale.com v1.104.0
 )
 
@@ -46,7 +47,6 @@ require (
 	golang.org/x/oauth2 v0.37.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
-	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect
