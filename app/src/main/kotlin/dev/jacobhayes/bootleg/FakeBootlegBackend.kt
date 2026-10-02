@@ -66,6 +66,14 @@ class FakeBootlegBackend(
         return ApplyResult.Applied(state, reenumerated = false)
     }
 
+    override suspend fun reinsert(lun: Int): ApplyResult {
+        delay(latencyMs)
+        journalFlow.update { it.copy(slotIntents = it.slotIntents + (lun to SlotIntent.EXPORTED)) }
+        val state = stateFor(journalFlow.value)
+        gadgetFlow.value = state
+        return ApplyResult.Applied(state, reenumerated = false)
+    }
+
     override suspend fun bootlegOff(): ApplyResult {
         journalFlow.value = Journal()
         gadgetFlow.value = stateFor(Journal())

@@ -1,6 +1,7 @@
 package dev.jacobhayes.bootleg
 
 import android.app.Application
+import android.content.Context
 import android.os.StatFs
 import dev.jacobhayes.bootleg.catalog.CatalogRepository
 import dev.jacobhayes.bootleg.catalog.OkHttpHttp
@@ -10,6 +11,7 @@ import dev.jacobhayes.bootleg.download.DownloadNotifications
 import dev.jacobhayes.bootleg.download.DownloadScheduler
 import dev.jacobhayes.bootleg.download.DownloadStore
 import dev.jacobhayes.bootleg.download.Downloads
+import dev.jacobhayes.bootleg.service.BootlegBackendImpl
 import dev.jacobhayes.bootleg.storage.FileTasks
 import dev.jacobhayes.bootleg.storage.StoragePaths
 import dev.jacobhayes.bootleg.ui.drives.DrivesController
@@ -18,11 +20,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import java.io.File
 
+/** Process-wide singletons (manual DI). */
 class BootlegApp : Application() {
-    /** The one place the UI gets the system side from. Merge point: the root-backed implementation. */
-    val backend: BootlegBackend by lazy { FakeBootlegBackend.demo() }
-
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    val systemBackend: BootlegBackendImpl by lazy { BootlegBackendImpl(this, appScope) }
+
+    /** The one place the UI gets the system side from. */
+    val backend: BootlegBackend get() = systemBackend
+
     val prefs by lazy { Prefs(this) }
     private val httpClient by lazy { OkHttpHttp.baseClient() }
     private val catalogHttp by lazy { OkHttpHttp(httpClient) }
@@ -45,5 +51,12 @@ class BootlegApp : Application() {
                 onImageAdded = { backend.refreshImages() },
             )
         Downloads(store, engine, notifications, DownloadScheduler(this), wifiOnly = { prefs.wifiOnlyDownloads.value })
+    }
+
+    companion object {
+        const val PREFERENCES_NAME = "bootleg"
+        const val PREFERENCE_RESTORE_AFTER_REBOOT = "restore_after_reboot"
+
+        fun from(context: Context): BootlegApp = context.applicationContext as BootlegApp
     }
 }

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- L4 test control surface (adb shell content call). DUMP is held by the adb shell, not by ordinary apps. -->
+        <provider
+            android:name=".debug.CommandProvider"
+            android:authorities="dev.jacobhayes.bootleg.debug"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>

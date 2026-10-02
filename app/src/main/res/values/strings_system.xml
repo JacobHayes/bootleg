@@ -1,0 +1,11 @@
+<resources>
+    <string name="notification_channel_exports">Exported disks</string>
+    <string name="notification_idle">Bootleg</string>
+    <plurals name="notification_exported">
+        <item quantity="one">%d disk exported</item>
+        <item quantity="other">%d disks exported</item>
+    </plurals>
+    <string name="notification_eject_all">Eject all</string>
+    <string name="tile_label">Bootleg</string>
+    <string name="tile_subtitle_inactive">No disks</string>
+</resources>

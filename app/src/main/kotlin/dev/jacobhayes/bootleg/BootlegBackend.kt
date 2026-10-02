@@ -48,6 +48,9 @@ interface BootlegBackend {
         force: Boolean,
     ): ApplyResult
 
+    /** Re-exports a slot the host or user ejected (or that failed). Bootleg never does this on its own. */
+    suspend fun reinsert(lun: Int): ApplyResult
+
     suspend fun bootlegOff(): ApplyResult
 
     suspend fun createBlankImage(
