@@ -25,6 +25,9 @@ android {
         aidl = true
         buildConfig = true
     }
+    testOptions {
+        unitTests.all { it.useJUnitPlatform() }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
@@ -50,4 +53,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.serialization.json)
     implementation(libs.coroutines.android)
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.junit.jupiter)
+    testImplementation(libs.coroutines.test)
+    testRuntimeOnly(libs.junit.launcher)
 }

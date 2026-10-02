@@ -13,7 +13,7 @@ lockfile = true
 
 [tasks.check]
 description = "L0-L2: lint, compile (warnings as errors), unit + property + simulation tests"
-run = "./gradlew --console=plain -q ktlintCheck :core:test :app:assembleDebug"
+run = "./gradlew --console=plain -q ktlintCheck :core:test :app:testDebugUnitTest :app:assembleDebug"
 
 [tasks."check:catalog"]
 description = "L3: live catalog smoke test against every distro (network)"
