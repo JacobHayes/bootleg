@@ -54,6 +54,11 @@ data class LunState(
     val cdrom: Boolean,
     val removable: Boolean,
     val nofua: Boolean,
+    /**
+     * `inquiry_string`, or null if the kernel has no such attribute. Bootleg writes a marker carrying
+     * [Journal.lunInstanceNonce] into it, so a LUN it configured can be told apart from a recreated one.
+     */
+    val inquiryString: String? = null,
 )
 
 /** A snapshot of the live configfs gadget, as read by [GadgetReader]. */
@@ -94,6 +99,18 @@ sealed interface Op {
         val value: String,
     ) : Op
 
+    /** Binary attribute write (HID `report_desc`). */
+    @Serializable class WriteBytes(
+        val path: String,
+        val bytes: ByteArray,
+    ) : Op {
+        override fun equals(other: Any?): Boolean = other is WriteBytes && path == other.path && bytes.contentEquals(other.bytes)
+
+        override fun hashCode(): Int = 31 * path.hashCode() + bytes.contentHashCode()
+
+        override fun toString(): String = "WriteBytes(path=$path, sizeBytes=${bytes.size})"
+    }
+
     @Serializable data class Symlink(
         val target: String,
         val link: String,
@@ -119,6 +136,11 @@ interface ConfigFs {
         value: String,
     )
 
+    fun writeBytes(
+        path: String,
+        bytes: ByteArray,
+    )
+
     fun mkdir(path: String)
 
     fun rmdir(path: String)
@@ -135,6 +157,11 @@ interface ConfigFs {
 @Serializable
 enum class SlotIntent { EXPORTED, HOST_EJECTED, USER_EJECTED, FAILED }
 
+/**
+ * Any non-IDLE phase tells reconcile a transition of ours was in flight. UNBINDING covers a whole
+ * switch (unbind through bind) so nothing is written to the journal inside the unbound window;
+ * BINDING is no longer written but stays readable in old journals.
+ */
 @Serializable
 enum class TransitionPhase { IDLE, UNBINDING, MUTATING, BINDING }
 
@@ -147,6 +174,11 @@ data class Journal(
     val phase: TransitionPhase = TransitionPhase.IDLE,
     /** UDC name to rebind to if a transition is interrupted. */
     val udc: String = "",
+    /**
+     * Identifies the LUNs Bootleg configured (see [LunMarker]): a LUN only counts as host-ejected while
+     * its `inquiry_string` still carries this nonce. Empty in journals written before the marker existed.
+     */
+    val lunInstanceNonce: String = "",
 )
 
 /** Durable journal storage (app: a file written atomically; tests: in-memory). */

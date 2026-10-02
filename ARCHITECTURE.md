@@ -48,10 +48,14 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   `Symlink`, `Unlink`, `Rmdir`, `Bind`. Changes that re-enumerate (unbind â†’ change â†’ bind): LUN
   count, HID function set, any `cdrom` or `ro` change on a LUN. Changes done in place, without
   re-enumerating: swapping media on a LUN whose type stays the same (write `file=""`, then the new
-  path), or ejecting.
+  path), or ejecting. Links are only ever created while the UDC is unbound (configfs rejects a
+  link into a bound config).
 - **Ejection.** A normal eject writes `file=""`. If the host prevents removal, Bootleg tells the
   user and offers "Force eject" (`forced_eject`). An eject started by the host (`file` becomes
-  empty) is recorded as `HostEjected`, and Bootleg never re-inserts that media on its own.
+  empty) is recorded as `HostEjected`, and Bootleg never re-inserts that media on its own. With the
+  journal idle, an existing LUN whose `file` is empty (and whose `ro`/`cdrom` still match the slot)
+  is a host eject even if the HAL has since unbound the UDC or our link was removed; a missing or
+  recreated LUN is not. A forced eject also clears the host's prevent-removal flag.
 - **Executor** (root): before running any destructive op, re-read the paths it touches; if foreign
   state changed since planning, abort and replan (at most 3 times). After applying, read back
   and assert the invariants:
@@ -60,7 +64,10 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   - â‰¤ 8 LUNs;
   - no writable file is exported twice;
   - every `file` path is canonical and inside an allowed root;
-  - foreign links are unchanged.
+  - no foreign function or foreign link target (notably `ffs.adb`) present before the operation is
+    gone afterwards. Links are compared by target because the HAL renumbers `functionN`;
+    additions are allowed, and ADB may be absent before (USB debugging off). A loss fails the
+    operation with `NeedsAttention`.
 
   Failures are per slot: a failed op marks only that slot `Failed(reason)`, and the
   unaffected exports stay in place. The full **Bootleg-off** (remove all our functions, rebind) is
@@ -75,10 +82,16 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
 - **ADB contract.** USB ADB drops for a few seconds on every re-enumeration. Recovery is bounded
   (dead-man â‰¤ 15s). Wireless ADB is the debugging path during that window.
 - **Reconcile.** Triggered by `ACTION_USB_STATE`, service start, or a user action, with no
-  periodic polling while idle. It waits for the HAL to go quiet (`sys.usb.state ==
-  sys.usb.config` for 1s), then compares the full state to the journal: UDC bound, links, LUN
-  `file`/`ro`/`cdrom`. `HostEjected`/`UserEjected` slots are never re-inserted. It is
-  rate-limited to 1 attempt per 2s, with a maximum of 5 attempts before `NeedsAttention`.
+  periodic polling while idle. It waits (â‰¤ 10s) for the HAL to go quiet: `sys.usb.config`
+  unchanged for 1s, and equal to `sys.usb.state` when that is set (the Pixel 6 leaves
+  `sys.usb.state` empty; a stable empty config with an empty state also counts as quiet). Then it compares the full state to the journal: UDC bound, links, LUN
+  `file`/`ro`/`cdrom`. `HostEjected`/`UserEjected` slots are never re-inserted (only an explicit
+  re-insert or a changed slot in `apply` brings media back). A LUN emptied while the journal phase
+  is not idle is our own interrupted swap, not a host eject. It is rate-limited to 1 attempt per
+  2s, with a maximum of 5 attempts before `NeedsAttention`.
+- **HAL races.** If the UDC gets bound by someone else (HAL, dead-man) during one of our
+  transitions, the host may have enumerated a half-built gadget, so the replan forces one more
+  unbind/bind even when the topology already looks right.
 - **Backing-file identity.** Root opens the image (`O_NOFOLLOW`), `fstat`s it, and writes
   `/proc/<rootpid>/fd/<n>` into `lun/file`. The kernel opens the same inode, which closes the
   check-then-open race. Duplicate exports are rejected by `(st_dev, st_ino)` whenever any copy is
