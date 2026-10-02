@@ -3,9 +3,122 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bootleg</title>
+<meta name="referrer" content="no-referrer">
+<title>Bootleg Remote</title>
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
 </head>
 <body>
-<p>Bootleg remote</p>
+<header class="top">
+  <h1>Bootleg</h1>
+  <div id="banner" class="banner" role="status" aria-live="polite">Connecting…</div>
+</header>
+
+<section id="pair" class="card narrow" hidden>
+  <h2>Pair this browser</h2>
+  <p>On the phone, open Bootleg → Remote → Offline mode and start pairing. Enter the 6-digit code it shows.</p>
+  <form id="pair-form" class="row">
+    <input id="pair-code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456" required aria-label="Pairing code">
+    <button type="submit">Pair</button>
+  </form>
+  <p id="pair-error" class="error" hidden></p>
+</section>
+
+<main id="main" hidden>
+  <section id="takeover" class="card takeover" role="alertdialog" aria-labelledby="takeover-text" hidden>
+    <p id="takeover-text"></p>
+    <div class="row">
+      <button id="takeover-allow" type="button">Allow</button>
+      <button id="takeover-decline" type="button" class="secondary">Decline</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Control</h2>
+    <p id="lease-text" class="muted">Lease: unknown</p>
+    <div class="row">
+      <button id="lease-take" type="button">Take control</button>
+      <button id="lease-takeover" type="button">Ask to take over</button>
+      <button id="lease-release" type="button" class="secondary">Release</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Disks</h2>
+    <table id="slots" class="slots">
+      <thead><tr><th>LUN</th><th>Image</th><th>Mode</th><th>Status</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p id="slots-empty" class="muted">No disks exposed.</p>
+    <form id="expose-form" class="row wrap">
+      <select id="expose-image" aria-label="Image" required></select>
+      <select id="expose-mode" aria-label="Mode">
+        <option value="cdrom">CD-ROM</option>
+        <option value="disk_ro">Disk (read-only)</option>
+        <option value="disk_rw">Disk (read-write)</option>
+      </select>
+      <select id="expose-lun" aria-label="LUN" required></select>
+      <button type="submit" class="needs-lease">Expose</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Keyboard &amp; mouse</h2>
+    <div class="row wrap">
+      <label><input id="hid-keyboard" type="checkbox"> Keyboard</label>
+      <label><input id="hid-mouse" type="checkbox"> Mouse</label>
+      <button id="hid-apply" type="button" class="needs-lease">Apply</button>
+      <span id="hid-status" class="muted"></span>
+    </div>
+
+    <div id="toolbar" class="toolbar" aria-label="Special keys">
+      <button type="button" class="needs-lease" data-chord="esc">Esc</button>
+      <button type="button" class="needs-lease" data-chord="tab">Tab</button>
+      <button type="button" class="needs-lease" data-chord="ctrl+alt+delete">Ctrl+Alt+Del</button>
+      <button type="button" class="needs-lease" data-chord="cmd+space">Cmd+Space</button>
+      <button type="button" class="needs-lease" data-chord="cmd+tab">Cmd+Tab</button>
+      <button type="button" class="needs-lease" data-chord="alt+tab">Alt+Tab</button>
+      <button type="button" class="needs-lease" data-chord="cmd">Win/Cmd</button>
+      <button type="button" class="needs-lease" data-chord="cmd+q">Cmd+Q</button>
+      <button type="button" class="needs-lease" data-chord="alt+f4">Alt+F4</button>
+      <button type="button" class="needs-lease" data-chord="printscreen">PrtSc</button>
+      <button type="button" class="needs-lease" data-chord="enter">Enter</button>
+    </div>
+    <div id="fkeys" class="toolbar" aria-label="Function keys"></div>
+
+    <div id="pad" class="pad" tabindex="0" aria-label="Keyboard and mouse capture area">
+      <span id="pad-hint">Click here to capture keyboard and mouse.</span>
+    </div>
+    <div class="row wrap">
+      <button id="click-left" type="button" class="needs-lease secondary">Left click</button>
+      <button id="click-right" type="button" class="needs-lease secondary">Right click</button>
+      <button id="release-all" type="button" class="needs-lease secondary">Release all keys</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Boot keys</h2>
+    <p class="muted">Start this, then power the target on. It taps the firmware key until stopped.</p>
+    <div class="row wrap">
+      <select id="boot-vendor" aria-label="Vendor"></select>
+      <button id="boot-menu" type="button" class="needs-lease">Boot menu</button>
+      <button id="boot-setup" type="button" class="needs-lease">Firmware setup</button>
+      <button id="boot-cancel" type="button" class="needs-lease secondary">Stop</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Paste as typing</h2>
+    <textarea id="paste-text" rows="4" maxlength="65000" placeholder="Text to type on the target (US layout)"></textarea>
+    <div class="row wrap">
+      <button id="paste-prepare" type="button" class="needs-lease">Prepare</button>
+      <span id="paste-plan" class="muted"></span>
+      <button id="paste-run" type="button" class="needs-lease" hidden>Type it</button>
+      <button id="paste-cancel" type="button" class="needs-lease secondary" hidden>Cancel</button>
+    </div>
+  </section>
+</main>
+
+<footer id="log" class="log muted" aria-live="polite"></footer>
 </body>
 </html>
