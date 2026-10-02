@@ -157,7 +157,9 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
 
 - Keyboard: 8-byte boot-format report (mods, reserved, 6 keys), no report ID, subclass 1 /
   protocol 1. The report format is the same in boot and report protocol, so no conversion is
-  needed. Keyboard LEDs (output report) are read.
+  needed. Keyboard LEDs (output report) are read. The descriptor is HID 1.11 appendix B.1 except
+  that the key array spans usages 0x00–0xFF (B.1 stops at 0x65), so report-protocol hosts accept
+  F13–F24 (used by the L4 harmless-input test), Intl/Lang and media keys.
 - Mouse: v1 uses a 3-byte boot mouse (buttons, dx, dy), subclass 1 / protocol 2. Scroll wheel is
   deferred until `SET_PROTOCOL` handling is proven.
 - Nonblocking writes with a 50ms deadline, a bounded queue (256), and release-all on
