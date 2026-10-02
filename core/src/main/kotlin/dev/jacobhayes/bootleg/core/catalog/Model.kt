@@ -32,17 +32,28 @@ data class Release(
     /** Optional edition/variant, e.g. "KDE", "netinst", "live". Empty if none. */
     val variant: String = "",
     val url: String,
-    /** Hex sha256 if known up front; otherwise [sumsUrl] must be set. */
+    /**
+     * Hex sha256 of the image if known up front; otherwise [sumsUrl] (or, for an archive,
+     * [archiveSha256]) must be set. With [archiveEntry] this is the extracted image's hash.
+     */
     val sha256: String? = null,
-    /** URL of a SHA256SUMS-style file containing this image's hash. */
+    /** URL of a SHA256SUMS-style file containing the hash of what [url] serves (the archive, with [archiveEntry]). */
     val sumsUrl: String? = null,
     val sizeBytes: Long? = null,
     /** ISO-8601 date when support ends, if published. */
     val supportedUntil: String? = null,
     /** True if the distro publishes a signature for the sums (not verified in v1). */
     val sumsSigned: Boolean = false,
-    /** File name to store as, e.g. "ubuntu-26.04-desktop-amd64.iso". */
+    /** File name to store as, e.g. "ubuntu-26.04-desktop-amd64.iso". For an archive, the name of the extracted image. */
     val fileName: String,
+    /**
+     * When set, [url] points to a .zip and the image is this entry inside it; the app extracts it
+     * after download and stores it as [fileName]. [sha256] then refers to the extracted image, if
+     * upstream publishes that hash.
+     */
+    val archiveEntry: String? = null,
+    /** Hex sha256 of the .zip at [url], if upstream publishes it. Only meaningful with [archiveEntry]. */
+    val archiveSha256: String? = null,
 )
 
 data class HttpResponse(

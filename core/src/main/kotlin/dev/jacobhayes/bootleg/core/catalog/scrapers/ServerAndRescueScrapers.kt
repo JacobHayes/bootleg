@@ -1,6 +1,7 @@
 package dev.jacobhayes.bootleg.core.catalog.scrapers
 
 import dev.jacobhayes.bootleg.core.catalog.Scraper
+import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.Memtest86PlusScraper
 import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.NetbootXyzScraper
 import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.ShredOsScraper
 import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.SystemRescueScraper
@@ -12,10 +13,7 @@ import dev.jacobhayes.bootleg.core.catalog.scrapers.server.TrueNasScraper
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.almaLinuxScraper
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.rockyScraper
 
-/**
- * Server and rescue scrapers. Memtest86+ is absent on purpose: upstream publishes only zipped
- * ISOs (`*.iso.zip`), and a Release has no way to say "unpack before use".
- */
+/** Server and rescue scrapers. */
 val serverAndRescueScrapers: List<Scraper> =
     listOf(
         AlpineScraper(),
@@ -26,6 +24,7 @@ val serverAndRescueScrapers: List<Scraper> =
         SystemRescueScraper(),
         gpartedScraper,
         clonezillaScraper,
+        Memtest86PlusScraper(),
         ShredOsScraper(),
         NetbootXyzScraper(),
     )

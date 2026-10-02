@@ -4,7 +4,9 @@ import dev.jacobhayes.bootleg.core.catalog.Arch
 import dev.jacobhayes.bootleg.core.catalog.Http
 import dev.jacobhayes.bootleg.core.catalog.HttpResponse
 import dev.jacobhayes.bootleg.core.catalog.Release
+import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.Memtest86PlusScraper
 import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.ShredOsScraper
+import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.newestMemtestArchive
 import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.parseLiveCdChecksums
 import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.parseNetbootXyzBuildDate
 import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.parseShredOsRelease
@@ -283,6 +285,65 @@ class ServerAndRescueParsersTest {
         assertEquals("2026-10-01", parseNetbootXyzBuildDate("# netboot.xyz bootloaders generated at Thu Oct  1 11:05:18 UTC 2026\n"))
         assertEquals("2026-12-24", parseNetbootXyzBuildDate("# generated at Thu Dec 24 01:00:00 UTC 2026"))
         assertNull(parseNetbootXyzBuildDate("$hashA *netboot.xyz.iso"))
+    }
+
+    @Test
+    fun `memtest picks the newest plain x86-64 ISO zip`() {
+        val html =
+            """
+            <a href="/download/v8.10/mt86plus_8.10_x86_64.iso.zip">64</a>
+            <a href="/download/v8.10/mt86plus_8.10_x86_64.grub.iso.zip">grub</a>
+            <a href="/download/v8.10/mt86plus_8.10_i586.iso.zip">32</a>
+            <a href="/download/v7.20/mt86plus_7.20_x86_64.iso.zip">old</a>
+            <a href="http://insecure.example/mt86plus_9.0_x86_64.iso.zip">insecure</a>
+            """.trimIndent()
+        val archive = newestMemtestArchive(html, "https://www.memtest.org/")
+        assertEquals("8.10", archive?.version)
+        assertEquals("https://www.memtest.org/download/v8.10/mt86plus_8.10_x86_64.iso.zip", archive?.url)
+        assertNull(newestMemtestArchive("<html>no links</html>", "https://www.memtest.org/"))
+        assertEquals(
+            emptyList<Release>(),
+            runBlocking { Memtest86PlusScraper().releases(StaticHttp(mapOf("memtest.org" to "<html></html>"))) },
+        )
+    }
+
+    @Test
+    fun `memtest fails when the sums file does not list the zip`() {
+        val http =
+            StaticHttp(
+                mapOf(
+                    "sha256sum.txt" to "$hashA  v8.10/mt86plus_8.10_i586.iso.zip",
+                    "memtest.org" to """<a href="/download/v8.10/mt86plus_8.10_x86_64.iso.zip">64</a>""",
+                ),
+            )
+        assertThrows<IllegalStateException> { runBlocking { Memtest86PlusScraper().releases(http) } }
+    }
+
+    @Test
+    fun `archive release invariants`() {
+        val scraper = Memtest86PlusScraper()
+        val good =
+            Release(
+                "memtest86plus",
+                "8.10",
+                Arch.X86_64,
+                url = "https://x/m.iso.zip",
+                fileName = "m.iso",
+                archiveEntry = "memtest.iso",
+                archiveSha256 = hashA,
+            )
+        assertEquals(listOf(good), scraper.checkedReleases(listOf(good)))
+        val bad =
+            listOf(
+                good.copy(url = "https://x/m.iso"),
+                good.copy(archiveEntry = null),
+                good.copy(archiveEntry = "../memtest.iso"),
+                good.copy(archiveEntry = "/memtest.iso"),
+                good.copy(archiveSha256 = "abc"),
+                good.copy(archiveSha256 = hashC),
+                good.copy(archiveSha256 = null),
+            )
+        for (release in bad) assertThrows<IllegalStateException>(release.toString()) { scraper.checkedReleases(listOf(release)) }
     }
 
     @Test

@@ -72,7 +72,21 @@ internal fun Scraper.checkedReleases(releases: List<Release>): List<Release> {
         }
         check(release.sha256 == null || isSha256(release.sha256)) { "bad sha256 for ${release.url}" }
         check(release.sha256 == null || release.sha256 == release.sha256.lowercase()) { "sha256 must be lowercase: ${release.url}" }
-        check(release.sha256 != null || release.sumsUrl != null) { "no sha256 and no sums URL for ${release.url}" }
+        check(release.sha256 != null || release.sumsUrl != null || release.archiveSha256 != null) {
+            "no sha256 and no sums URL for ${release.url}"
+        }
+        check(release.archiveSha256 == null || release.archiveEntry != null) { "archive sha256 without an archive entry: ${release.url}" }
+        check(release.archiveSha256 == null || isSha256(release.archiveSha256)) { "bad archive sha256 for ${release.url}" }
+        check(release.archiveSha256 == null || release.archiveSha256 == release.archiveSha256.lowercase()) {
+            "archive sha256 must be lowercase: ${release.url}"
+        }
+        check(release.archiveEntry == null || release.url.substringBefore('?').endsWith(".zip")) {
+            "archive entry needs a .zip URL: ${release.url}"
+        }
+        check(
+            release.archiveEntry == null ||
+                (release.archiveEntry.isNotBlank() && !release.archiveEntry.startsWith("/") && ".." !in release.archiveEntry.split('/')),
+        ) { "bad archive entry '${release.archiveEntry}'" }
         check(release.sumsUrl == null || release.sumsUrl.startsWith("https://")) { "sums URL must be https: ${release.sumsUrl}" }
         check(release.sizeBytes == null || release.sizeBytes > 0) { "non-positive size for ${release.url}" }
     }

@@ -7,6 +7,7 @@ import dev.jacobhayes.bootleg.core.catalog.Http
 import dev.jacobhayes.bootleg.core.catalog.HttpResponse
 import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.catalog.Scraper
+import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.Memtest86PlusScraper
 import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.NetbootXyzScraper
 import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.ShredOsScraper
 import dev.jacobhayes.bootleg.core.catalog.scrapers.rescue.SystemRescueScraper
@@ -52,6 +53,7 @@ class ServerAndRescueFixtureTest {
                 "systemrescue",
                 "gparted-live",
                 "clonezilla",
+                "memtest86plus",
                 "shredos",
                 "netboot-xyz",
             ),
@@ -59,7 +61,7 @@ class ServerAndRescueFixtureTest {
         )
         assertEquals(distros.size, distros.map { it.id }.toSet().size)
         assertEquals(5, distros.count { it.category == Category.SERVER })
-        assertEquals(5, distros.count { it.category == Category.RESCUE })
+        assertEquals(6, distros.count { it.category == Category.RESCUE })
         assertTrue(distros.all { it.homepage.startsWith("https://") })
     }
 
@@ -241,6 +243,24 @@ class ServerAndRescueFixtureTest {
             release.url,
         )
         assertEquals("3079458d926a37d3533e5d5caeb61b6e49c2dc69e2c97e0332ef37986bb3414f", release.sha256)
+    }
+
+    @Test
+    fun memtest86Plus() {
+        val release = scrape(Memtest86PlusScraper()).single()
+        assertEquals(
+            Release(
+                distroId = "memtest86plus",
+                version = "8.10",
+                arch = Arch.X86_64,
+                url = "https://www.memtest.org/download/v8.10/mt86plus_8.10_x86_64.iso.zip",
+                sumsUrl = "https://www.memtest.org/download/v8.10/sha256sum.txt",
+                fileName = "mt86plus_8.10_x86_64.iso",
+                archiveEntry = "memtest.iso",
+                archiveSha256 = "93530005d6ac6a85aa2a49c68604a43c25794ecccf796c4f8849a73a8001be9a",
+            ),
+            release,
+        )
     }
 
     @Test

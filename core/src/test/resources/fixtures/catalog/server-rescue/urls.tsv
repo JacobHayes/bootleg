@@ -6,9 +6,11 @@
 2509416b796fdfbf	200	https://repo.almalinux.org/almalinux/8/isos/aarch64/CHECKSUM
 2681ca4df550fd60	200	https://repo.almalinux.org/almalinux/9/isos/x86_64/CHECKSUM
 330f0c2e697f7096	200	https://enterprise.proxmox.com/iso/SHA256SUMS
+5f295c957dbeebc2	200	https://www.memtest.org/
 6308a0b45b543d07	200	https://api.github.com/repos/PartialVolume/shredos.x86_64/releases/latest
 63cba00750b6f0e0	200	https://enterprise.proxmox.com/iso/
 652eb441361e3f05	200	https://www.truenas.com/download-truenas-community-edition/
+694607e1123e37af	200	https://www.memtest.org/download/v8.10/sha256sum.txt
 7071a06cb8066694	200	https://www.system-rescue.org/Download/
 710f70c93ebceaf1	200	https://repo.almalinux.org/almalinux/8/isos/x86_64/CHECKSUM
 738c3e1c6bc1f6f0	200	https://download.sys.truenas.net/TrueNAS-SCALE-Goldeye/25.10.7/TrueNAS-SCALE-25.10.7.iso.sha256

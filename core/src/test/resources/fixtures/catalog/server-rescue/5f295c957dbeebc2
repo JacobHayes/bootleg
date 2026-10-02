@@ -1,0 +1,1548 @@
+<!DOCTYPE html>
+<html lang="en">
+	<!--begin::Head-->
+	<head><base href="">
+		<title>Memtest86+ | The Open-Source Memory Testing Tool</title>
+		<meta charset="utf-8" />
+		<meta name="description" content="Memtest86+ is an advanced, free, open-source, stand-alone memory tester for 32- and 64-bits architecture computers. Compatible with BIOS & UEFI." />
+		<meta name="keywords" content="Memory, Testing, Tool, open-source, free, RAM, crash, BSOD, bug" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+		<meta property="og:locale" content="en_US" />
+		<meta property="og:type" content="website" />
+		<meta property="og:title" content="Memtest86+ | The Open-Source Memory Testing Tool" />
+		<meta property="og:url" content="https://memtest.org" />
+		<meta property="og:site_name" content="Memtest86+" />
+		<meta property="og:image" content="https://memtest.org/assets/media/screenshots/mt86plus-03.png?123" />
+		<meta property="og:description" content="Memtest86+ is an advanced, free, open-source, stand-alone memory tester for 32- and 64-bit computers (UEFI & BIOS supported)" />
+
+		<meta name="twitter:card" content="summary">
+		<meta property="twitter:domain" content="memtest.org">
+		<meta property="twitter:url" content="https://memtest.org/">
+
+		<link rel="shortcut icon" href="assets/media/logos/favicon.ico" />
+		<!--begin::Fonts-->
+		<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,600,700" />
+		<!--end::Fonts-->
+		<!--begin::Global Stylesheets Bundle(used by all pages)-->
+		<link href="assets/css/style.bundle.css" rel="stylesheet" type="text/css" />
+		<link href="assets/fa/css/all.css" rel="stylesheet" type="text/css" />
+		<link href="assets/css/cookieconsent.min.css" rel="stylesheet" type="text/css" />
+		<link href="assets/css/style.custom.css" rel="stylesheet" type="text/css" />
+		<!--end::Global Stylesheets Bundle-->
+		<!-- Google tag (gtag.js) -->
+        <script async src="https://www.googletagmanager.com/gtag/js?id=UA-44425153-1"></script>
+        <script>
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+
+          gtag('config', 'UA-44425153-1');
+        </script>
+	</head>
+	<!--end::Head-->
+	<!--begin::Body-->
+	<body id="kt_body" class="header-fixed header-tablet-and-mobile-fixed toolbar-enabled aside-fixed aside-default-enabled">
+		<!--begin::Main-->
+		<!--begin::Root-->
+		<div class="d-flex flex-column flex-root">
+			<!--begin::Page-->
+			<div class="page d-flex flex-row flex-column-fluid">
+				<!--begin::Wrapper-->
+				<div class="d-flex flex-column flex-row-fluid" id="kt_wrapper">
+					<!--begin::Header-->
+					<div id="kt_header" class="header fs-6 d-flex">
+						<!--begin::Container-->
+						<div class="container-fluid d-flex align-items-stretch justify-content-between">
+							<!--begin::Topbar-->
+							<div class="d-flex flex-column-auto flex-grow-1 p-4 px-lg-15 ms-1 ms-lg-2">
+        						<!--begin::Logo-->
+                                <a href="/" class="d-flex flex-column-auto flex-grow-1">
+        					        <img alt="Logo" src="assets/media/svg/mt86plus_logo.svg" class="logo-default" />
+                                </a>
+        						<!--end::Logo-->
+							</div>
+							<div class="d-flex align-items-center ms-1 ms-lg-2">
+    							<div class="pe-lg-10">
+    								<a class="btn btn-icon btn-active-light-primary text-gray-600 fas fa-code fa-3x" href="/dev"></a>
+    								<p class="text-center text-gray-600">Dev & Nightly</p>
+    							</div>
+    							<div class="pe-lg-10">
+    								<a class="btn btn-icon btn-active-light-primary text-gray-600 fas fa-box-archive fa-3x" href="/archives"></a>
+    								<p class="text-center text-gray-600">Archives</p>
+    							</div>
+							</div>
+							<!--end::Topbar-->
+						</div>
+						<!--end::Container-->
+					</div>
+					<!--end::Header-->
+					<!--begin::Content-->
+					<div class="content fs-6 d-flex flex-column flex-column-fluid" id="kt_content">
+						<!--begin::Post-->
+						<div class="post fs-6 d-flex flex-column-fluid" id="kt_post">
+							<!--begin::Container-->
+							<div class="container-xl">
+								<!--begin::Row-->
+								<div class="row g-xl-8">
+									<!--begin::Col-->
+									<div class="col-xl-8">
+										<!--begin::Row-->
+										<div class="row g-xl-8">
+											<!--begin::Col-->
+											<div class="col-xl-12">
+												<!--begin::Chart Widget 1-->
+												<div class="card card-xl-stretch mb-5 mb-xl-8">
+													<!--begin::Body-->
+        											<div class="card-body border-0 py-5">
+                                                            Memtest86+ is a free, open-source, stand-alone memory tester for IA-32, x86-64, and LoongArch64 systems<br/>
+                                                            It provides a more thorough memory check than that provided by BIOS memory tests.
+
+                                                            On x86 systems, Memtest86+ can be loaded and run either directly by a PC BIOS (legacy or UEFI) or via an intermediate
+                                                            bootloader that supports the Linux boot protocol.
+
+                                                            It should work on any Pentium-class or later 32-bit x86 CPU, any 64-bit x86 CPU, and supported Loongson LA64 systems.
+													</div>
+												</div>
+												<!--end::Chart Widget 1-->
+											</div>
+											<!--end::Col-->
+											<!--begin::Col-->
+											<!--end::Col-->
+										</div>
+										<!--end::Row-->
+										<!--begin::Row-->
+										<div class="row g-xl-8">
+											<!--begin::Col-->
+											<div class="col-xl-6">
+												<!--begin::Chart Widget 2-->
+												<div class="card card-xl-stretch mb-5 mb-xl-8">
+													<!--begin::Body-->
+													<div class="card-body p-0 d-flex justify-content-between flex-column overflow-hidden">
+														<div class="d-flex flex-stack flex-grow-1 px-9">
+															<!--begin::Text-->
+															<div class="d-flex flex-column text-start">
+																<span class="fw-boldest text-gray-800 fs-2">Licensing</span>
+																<span class="text-gray-400 fw-bold fs-6">General Public License v2</span>
+															</div>
+															<!--end::Text-->
+															<!--begin::Icon-->
+															<div class="symbol symbol-45px">
+																<div class="symbol-label">
+																	<i class="text-gray-400 fa-solid fa-2x fa-file-contract"></i>
+																</div>
+															</div>
+															<!--end::Icon-->
+														</div>
+														<!--begin::Chart-->
+														<div class="card-body border-0 pt-2">
+                                                            Memtest86+ is a unified, free, open-source memory testing tool,
+                                                            released under GNU GPL v2.0. The new v6 code base (originally called PCMemTest) was
+                                                            provided by Martin Whitaker, based on Memtest86+ v5, developed by Sam Demeulemeester.
+                                                            Both are now working on Memtest86+.
+                                                            <br/><br/>
+                                                            Memtest86+ is not an edition of Memtest86, which since 2013 has been
+                                                            closed-source `Freemium` software owned by PassMark Software Pty Ltd.
+                                                        </div>
+														<!--end::Chart-->
+													</div>
+												</div>
+												<!--end::Chart Widget 2-->
+											</div>
+											<!--end::Col-->
+											<!--begin::Col-->
+											<div class="col-xl-6">
+												<!--begin::Slider widget 2-->
+												<div class="card card-xl-stretch mb-5 mb-xl-8">
+													<!--begin::Body-->
+													<div class="card-body pt-5">
+														<!--begin::Carousel-->
+														<div id="kt_stats_widget_9_carousel" class="carousel carousel-custom carousel-stretch slide" data-bs-ride="carousel" data-bs-interval="8000">
+															<!--begin::Nav-->
+															<div class="d-flex flex-stack flex-wrap">
+																<span class="fw-boldest fs-2 pe-2">Screenshots</span>
+																<!--begin::Carousel Indicators-->
+																<ol class="p-0 m-0 carousel-indicators carousel-indicators-dots">
+																	<li data-bs-target="#kt_stats_widget_9_carousel" data-bs-slide-to="0" class="ml-1 active"></li>
+																	<li data-bs-target="#kt_stats_widget_9_carousel" data-bs-slide-to="1" class="ml-1"></li>
+																	<li data-bs-target="#kt_stats_widget_9_carousel" data-bs-slide-to="2" class="ml-1"></li>
+																</ol>
+																<!--end::Carousel Indicators-->
+															</div>
+															<!--end::Nav-->
+															<!--begin::Items-->
+															<div class="carousel-inner pt-3">
+																<div class="carousel-item active">
+																	<div class="carousel-wrapper">
+																		<div class="px-3 py-0 flex-grow-1">
+																		    <img data-bs-toggle="modal" data-bs-target="#exampleModal" class="img-thumbnail" alt="Memtest86+ Screenshot" src="assets/media/screenshots/mt86plus-01.png"><br/>
+																		    <span class="text-gray-400 fs-6 fw-bold pe-2">DDR5-7200 Qualification</span>
+																		</div>
+																	</div>
+																</div>
+																<div class="carousel-item">
+																	<div class="carousel-wrapper">
+																		<div class="px-3 py-0 flex-grow-1">
+																		    <img data-bs-toggle="modal" data-bs-target="#exampleModal" class="img-thumbnail" alt="Memtest86+ Screenshot" src="assets/media/screenshots/mt86plus-02.png"><br/>
+																		    <span class="text-gray-400 fs-6 fw-bold pe-2">224 Threads, 3TB RAM Server</span>
+																		</div>
+																	</div>
+																</div>
+																<div class="carousel-item">
+																	<div class="carousel-wrapper">
+																		<div class="px-3 py-0 flex-grow-1">
+																		    <img data-bs-toggle="modal" data-bs-target="#exampleModal" class="img-thumbnail" alt="Memtest86+ Screenshot" src="assets/media/screenshots/mt86plus-03.png"><br/>
+																		    <span class="text-gray-400 fs-6 fw-bold pe-2">[Retro] Rambus RDRAM on Pentium 4</span>
+																		</div>
+																	</div>
+																</div>
+																<!--end::Item-->
+															</div>
+															<!--end::Items-->
+															<!--Modal-->
+                                                            <div class="modal fade" id="exampleModal" tabindex="-1" aria-labelledby="exampleModalLabel" aria-hidden="true">
+                                                              <div class="modal-dialog" style="max-width: 75%;">
+                                                                <div class="modal-content">
+                                                                  <div class="modal-body">
+                                                                    <div class="item"><img id="modalImage" class="img-fluid" /></div>
+                                                                  </div>
+                                                                </div>
+                                                              </div>
+                                                            </div>
+                                                        </div>
+														<!--end::Carousel-->
+													</div>
+													<!--end::Body-->
+												</div>
+												<!--end::Slider widget 2-->
+											</div>
+											<!--end::Col-->
+										</div>
+										<!--end::Row-->
+									</div>
+									<!--end::Col-->
+									<!--begin::Col-->
+									<div class="col-xl-4 gy-0 gy-xl-8">
+										<!--begin::Engage Widget 1-->
+										<div class="card card-xl-stretch mb-5 mb-xl-8">
+											<!--begin::Body-->
+											<div class="card-body pb-0">
+												<!--begin::Wrapper-->
+												<div class="d-flex flex-column justify-content-between h-100">
+													<!--begin::Section-->
+													<div class="">
+														<!--begin::Title-->
+														<h3 class="text-dark text-center fs-2 fw-boldest line-height-lg">Why test your RAM?</h3>
+														<!--end::Title-->
+														<div class="d-flex justify-content-center text-center pt-6">
+														    <img class="w-75 opacity-75" alt="ram logo" src="assets/media/illustrations/ram3.svg">
+														</div>
+														<!--begin::Text-->
+														<div class="text-start text-wrap fs-6 pt-6 pb-1">
+                                                            <i class="text-primary fa-solid fa-circle-arrow-right m-2"></i>
+                                                            <span class="text-primary fs-4 fw-bold line-height-lg">Troubleshoot PC Instabilities</span><BR/>
+														    Memory errors are one of the most common causes of crashes, freezes and instabilities.
+														    If you encounter such issues with your computer, testing your RAM thoroughly is probably the
+														    first thing to do. Memtest86+ uses various algorithms to reliably detect failures. It will
+														    let you know if your RAM is faulty or not.
+														</div>
+														<div class="text-start text-wrap fs-6 pt-8 pb-1">
+                                                            <i class="text-primary fa-solid fa-circle-arrow-right m-2"></i>
+                                                            <span class="text-primary fs-4 fw-bold line-height-lg">Ensure Initial Stability</span><BR/>
+                                                            Before using your brand-new PC, putting your new server into production, or after having overclocked
+                                                            your CPU or RAM, it's often wise to make sure there are no memory issues. Troubleshooting issues later
+                                                            can be annoying, costly, and time-consuming.
+														</div>
+														<!--end::Text-->
+													</div>
+													<!--end::Section-->
+												</div>
+												<!--end::Wrapper-->
+											</div>
+											<!--end::Body-->
+										</div>
+										<!--end::Engage Widget 1-->
+									</div>
+									<!--end::Col-->
+								</div>
+								<!--end::Row-->
+								<!--begin::Row-->
+								<div class="row g-5 gx-xxl-8 mb-xxl-3">
+									<!--begin::Col-->
+									<div class="col-xxl-8">
+										<!--begin::Table widget 1-->
+        								<div class="card card-xl-stretch mb-5 mb-xl-8">
+        									<!--begin::Body-->
+        									<div class="card-body p-lg-15">
+        										<!--begin::Classic content-->
+        										<div class="">
+        											<!--begin::Intro-->
+        											<div class="mb-10">
+        												<!--begin::Title-->
+        												<h4 class="fs-2x text-gray-800 w-bolder mb-6">Frequently Asked Questions (FAQ)</h4>
+        												<!--end::Title-->
+        												<!--begin::Text-->
+        												<p class="fw-bold fs-4 text-gray-600 mb-2">This FAQ covers the main issues with Memtest86+. Please also read the full <a href='https://memtest.org/readme'>README</a> if you don't find an appropriate answer.</p>
+        												<!--end::Text-->
+        											</div>
+        											<!--end::Intro-->
+        											<!--begin::Row-->
+        											<div class="row mb-12">
+        												<!--begin::Col-->
+        												<div class="col-md-6 pe-md-10 mb-10 mb-md-0">
+        													<!--begin::Title-->
+        													<h2 class="text-gray-800 fw-bolder mb-4">Installation on Removable Media</h2>
+        													<!--end::Title-->
+        													<!--begin::Accordion-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_4_1">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">How to create a bootable Memtest86+ USB Drive using Windows?</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_4_1" class="collapse show fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">Plug a standard FAT32-formatted USB Drive, download and launch the Windows USB Installer and follow the quick steps. Reboot your computer and select the USB Drive in your Boot Menu.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        													<!--end::Section-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle collapsed mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_4_2">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">How to create a bootable Memtest86+ USB Drive using Linux?</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_4_2" class="collapse fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">
+        															    The ISO image must be written directly ('dumped') to the raw device, either by using the dd command or by
+        															    using a utility that provides the same functionality like <a href="https://www.balena.io/etcher/" target="_blank">balenaEtcher</a>.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        													<!--end::Section-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle collapsed mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_4_3">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">How to create a bootable Memtest86+ USB Drive using MacOS</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_4_3" class="collapse fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">
+        															    We recommand <a href="https://www.balena.io/etcher/" target="_blank">balenaEtcher</a> to burn the image to a USB Flash Drive under MacOS.
+        															    PS: Using the Restore function in Apple's Disk Utility does not work.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        													<!--end::Section-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle collapsed mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_4_4">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">Which media are supported?</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_4_4" class="collapse fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">Memtest86+ can be run from a USB Flash Drive (FAT32 formatted), CDROM drive (by burning the ISO to a blank disk) or Network boot (PXE). If you need a floppy image, use the "make iso" command to generate a 'floppy.img' file</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        													</div>
+        													<!--end::Section-->
+        													<!--end::Accordion-->
+        												</div>
+        												<!--end::Col-->
+        												<!--begin::Col-->
+        												<div class="col-md-6 ps-md-10">
+        													<!--begin::Title-->
+        													<h2 class="text-gray-800 fw-bolder mb-4">Booting Issues</h2>
+        													<!--end::Title-->
+        													<!--begin::Accordion-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_5_1">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">I can't boot because of a "Secure Boot Violation"</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_5_1" class="collapse show fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">The Memtest86+ binary is not signed by Microsoft, so you need to temporarily disable Secure Boot in your BIOS options. We're working on a better solution.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        													<!--end::Section-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle collapsed mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_5_2">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">Memtest86+ does not launch.</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_5_2" class="collapse fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">To boot from a USB Flash Drive instead of your hard drive, you must select it using the Boot Menu. The Boot Menu is usually available by pressing F8, F12 or ESC at early startup. Please check your PC/motherboard manual.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        													<!--end::Section-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle collapsed mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_5_3">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">Can I launch Memtet86+ using PXE?</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_5_3" class="collapse fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">Yes. Just use memtest.bin (for BIOS PXE) or memtest.efi (for UEFI PXE) as payload for iPXE or PXELINUX. Don't forget to disable Secure Boot. </div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        													<!--end::Section-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle collapsed mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_5_4">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">My USB keyboard does not work</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_5_4" class="collapse fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">Memtest86+ USB drivers are work in progress. Not all USB devices are supported yet, and there may be problems on some hardware. Please submit a bug report with detailed information.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        													</div>
+        													<!--end::Section-->
+        													<!--end::Accordion-->
+        												</div>
+        												<!--end::Col-->
+        											</div>
+        											<!--end::Row-->
+        											<!--begin::Row-->
+        											<div class="row">
+        												<!--begin::Col-->
+        												<div class="col-md-6 pe-md-10 mb-10 mb-md-0">
+        													<!--begin::Title-->
+        													<h2 class="text-gray-800 w-bolder mb-4">Troubleshooting RAM Errors</h2>
+        													<!--end::Title-->
+        													<!--begin::Accordion-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_6_1">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">I got errors! What's next?</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_6_1" class="collapse show fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">Once a memory error has been detected, determining the failing module is not a clear-cut procedure. If your computer is overclocked, you should try again at default settings first. Then, if you have more than one memory module, try removing them one at a time to find the faulty one. You can also rotate them. For more informations, look <a href='https://memtest.org/readme#trouble-shooting-memory-errors'>here</a> </div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        													<!--end::Section-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle collapsed mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_6_2">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">I only have some bits wrong. Any solution?</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_6_2" class="collapse fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">Yes. Both Linux and Windows offer a way to exclude small bad memory areas. An additional Memtest86+ feature is planned to easily generate the required patterns for Windows.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        												</div>
+        												<!--end::Col-->
+        												<!--begin::Col-->
+        												<div class="col-md-6 ps-md-10">
+        													<!--begin::Title-->
+        													<h2 class="text-gray-800 fw-bolder mb-4">Various</h2>
+        													<!--end::Title-->
+        													<!--begin::Accordion-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_7_1">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">When does it stop?</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_7_1" class="collapse show fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">It doesn't: Memtest86+ is an endless loop. After a successful pass, all your memory has been tested successfully. You can wait longer for even greater confidence, or just press ESC to stop.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        													<!--end::Section-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle collapsed mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_7_2">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">Which tests are executed by Memtest86+?</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_7_2" class="collapse fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">For a more detailed explanation about Memtest86+'s Test Algorithms and induvial Test Descriptions, please check <a href='https://memtest.org/readme#memory-testing-philosophy'>this section</a> of the README page.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        													<!--end::Section-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle collapsed mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_7_3">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">How to use the COM/serial output?</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_7_3" class="collapse fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">On Windows, edit the file syslinux.cfg at the root of the USB Drive and add "APPEND ttyS0" after "KERNEL mt86plus". On Linux, pass the parameter "ttyS0" using GRUB ISO. Alternatively, compile your own version with the switch "enable_tty = true" in "config.c. Default settings are 8N1 115200 bps.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        														<!--begin::Separator-->
+        														<div class="separator separator-dashed"></div>
+        														<!--end::Separator-->
+        													</div>
+        													<!--end::Section-->
+        													<!--begin::Section-->
+        													<div class="m-0">
+        														<!--begin::Heading-->
+        														<div class="d-flex align-items-center collapsible py-3 toggle collapsed mb-0" data-bs-toggle="collapse" data-bs-target="#kt_job_7_4">
+        															<!--begin::Icon-->
+        															<div class="btn btn-sm btn-icon mw-20px btn-active-color-primary me-5">
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen036.svg-->
+        																<span class="svg-icon toggle-on svg-icon-primary svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="6.0104" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        																<!--begin::Svg Icon | path: icons/duotune/general/gen035.svg-->
+        																<span class="svg-icon toggle-off svg-icon-1">
+        																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+        																		<rect opacity="0.3" x="2" y="2" width="20" height="20" rx="5" fill="black" />
+        																		<rect x="10.8891" y="17.8033" width="12" height="2" rx="1" transform="rotate(-90 10.8891 17.8033)" fill="black" />
+        																		<rect x="6.01041" y="10.9247" width="12" height="2" rx="1" fill="black" />
+        																	</svg>
+        																</span>
+        																<!--end::Svg Icon-->
+        															</div>
+        															<!--end::Icon-->
+        															<!--begin::Title-->
+        															<h4 class="text-gray-700 fw-bolder cursor-pointer mb-0">Why is Memtest86+ testing more memory than I have?</h4>
+        															<!--end::Title-->
+        														</div>
+        														<!--end::Heading-->
+        														<!--begin::Body-->
+        														<div id="kt_job_7_4" class="collapse fs-6 ms-1">
+        															<!--begin::Text-->
+        															<div class="mb-4 text-gray-600 fw-bold fs-6 ps-10">It doesn't. The memory on a modern computer is not necessarily mapped in a linear way. E.g.: 16GB of RAM can be virtually mapped from 0-15GB and 16-17GB with a hole between 15GB and 16GB.</div>
+        															<!--end::Text-->
+        														</div>
+        														<!--end::Content-->
+        													</div>
+        													<!--end::Section-->
+        													<!--end::Accordion-->
+        												</div>
+        												<!--end::Col-->
+        											</div>
+        											<!--end::Row-->
+        										</div>
+        										<!--end::Classic content-->
+        									</div>
+        									<!--end::Body-->
+        								</div>
+										<!--end::Table widget 1-->
+									</div>
+									<!--end::Col-->
+									<!--begin::Col-->
+									<div class="col-xxl-4">
+										<!--begin::Chart Widget 4-->
+										<div class="card card-xl-stretch mb-5 mb-xl-8">
+											<!--begin::Beader-->
+											<div class="card-header border-0 py-0">
+												<h3 class="card-title align-items-start flex-column">
+													<span class="card-label fw-boldest text-dark fs-2">Download</span>
+													<span class="text-gray-400 mt-2 fw-bold fs-6">Latest Version</span>
+												</h3>
+												<!--begin::Icon-->
+												<div class="symbol symbol-45px py-5">
+													<div class="symbol-label">
+														<i class="text-gray-400 fa-solid fa-2x fa-download"></i>
+													</div>
+												</div>
+												<!--end::Icon-->
+											</div>
+											<!--end::Header-->
+											<!--begin::Body-->
+											<div class="card-body d-flex flex-column pt-0">
+                                                <div class="text-center px-6 pb-3 fw-bold fs-4">
+    										    	<span class="text-gray-600 mt-2 fw-bold fs-6">
+    												    <span class="text-primary fs-2"> Memtest86+ v8.10</span><br/>
+    												    <div class="fs-7 text-gray-400 fw-bold mt-0">
+    												        Released: 2026-05-16<br />Checksum:
+                                                            <a href="/download/v8.10/md5sum.txt" class="text-gray-400 text-hover-primary">MD5</a> | <a href="/download/v8.10/sha256sum.txt" class="text-gray-400 text-hover-primary">SHA256</a> | <a href="/download/v8.10/sha512sum.txt" class="text-gray-400 text-hover-primary">SHA512</a>
+                                                         </div>
+    											    </span>
+    											</div>
+													<!--begin::Items-->
+													<div class="mt-2">
+    														<!--begin::Item-->
+														<div class="mt-2 d-flex flex-stack mb-6">
+															<!--begin::Section-->
+															<div class="d-flex align-items-center me-2">
+																<!--begin::Symbol-->
+																<div class="symbol symbol-40px me-5">
+				                                                <img alt="Icon" src="assets/media/svg/files/exe.svg">
+																</div>
+																<!--end::Symbol-->
+																<!--begin::Title-->
+																<div>
+																	<a href="/download/v8.10/mt86plus_8.10_USB_Installer.exe" class="fs-5 text-gray-800 text-hover-primary fw-boldest">Windows USB Installer (32/64 bits)</a>
+																	<div class="fs-7 text-gray-400 fw-bold mt-1">Latest version!</div>																</div>
+																<!--end::Title-->
+															</div>
+															<!--end::Section-->
+															<!--begin::Action-->
+															<a href="/download/v8.10/mt86plus_8.10_USB_Installer.exe" class="btn btn-icon btn-light btn-sm">
+																<!--begin::Svg Icon | path: icons/duotune/arrows/arr064.svg-->
+																<span class="svg-icon svg-icon-4 svg-icon-gray-400">
+																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+																		<rect opacity="0.5" x="18" y="13" width="13" height="2" rx="1" transform="rotate(-180 18 13)" fill="black" />
+																		<path d="M15.4343 12.5657L11.25 16.75C10.8358 17.1642 10.8358 17.8358 11.25 18.25C11.6642 18.6642 12.3358 18.6642 12.75 18.25L18.2929 12.7071C18.6834 12.3166 18.6834 11.6834 18.2929 11.2929L12.75 5.75C12.3358 5.33579 11.6642 5.33579 11.25 5.75C10.8358 6.16421 10.8358 6.83579 11.25 7.25L15.4343 11.4343C15.7467 11.7467 15.7467 12.2533 15.4343 12.5657Z" fill="black" />
+																	</svg>
+																</span>																<!--end::Svg Icon-->
+															</a>
+															<!--end::Action-->
+														</div>
+														<!--end::Item-->
+    														<!--begin::Item-->
+														<div class="d-flex flex-stack mb-6">
+															<!--begin::Section-->
+															<div class="d-flex align-items-center me-2">
+																<!--begin::Symbol-->
+																<div class="symbol symbol-40px me-5">
+				                                                <img alt="Icon" src="assets/media/svg/files/iso.svg">
+																</div>
+																<!--end::Symbol-->
+																<!--begin::Title-->
+																<div>
+																	<a href="/download/v8.10/mt86plus_8.10_i586.iso.zip" class="fs-5 text-gray-800 text-hover-primary fw-boldest">Linux ISO (32 bits)</a>
+																	<div class="fs-7 text-gray-400 fw-bold mt-1">Latest version!</div>																</div>
+																<!--end::Title-->
+															</div>
+															<!--end::Section-->
+															<!--begin::Action-->
+															<a href="/download/v8.10/mt86plus_8.10_i586.iso.zip" class="btn btn-icon btn-light btn-sm">
+																<!--begin::Svg Icon | path: icons/duotune/arrows/arr064.svg-->
+																<span class="svg-icon svg-icon-4 svg-icon-gray-400">
+																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+																		<rect opacity="0.5" x="18" y="13" width="13" height="2" rx="1" transform="rotate(-180 18 13)" fill="black" />
+																		<path d="M15.4343 12.5657L11.25 16.75C10.8358 17.1642 10.8358 17.8358 11.25 18.25C11.6642 18.6642 12.3358 18.6642 12.75 18.25L18.2929 12.7071C18.6834 12.3166 18.6834 11.6834 18.2929 11.2929L12.75 5.75C12.3358 5.33579 11.6642 5.33579 11.25 5.75C10.8358 6.16421 10.8358 6.83579 11.25 7.25L15.4343 11.4343C15.7467 11.7467 15.7467 12.2533 15.4343 12.5657Z" fill="black" />
+																	</svg>
+																</span>																<!--end::Svg Icon-->
+															</a>
+															<!--end::Action-->
+														</div>
+														<!--end::Item-->
+    														<!--begin::Item-->
+														<div class="d-flex flex-stack mb-6">
+															<!--begin::Section-->
+															<div class="d-flex align-items-center me-2">
+																<!--begin::Symbol-->
+																<div class="symbol symbol-40px me-5">
+				                                                <img alt="Icon" src="assets/media/svg/files/iso.svg">
+																</div>
+																<!--end::Symbol-->
+																<!--begin::Title-->
+																<div>
+																	<a href="/download/v8.10/mt86plus_8.10_x86_64.grub.iso.zip" class="fs-5 text-gray-800 text-hover-primary fw-boldest">Linux ISO w/ GRUB (64 bits)</a>
+																	<div class="fs-7 text-gray-400 fw-bold mt-1">Latest version!</div>																</div>
+																<!--end::Title-->
+															</div>
+															<!--end::Section-->
+															<!--begin::Action-->
+															<a href="/download/v8.10/mt86plus_8.10_x86_64.grub.iso.zip" class="btn btn-icon btn-light btn-sm">
+																<!--begin::Svg Icon | path: icons/duotune/arrows/arr064.svg-->
+																<span class="svg-icon svg-icon-4 svg-icon-gray-400">
+																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+																		<rect opacity="0.5" x="18" y="13" width="13" height="2" rx="1" transform="rotate(-180 18 13)" fill="black" />
+																		<path d="M15.4343 12.5657L11.25 16.75C10.8358 17.1642 10.8358 17.8358 11.25 18.25C11.6642 18.6642 12.3358 18.6642 12.75 18.25L18.2929 12.7071C18.6834 12.3166 18.6834 11.6834 18.2929 11.2929L12.75 5.75C12.3358 5.33579 11.6642 5.33579 11.25 5.75C10.8358 6.16421 10.8358 6.83579 11.25 7.25L15.4343 11.4343C15.7467 11.7467 15.7467 12.2533 15.4343 12.5657Z" fill="black" />
+																	</svg>
+																</span>																<!--end::Svg Icon-->
+															</a>
+															<!--end::Action-->
+														</div>
+														<!--end::Item-->
+    														<!--begin::Item-->
+														<div class="d-flex flex-stack mb-6">
+															<!--begin::Section-->
+															<div class="d-flex align-items-center me-2">
+																<!--begin::Symbol-->
+																<div class="symbol symbol-40px me-5">
+				                                                <img alt="Icon" src="assets/media/svg/files/iso.svg">
+																</div>
+																<!--end::Symbol-->
+																<!--begin::Title-->
+																<div>
+																	<a href="/download/v8.10/mt86plus_8.10_x86_64.iso.zip" class="fs-5 text-gray-800 text-hover-primary fw-boldest">Linux ISO (64 bits)</a>
+																	<div class="fs-7 text-gray-400 fw-bold mt-1">Latest version!</div>																</div>
+																<!--end::Title-->
+															</div>
+															<!--end::Section-->
+															<!--begin::Action-->
+															<a href="/download/v8.10/mt86plus_8.10_x86_64.iso.zip" class="btn btn-icon btn-light btn-sm">
+																<!--begin::Svg Icon | path: icons/duotune/arrows/arr064.svg-->
+																<span class="svg-icon svg-icon-4 svg-icon-gray-400">
+																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+																		<rect opacity="0.5" x="18" y="13" width="13" height="2" rx="1" transform="rotate(-180 18 13)" fill="black" />
+																		<path d="M15.4343 12.5657L11.25 16.75C10.8358 17.1642 10.8358 17.8358 11.25 18.25C11.6642 18.6642 12.3358 18.6642 12.75 18.25L18.2929 12.7071C18.6834 12.3166 18.6834 11.6834 18.2929 11.2929L12.75 5.75C12.3358 5.33579 11.6642 5.33579 11.25 5.75C10.8358 6.16421 10.8358 6.83579 11.25 7.25L15.4343 11.4343C15.7467 11.7467 15.7467 12.2533 15.4343 12.5657Z" fill="black" />
+																	</svg>
+																</span>																<!--end::Svg Icon-->
+															</a>
+															<!--end::Action-->
+														</div>
+														<!--end::Item-->
+    														<!--begin::Item-->
+														<div class="d-flex flex-stack mb-6">
+															<!--begin::Section-->
+															<div class="d-flex align-items-center me-2">
+																<!--begin::Symbol-->
+																<div class="symbol symbol-40px me-5">
+				                                                <img alt="Icon" src="assets/media/svg/files/bin.svg">
+																</div>
+																<!--end::Symbol-->
+																<!--begin::Title-->
+																<div>
+																	<a href="/download/v8.10/mt86plus_8.10.binaries.zip" class="fs-5 text-gray-800 text-hover-primary fw-boldest">Binary Files</a>
+																	<div class="fs-7 text-gray-400 fw-bold mt-1">For PXE and chainloading</div>																</div>
+																<!--end::Title-->
+															</div>
+															<!--end::Section-->
+															<!--begin::Action-->
+															<a href="/download/v8.10/mt86plus_8.10.binaries.zip" class="btn btn-icon btn-light btn-sm">
+																<!--begin::Svg Icon | path: icons/duotune/arrows/arr064.svg-->
+																<span class="svg-icon svg-icon-4 svg-icon-gray-400">
+																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+																		<rect opacity="0.5" x="18" y="13" width="13" height="2" rx="1" transform="rotate(-180 18 13)" fill="black" />
+																		<path d="M15.4343 12.5657L11.25 16.75C10.8358 17.1642 10.8358 17.8358 11.25 18.25C11.6642 18.6642 12.3358 18.6642 12.75 18.25L18.2929 12.7071C18.6834 12.3166 18.6834 11.6834 18.2929 11.2929L12.75 5.75C12.3358 5.33579 11.6642 5.33579 11.25 5.75C10.8358 6.16421 10.8358 6.83579 11.25 7.25L15.4343 11.4343C15.7467 11.7467 15.7467 12.2533 15.4343 12.5657Z" fill="black" />
+																	</svg>
+																</span>																<!--end::Svg Icon-->
+															</a>
+															<!--end::Action-->
+														</div>
+														<!--end::Item-->
+    														<!--begin::Item-->
+														<div class="d-flex flex-stack mb-6">
+															<!--begin::Section-->
+															<div class="d-flex align-items-center me-2">
+																<!--begin::Symbol-->
+																<div class="symbol symbol-40px me-5">
+				                                                <img alt="Icon" src="assets/media/svg/files/src.svg">
+																</div>
+																<!--end::Symbol-->
+																<!--begin::Title-->
+																<div>
+																	<a href="/download/v8.10/mt86plus_8.10.src.zip" class="fs-5 text-gray-800 text-hover-primary fw-boldest">Source code (.zip)</a>
+																	<div class="fs-7 text-gray-400 fw-bold mt-1">Used to build these binaries</div>																</div>
+																<!--end::Title-->
+															</div>
+															<!--end::Section-->
+															<!--begin::Action-->
+															<a href="/download/v8.10/mt86plus_8.10.src.zip" class="btn btn-icon btn-light btn-sm">
+																<!--begin::Svg Icon | path: icons/duotune/arrows/arr064.svg-->
+																<span class="svg-icon svg-icon-4 svg-icon-gray-400">
+																	<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none">
+																		<rect opacity="0.5" x="18" y="13" width="13" height="2" rx="1" transform="rotate(-180 18 13)" fill="black" />
+																		<path d="M15.4343 12.5657L11.25 16.75C10.8358 17.1642 10.8358 17.8358 11.25 18.25C11.6642 18.6642 12.3358 18.6642 12.75 18.25L18.2929 12.7071C18.6834 12.3166 18.6834 11.6834 18.2929 11.2929L12.75 5.75C12.3358 5.33579 11.6642 5.33579 11.25 5.75C10.8358 6.16421 10.8358 6.83579 11.25 7.25L15.4343 11.4343C15.7467 11.7467 15.7467 12.2533 15.4343 12.5657Z" fill="black" />
+																	</svg>
+																</span>																<!--end::Svg Icon-->
+															</a>
+															<!--end::Action-->
+														</div>
+														<!--end::Item-->
+    														<hr/>
+														<div class="mt-8">
+														    <span class="text-gray-800 pt-2 fw-bold fs-4">v8.10 Changelog</span><br/><br/>
+														</div>
+														<div class="text-gray-600 fs-6 fw-bold">
+														<ul>
+    														    <li>Add support for x2APIC</li>
+    														    <li>Better support for Intel Panther Lake</li>
+    														    <li>Better Bandwidth measurement</li>
+    														    <li>Fix timings on LPDDR5</li>
+    														    <li>Fix AMI BIOS boot issues</li>
+    														    <li>Fix GRUB boot issues</li>
+    														    <li>Fix SecureBoot code for shim</li>
+    														    <li>LA64-specific improvements</li>
+    														    <li>Bug fixes</li>
+    														</ul>
+													    </div>
+
+														<br/><hr/>
+
+
+
+													</div>
+													<!--end::Items-->
+            									        <!--begin::Beader-->
+
+            												<h3 class="align-items-start flex-column mt-4">
+        													<span class="card-label text-gray-600 fw-bold text-dark fs-3 mt-4">Nightly builds</span><br/>
+        													<span class="text-gray-400 mt-2 fw-bold fs-6">Pre-release/Beta versions</span>
+        												</h3>
+        												<div class="py-4">
+               										    Nightly builds are generated automatically each night with the latest code changes and updates.
+               										    They are fully untested and may contain issues.
+               										    </div>
+    													<div class="text-center py-8">
+    														<a href="https://memtest.org/dev" class="btn btn-secondary fs-6 px-6">Nightly Builds</a>
+    													</div>
+
+
+											</div>
+											<!--end::Body-->
+										</div>
+										<!--end::Chart Widget 4-->
+									</div>
+									<!--end::Col-->
+								</div>
+								<!--end::Row-->
+								<!--begin::Row-->
+								<div class="row g-5 g-xl-8">
+									<!--begin::Col-->
+									<div class="col-xl-4">
+										<!--begin::List Widget 4-->
+										<div class="card card-xl-stretch mb-5 mb-xl-8">
+											<!--begin::Header-->
+											<div class="card-header align-items-center border-0 mt-5">
+												<h3 class="card-title align-items-start flex-column">
+													<span class="fw-boldest text-dark fs-2">Memtest86+ Timeline</span>
+													<span class="text-gray-400 mt-2 fw-bold fs-6">Evolution of the GPL version</span>
+												</h3>
+												<!--begin::Icon-->
+												<div class="symbol symbol-45px py-5">
+													<div class="symbol-label">
+														<i class="text-gray-400 fa-solid fa-2x fa-download"></i>
+													</div>
+												</div>
+												<!--end::Icon-->
+											</div>
+											<!--end::Header-->
+											<!--begin::Body-->
+											<div class="card-body pt-4">
+												<div class="position-relative">
+													<!--begin::Border-->
+													<div class="w-35px d-flex justify-content-center">
+														<div class="border-start border-1 border-dashed border-gray-300 top-0 bottom-0 mb-5 mt-5 position-absolute"></div>
+													</div>
+													<!--end::Border-->
+													<!--begin::Item-->
+													<div class="d-flex flex-stack pb-10">
+														<!--begin::Section-->
+														<div class="d-flex">
+															<!--begin::Symbol-->
+															<div class="symbol symbol-35px me-5 mt-2">
+            													<div class="symbol-label">
+            														<i class="text-gray-400 fa-solid fa-code-merge"></i>
+            													</div>
+															</div>
+															<!--end::Symbol-->
+															<!--begin::Title-->
+															<div class="pe-3">
+																<a href="#" class="fs-5 text-gray-800 text-hover-primary fw-boldest">Memtest86+ V6 & newer</a>
+																<div class="text-gray-400 fw-bold mt-1">M. Whitaker & S. Demeulemeester</div>
+															</div>
+															<!--end::Title-->
+														</div>
+														<!--end::Section-->
+														<!--begin::Label-->
+														<span class="fw-boldest fs-7 text-gray-400">2022-</span>
+														<!--end::Label-->
+													</div>
+													<!--end::Item-->
+													<!--begin::Item-->
+													<div class="d-flex flex-stack pb-10">
+														<!--begin::Section-->
+														<div class="d-flex">
+															<!--begin::Symbol-->
+															<div class="symbol symbol-35px me-5 mt-2">
+            													<div class="symbol-label">
+            														<i class="text-gray-400 fa-solid fa-code-fork"></i>
+            													</div>
+															</div>
+															<!--end::Symbol-->
+															<!--begin::Title-->
+															<div class="pe-3">
+																<a href="#" class="fs-5 text-gray-800 text-hover-primary fw-boldest">PCMemTest</a>
+																<div class="text-gray-400 fw-bold mt-1">Martin Whitaker</div>
+															</div>
+															<!--end::Title-->
+														</div>
+														<!--end::Section-->
+														<!--begin::Label-->
+														<span class="fw-boldest fs-7 text-gray-400">2020-2022</span>
+														<!--end::Label-->
+													</div>
+													<!--end::Item-->
+													<!--begin::Item-->
+													<div class="d-flex flex-stack pb-10">
+														<!--begin::Section-->
+														<div class="d-flex">
+															<!--begin::Symbol-->
+															<div class="symbol symbol-35px me-5 mt-2">
+            													<div class="symbol-label">
+            														<i class="text-gray-400 fa-solid fa-code-fork"></i>
+            													</div>
+															</div>
+															<!--end::Symbol-->
+															<!--begin::Title-->
+															<div class="pe-3">
+																<a href="#" class="fs-5 text-gray-800 text-hover-primary fw-boldest">Memtest86+ V1-V5</a>
+																<div class="text-gray-400 fw-bold mt-1">Sam Demeulemeester</div>
+															</div>
+															<!--end::Title-->
+														</div>
+														<!--end::Section-->
+														<!--begin::Label-->
+														<span class="fw-boldest fs-7 text-gray-400">2004-2020</span>
+														<!--end::Label-->
+													</div>
+													<!--end::Item-->
+													<!--begin::Item-->
+													<div class="d-flex flex-stack pb-10">
+														<!--begin::Section-->
+														<div class="d-flex">
+															<!--begin::Symbol-->
+															<div class="symbol symbol-35px me-5 mt-2">
+            													<div class="symbol-label">
+            														<i class="text-gray-400 fa-solid fa-code-commit"></i>
+            													</div>
+															</div>
+															<!--end::Symbol-->
+															<!--begin::Title-->
+															<div class="pr-3">
+																<a href="#" class="fs-5 text-gray-800 text-hover-primary fw-boldest">Memtest86 V3</a>
+																<div class="text-gray-400 fw-bold mt-1">Eric Biederman</div>
+															</div>
+															<!--end::Title-->
+														</div>
+														<!--end::Section-->
+														<!--begin::Label-->
+														<span class="fw-boldest fs-7 text-gray-400">2004</span>
+														<!--end::Label-->
+													</div>
+													<!--end::Item-->
+													<!--begin::Item-->
+													<div class="d-flex flex-stack">
+														<!--begin::Section-->
+														<div class="d-flex">
+															<!--begin::Symbol-->
+															<div class="symbol symbol-35px me-5 mt-2">
+            													<div class="symbol-label">
+            														<i class="text-gray-400 fa-solid fa-code"></i>
+            													</div>
+															</div>
+															<!--end::Symbol-->
+															<!--begin::Title-->
+															<div class="pe-3">
+																<a href="#" class="fs-5 text-gray-800 text-hover-primary fw-boldest">MemTest-86</a>
+																<div class="text-gray-400 fw-bold mt-1">Chris Brady</div>
+															</div>
+															<!--end::Title-->
+														</div>
+														<!--end::Section-->
+														<!--begin::Label-->
+														<span class="fw-boldest fs-7 text-gray-400">1994-2002</span>
+														<!--end::Label-->
+													</div>
+													<!--end::Item-->
+												</div>
+											</div>
+											<!--end::Body-->
+										</div>
+										<!--end::List Widget 4-->
+									</div>
+									<!--end::Col-->
+									<!--begin::Col-->
+									<div class="col-xl-4">
+										<!--begin::List Widget 2-->
+										<div class="card card-xl-stretch mb-xl-8">
+											<div class="d-flex flex-column justify-content-between h-100">
+												<!--begin::Section-->
+												<div class="pt-12 px-12">
+													<!--begin::Title-->
+													<h3 class="text-dark text-center fs-1 fw-boldest line-height-lg">Bug Report</h3>
+													<!--end::Title-->
+													<!--begin::Text-->
+													<div class="text-center text-gray-600 fs-5 fw-bold pt-4 pb-1">Found a bug? Please file a bug report on our official GitHub page!<br/><br/>
+													    Please give us as much information as possible about your hardware and the way to reproduce the issue. Also, please check that your bug hasn't already been submitted.</div>
+													<!--end::Text-->
+													<!--begin::Action-->
+													<div class="text-center py-7">
+														<a href="https://github.com/memtest86plus/memtest86plus/issues" class="btn btn-primary fs-6 px-6">Submit Issue</a>
+													</div>
+													<!--end::Action-->
+												</div>
+												<!--end::Section-->
+												<!--begin::Image-->
+												<div class="d-flex justify-content-center">
+    												<div class="w-100 opacity-75 flex-grow-1 bgi-no-repeat bgi-size-contain bgi-position-x-center bgi-position-y-bottom card-rounded-bottom max-h-175px min-h-175px" style="background-image:url('assets/media/illustrations/bug.svg')"></div>
+												</div>
+												<!--end::Image-->
+											</div>
+										</div>
+										<!--end::List Widget 2-->
+									</div>
+									<!--end::Col-->
+									<!--begin::Col-->
+									<div class="col-xl-4">
+										<!--begin::List Widget 3-->
+										<div class="card card-xl-stretch mb-xl-8">
+											<!--begin::Header-->
+											<div class="card-header align-items-center border-0 mt-5">
+												<h3 class="card-title align-items-start flex-column">
+													<span class="fw-boldest text-dark fs-2">Donation</span>
+													<span class="text-gray-400 mt-2 fw-bold fs-6">& Last Donators list</span>
+												</h3>
+												<!--begin::Icon-->
+												<div class="symbol symbol-45px py-5">
+													<div class="symbol-label">
+														<i class="text-gray-400 fa-solid fa-2x fa-hand-holding-dollar"></i>
+													</div>
+												</div>
+												<!--end::Icon-->
+											</div>
+											<!--end::Header-->
+											<!--begin::Body-->
+											<div class="card-body pt-5">
+												<div class="d-flex justify-content-center pb-6 fw-bold text-gray-600">
+												    <p align="center">Donations are actually disabled (thanks to Paypal!). Until we set up another form of support, feel free to donate hardware directly if you require support for Memtest86+.</p>
+												    <!-- <form action="https://www.paypal.com/donate" method="post" target="_top">
+                                                    <input type="hidden" name="hosted_button_id" value="2ZFBR8XUVHF5J" />
+                                                    <input type="image" src="https://www.paypalobjects.com/en_US/FR/i/btn/btn_donateCC_LG.gif" style="border:0;" name="submit" title="Stripe - The safer, easier way to pay online!" alt="Donate with PayPal button" />
+                                                    <!-- <img alt="" style="border:0;" src="https://www.paypal.com/en_FR/i/scr/pixel.gif" width="1" height="1" />
+                                                    </form>
+                                                    <a href="https://donate.stripe.com/00g7tX3MOfMx1wY3cc" target='_blank'>
+                                                        <img alt="Donation to Memtest86+ By Stripe" style="border:0;" src="/assets/media/donation/btn_donate.gif" />
+                                                    </a> -->
+                                                </div>
+												<!--begin::Item-->
+												<div class="d-flex flex-stack mb-2">
+													<!--begin::Section-->
+													<div class="d-flex align-items-center">
+														<!--begin::Symbol-->
+														<div class="symbol symbol-35px me-4">
+															<i class="text-gray-400 fa-solid fa-code fa-thumbs-up fa-2x"></i>
+														</div>
+														<!--end::Symbol-->
+														<!--begin::Title-->
+														<div class="ps-1">
+															<a href="https://monovm.com/" target="_blank" class="fs-6 text-gray-800 text-hover-primary fw-boldest">Michael Scalera</a>
+															<div class="fs-7 text-gray-400 fw-bold mt-1">Donated on 2022-12-03</div>
+														</div>
+														<!--end::Title-->
+													</div>
+													<!--end::Section-->
+												</div>
+												<!--end::Item-->
+												<!--begin::Item-->
+												<div class="d-flex flex-stack mb-2">
+													<!--begin::Section-->
+													<div class="d-flex align-items-center">
+														<!--begin::Symbol-->
+														<div class="symbol symbol-35px me-4">
+															<i class="text-gray-400 fa-solid fa-code fa-thumbs-up fa-2x"></i>
+														</div>
+														<!--end::Symbol-->
+														<!--begin::Title-->
+														<div class="ps-1">
+															<a href="" class="fs-6 text-gray-800 text-hover-primary fw-boldest">Stephen Liu</a>
+															<div class="fs-7 text-gray-400 fw-bold mt-1">Donated on 2022-12-02</div>
+														</div>
+														<!--end::Title-->
+													</div>
+													<!--end::Section-->
+												</div>
+												<!--end::Item-->
+												<!--begin::Item-->
+												<div class="d-flex flex-stack mb-2">
+													<!--begin::Section-->
+													<div class="d-flex align-items-center">
+														<!--begin::Symbol-->
+														<div class="symbol symbol-35px me-4">
+															<i class="text-gray-400 fa-solid fa-code fa-thumbs-up fa-2x"></i>
+														</div>
+														<!--end::Symbol-->
+														<!--begin::Title-->
+														<div class="ps-1">
+															<a href="" class="fs-6 text-gray-800 text-hover-primary fw-boldest">Kim Skråmo</a>
+															<div class="fs-7 text-gray-400 fw-bold mt-1">Donated on 2022-11-18</div>
+														</div>
+														<!--end::Title-->
+													</div>
+													<!--end::Section-->
+												</div>
+												<!--end::Item-->
+												<!--begin::Item-->
+												<div class="d-flex flex-stack mb-2">
+													<!--begin::Section-->
+													<div class="d-flex align-items-center">
+														<!--begin::Symbol-->
+														<div class="symbol symbol-35px me-4">
+															<i class="text-gray-400 fa-solid fa-code fa-thumbs-up fa-2x"></i>
+														</div>
+														<!--end::Symbol-->
+														<!--begin::Title-->
+														<div class="ps-1">
+															<a href="#" class="fs-6 text-gray-800 text-hover-primary fw-boldest">Gunther Mayer</a>
+															<div class="fs-7 text-gray-400 fw-bold mt-1">Donated on 2022-11-16</div>
+														</div>
+														<!--end::Title-->
+													</div>
+													<!--end::Section-->
+												</div>
+												<!--end::Item-->
+												<!--begin::Item-->
+												<div class="d-flex flex-stack mb-2">
+													<!--begin::Section-->
+													<div class="d-flex align-items-center">
+														<!--begin::Symbol-->
+														<div class="symbol symbol-35px me-4">
+															<i class="text-gray-400 fa-solid fa-code fa-thumbs-up fa-2x"></i>
+														</div>
+														<!--end::Symbol-->
+														<!--begin::Title-->
+														<div class="ps-1">
+															<a href="http://www.glitchwrks.com/" target="_blank" class="fs-6 text-gray-800 text-hover-primary fw-boldest">Glitch Works, LLC</a>
+															<div class="fs-7 text-gray-400 fw-bold mt-1">Donated on 2022-11-04</div>
+														</div>
+														<!--end::Title-->
+													</div>
+													<!--end::Section-->
+													<!--begin::Details-->
+													<a href="http://www.glitchwrks.com/" target="_blank" class="btn btn-light btn-color-muted fw-boldest btn-sm px-5">Link</a>
+													<!--end::Details-->
+												</div>
+												<!--end::Item-->
+												<!--begin::Item-->
+												<div class="d-flex flex-stack mb-2">
+													<!--begin::Section-->
+													<div class="d-flex align-items-center">
+														<!--begin::Symbol-->
+														<div class="symbol symbol-35px me-4">
+															<i class="text-gray-400 fa-solid fa-code fa-thumbs-up fa-2x"></i>
+														</div>
+														<!--end::Symbol-->
+														<!--begin::Title-->
+														<div class="ps-1">
+															<a href="" class="fs-6 text-gray-800 text-hover-primary fw-boldest">William Viergever</a>
+															<div class="fs-7 text-gray-400 fw-bold mt-1">Donated on 2022-11-01</div>
+														</div>
+														<!--end::Title-->
+													</div>
+													<!--end::Section-->
+												</div>
+												<!--end::Item-->
+											</div>
+											<!--end::Body-->
+										</div>
+										<!--end::List Widget 3-->
+									</div>
+									<!--end::Col-->
+								</div>
+								<!--end::Row-->
+							</div>
+							<!--end::Container-->
+						</div>
+						<!--end::Post-->
+					</div>
+					<!--end::Content-->
+					<!--begin::Footer-->
+					<div class="footer py-4 d-flex flex-lg-column" id="kt_footer">
+						<!--begin::Container-->
+						<!--end::Container-->
+					</div>
+					<!--end::Footer-->
+				</div>
+				<!--end::Wrapper-->
+			</div>
+			<!--end::Page-->
+		</div>
+		<!--end::Root-->
+
+		<!--begin::Javascript-->
+		<script>var hostUrl = "assets/";</script>
+		<!--begin::Global Javascript Bundle(used by all pages)-->
+        <script src="assets/js/bootstrap.bundle.min.js"></script>
+        <script src="assets/js/jquery-3.6.0.min.js"></script>
+		<script async src="//pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"></script>
+		<script src="assets/js/cookieconsent.min.js"></script>
+        <script src="assets/js/custom.js"></script>
+	</body>
+	<!--end::Body-->
+</html>
