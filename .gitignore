@@ -1,0 +1,9 @@
+.android-sdk
+.gradle/
+build/
+*.iml
+.idea/
+local.properties
+.DS_Store
+.claude/settings.local.json
+.claude/worktrees/
