@@ -318,12 +318,3 @@ class ConfinedFile(
 
     override fun close() = descriptor.close()
 }
-
-/** Confines image paths to allowed roots and rejects symlinks anywhere below the root. */
-object PathGuard {
-    /** Returns the normalized kernel path of an existing regular file inside [roots]. */
-    fun requireImage(
-        path: String,
-        roots: List<String>,
-    ): String = ConfinedFiles.openImage(path, roots).use { it.path }
-}

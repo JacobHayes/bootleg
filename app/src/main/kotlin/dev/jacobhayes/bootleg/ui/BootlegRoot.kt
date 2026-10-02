@@ -13,6 +13,7 @@ import androidx.compose.material.icons.outlined.Downloading
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SettingsRemote
 import androidx.compose.material.icons.outlined.Usb
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -28,24 +29,32 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import dev.jacobhayes.bootleg.BootlegApp
 import dev.jacobhayes.bootleg.ui.catalog.CatalogScreen
 import dev.jacobhayes.bootleg.ui.control.ControlScreen
 import dev.jacobhayes.bootleg.ui.downloads.DownloadsScreen
 import dev.jacobhayes.bootleg.ui.drives.DrivesScreen
 import dev.jacobhayes.bootleg.ui.library.LibraryScreen
+import dev.jacobhayes.bootleg.ui.remote.RemoteRoute
 import dev.jacobhayes.bootleg.ui.settings.SettingsScreen
 
+/** Screens. [navParent] is the bottom-bar item a screen lives under (Downloads opens from Library and Catalog). */
 enum class Tab(
     val label: String,
     val icon: ImageVector,
+    val navParent: Tab? = null,
 ) {
     DRIVES("Drives", Icons.Outlined.Usb),
     CONTROL("Control", Icons.Outlined.Keyboard),
     LIBRARY("Library", Icons.Outlined.Inventory2),
     CATALOG("Catalog", Icons.Outlined.CloudDownload),
-    DOWNLOADS("Downloads", Icons.Outlined.Downloading),
+    REMOTE("Remote", Icons.Outlined.SettingsRemote),
     SETTINGS("Settings", Icons.Outlined.Settings),
+    DOWNLOADS("Downloads", Icons.Outlined.Downloading, navParent = LIBRARY),
+    ;
+
+    val inNavBar: Boolean get() = navParent == null
 }
 
 @Composable
@@ -56,16 +65,23 @@ fun BootlegRoot(
 ) {
     val records by app.downloads.records.collectAsState()
     val activeDownloads = records.values.count { it.isActive }
+    val remoteState by app.remote.state.collectAsState()
     val browse = rememberBrowseForImage(app)
 
     Scaffold(
         bottomBar = {
             NavigationBar {
-                Tab.entries.forEach { tab ->
+                Tab.entries.filter { it.inNavBar }.forEach { tab ->
+                    val badgeCount =
+                        when (tab) {
+                            Tab.LIBRARY -> activeDownloads
+                            Tab.REMOTE -> remoteState.pendingCount
+                            else -> 0
+                        }
                     NavigationBarItem(
-                        selected = tab == selectedTab,
+                        selected = tab == (selectedTab.navParent ?: selectedTab),
                         onClick = { onSelectTab(tab) },
-                        icon = { TabIcon(tab, if (tab == Tab.DOWNLOADS) activeDownloads else 0) },
+                        icon = { TabIcon(tab, badgeCount) },
                         label = { Text(tab.label) },
                     )
                 }
@@ -76,9 +92,23 @@ fun BootlegRoot(
         Box(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()) {
             when (selectedTab) {
                 Tab.DRIVES -> DrivesScreen(app.backend, app.drives, browse)
-                Tab.CONTROL -> ControlScreen(app.backend, app.hid)
+                Tab.CONTROL -> {
+                    // The Control tab in the foreground preempts any remote controller.
+                    LifecycleResumeEffect(Unit) {
+                        app.remote.setLocalCapture(true)
+                        onPauseOrDispose { app.remote.setLocalCapture(false) }
+                    }
+                    ControlScreen(app.backend, app.hid)
+                }
                 Tab.LIBRARY ->
-                    LibraryScreen(app.backend, app.drives, app.fileTasks, app.downloads, onExposed = { onSelectTab(Tab.DRIVES) })
+                    LibraryScreen(
+                        app.backend,
+                        app.drives,
+                        app.fileTasks,
+                        app.downloads,
+                        onExposed = { onSelectTab(Tab.DRIVES) },
+                        onShowDownloads = { onSelectTab(Tab.DOWNLOADS) },
+                    )
                 Tab.CATALOG -> CatalogScreen(app.catalog, app.downloads, onShowDownloads = { onSelectTab(Tab.DOWNLOADS) })
                 Tab.DOWNLOADS ->
                     DownloadsScreen(
@@ -86,7 +116,9 @@ fun BootlegRoot(
                         app.prefs.wifiOnlyDownloads
                             .collectAsState()
                             .value,
+                        onBack = { onSelectTab(Tab.LIBRARY) },
                     )
+                Tab.REMOTE -> RemoteRoute(app.remote)
                 Tab.SETTINGS -> SettingsScreen(app.prefs)
             }
         }

@@ -29,6 +29,16 @@ enum class HidWriteResult {
     FAILED,
 }
 
+enum class HidOffer {
+    ACCEPTED,
+
+    /** The bounded queue overflowed: everything queued was dropped and a release-all is owed. */
+    QUEUE_FULL,
+
+    /** Stopped, reconnecting, or the host isn't reading reports. */
+    UNAVAILABLE,
+}
+
 /** A nonblocking `/dev/hidgN` file descriptor (or a fake in tests). */
 interface HidEndpoint {
     /** One nonblocking attempt to write a whole report. */
@@ -132,6 +142,11 @@ class HidSession(
         val report: ByteArray,
     )
 
+    /**
+     * Guards [queue] and [releaseAllOwed] together: dropping the queue and owing a release is one step,
+     * and admission checks the barrier in the same step, so no report can be queued between the drop
+     * and the barrier and then reach the host after the release.
+     */
     private val queueLock = Any()
     private val queue = ArrayDeque<Pending>()
     private val wakeUp = Channel<Unit>(Channel.CONFLATED)
@@ -166,7 +181,7 @@ class HidSession(
         if (isRunning) return
         failedAttempts = 0
         stallStartMs = null
-        owesReleaseAll()
+        dropQueueAndOweRelease()
         stateFlow.value = HidLinkState.Opening
         job = scope.launch { runLoop() }
     }
@@ -188,49 +203,60 @@ class HidSession(
 
     /**
      * Queues one report. Returns false (and counts it dropped) when the session isn't ready to
-     * deliver it promptly: stopped, reconnecting, the host isn't listening, or the queue overflowed.
+     * deliver it promptly: stopped, reconnecting, the host isn't listening, a release-all is still
+     * owed, or the queue overflowed.
      */
     fun send(
         kind: HidKind,
         report: ByteArray,
-    ): Boolean {
+    ): Boolean = offer(kind, report) == HidOffer.ACCEPTED
+
+    /** [send], saying why a report was dropped (the remote controller reacts differently to each). */
+    fun offer(
+        kind: HidKind,
+        report: ByteArray,
+    ): HidOffer {
         require(kind in kinds) { "$kind is not part of this session" }
         require(report.size == kind.reportSizeBytes) { "$kind report must be ${kind.reportSizeBytes} bytes, got ${report.size}" }
         when (val current = stateFlow.value) {
-            is HidLinkState.Open -> if (!current.hostListening) return dropped()
+            is HidLinkState.Open -> if (!current.hostListening) return dropped(HidOffer.UNAVAILABLE)
             is HidLinkState.Failed -> {
                 // User input is the signal to try again.
                 start()
-                return dropped()
+                return dropped(HidOffer.UNAVAILABLE)
             }
-            else -> return dropped()
+            else -> return dropped(HidOffer.UNAVAILABLE)
         }
-        val overflowed =
+        var droppedCount = 0
+        val offer =
             synchronized(queueLock) {
-                if (queue.size >= tuning.queueLengthMax) {
-                    true
-                } else {
-                    queue.addLast(Pending(kind, report.copyOf()))
-                    queueLengthFlow.value = queue.size
-                    false
+                when {
+                    // Input waits behind the owed release; queued now, it could reach the host after it.
+                    releaseAllOwed -> HidOffer.UNAVAILABLE
+                    queue.size >= tuning.queueLengthMax -> {
+                        droppedCount = dropQueueAndOweReleaseLocked()
+                        HidOffer.QUEUE_FULL
+                    }
+                    else -> {
+                        queue.addLast(Pending(kind, report.copyOf()))
+                        queueLengthFlow.value = queue.size
+                        HidOffer.ACCEPTED
+                    }
                 }
             }
-        if (overflowed) {
-            statsFlow.update { it.copy(lastError = "report queue overflowed") }
-            clearQueue()
-            owesReleaseAll()
-            wakeUp.trySend(Unit)
-            return dropped()
-        }
-        wakeUp.trySend(Unit)
-        return true
+        countDropped(droppedCount)
+        if (offer == HidOffer.QUEUE_FULL) statsFlow.update { it.copy(lastError = "report queue overflowed") }
+        if (offer != HidOffer.UNAVAILABLE) wakeUp.trySend(Unit)
+        return if (offer == HidOffer.ACCEPTED) offer else dropped(offer)
     }
+
+    /** A release-all is owed and hasn't reached the host yet; the remote controller holds input behind it. */
+    val releaseOwed: Boolean get() = isRunning && releaseAllOwed
 
     /** Owes the host a release-all, e.g. when the app goes to the background. */
     fun releaseAll() {
         if (!isRunning) return
-        clearQueue()
-        owesReleaseAll()
+        dropQueueAndOweRelease()
         wakeUp.trySend(Unit)
     }
 
@@ -279,7 +305,7 @@ class HidSession(
             return false
         }
         stallStartMs = null
-        owesReleaseAll()
+        dropQueueAndOweRelease()
         stateFlow.value = HidLinkState.Open(hostListening = true)
         return true
     }
@@ -293,7 +319,11 @@ class HidSession(
                 return false
             }
         }
-        releaseAllOwed = false
+        // Nothing was admitted since the barrier went up, so the release is the last thing the host saw.
+        synchronized(queueLock) {
+            check(queue.isEmpty()) { "input was queued behind an owed release" }
+            releaseAllOwed = false
+        }
         statsFlow.update { it.copy(releaseAllCount = it.releaseAllCount + 1) }
         markHostListening()
         return true
@@ -324,8 +354,7 @@ class HidSession(
                 val now = nowMs()
                 val stallStart = stallStartMs ?: now.also { stallStartMs = it }
                 // Input the host didn't take within the deadline is stale; never replay it late.
-                clearQueue()
-                owesReleaseAll()
+                dropQueueAndOweRelease()
                 if (now - stallStart >= tuning.stallReopenMs) {
                     reconnect("host stopped reading reports for ${now - stallStart} ms")
                 } else {
@@ -341,8 +370,7 @@ class HidSession(
     private fun reconnect(reason: String) {
         failedAttempts++
         statsFlow.update { it.copy(lastError = reason) }
-        clearQueue()
-        owesReleaseAll()
+        dropQueueAndOweRelease()
         closeEndpoints()
         stallStartMs = null
         stateFlow.value = HidLinkState.Reconnecting(failedAttempts, reason)
@@ -377,19 +405,31 @@ class HidSession(
     }
 
     private fun clearQueue() {
-        val droppedCount =
+        countDropped(
             synchronized(queueLock) {
                 val count = queue.size
                 queue.clear()
                 queueLengthFlow.value = 0
                 count
-            }
-        if (droppedCount > 0) statsFlow.update { it.copy(reportsDropped = it.reportsDropped + droppedCount) }
+            },
+        )
     }
 
-    private fun owesReleaseAll() {
+    /** Drops queued input and raises the release barrier in one step (see [queueLock]). */
+    private fun dropQueueAndOweRelease() = countDropped(synchronized(queueLock) { dropQueueAndOweReleaseLocked() })
+
+    /** Returns how many queued reports were dropped. Caller holds [queueLock]. */
+    private fun dropQueueAndOweReleaseLocked(): Int {
+        val count = queue.size
+        queue.clear()
+        queueLengthFlow.value = 0
         if (!releaseAllOwed) bumpReleaseEpoch()
         releaseAllOwed = true
+        return count
+    }
+
+    private fun countDropped(count: Int) {
+        if (count > 0) statsFlow.update { it.copy(reportsDropped = it.reportsDropped + count) }
     }
 
     private fun bumpReleaseEpoch() = releaseEpochFlow.update { it + 1 }
@@ -399,8 +439,8 @@ class HidSession(
         endpoints.clear()
     }
 
-    private fun dropped(): Boolean {
+    private fun dropped(reason: HidOffer): HidOffer {
         statsFlow.update { it.copy(reportsDropped = it.reportsDropped + 1) }
-        return false
+        return reason
     }
 }

@@ -8,7 +8,6 @@ import com.topjohnwu.superuser.ipc.RootService
 import dev.jacobhayes.bootleg.BlankImageFormat
 import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
 import dev.jacobhayes.bootleg.core.gadget.Desired
-import dev.jacobhayes.bootleg.core.gadget.SlotSpec
 import dev.jacobhayes.bootleg.core.hid.HidDescriptors
 import dev.jacobhayes.bootleg.core.hid.HidKind
 
@@ -24,6 +23,7 @@ class BootlegRootService : RootService() {
 
     // HID writes take at most the 50ms write deadline; they must never wait behind a gadget apply.
     private val hidLock = Any()
+    private val keepAwakeLock = Any()
     private val hidRelay = HidRelay()
     private val journalStore = FileJournalStore()
     private val images = ImageStore()
@@ -123,18 +123,28 @@ class BootlegRootService : RootService() {
             override fun hidReadOutput(kind: String): ByteArray = call(hidLock) { hidRelay.readOutput(hidKind(kind)) }
 
             override fun hidClose(kind: String) = call(hidLock) { hidRelay.close(hidKind(kind)) }
+
+            override fun setKeepAwake(
+                stayOnWhilePluggedIn: Int,
+                lowLatency: Boolean,
+                wakeScreen: Boolean,
+            ) = call(keepAwakeLock) {
+                require(stayOnWhilePluggedIn in STAY_ON_VALUE_MIN..STAY_ON_VALUE_MAX) {
+                    "stay_on_while_plugged_in must be $STAY_ON_VALUE_MIN..$STAY_ON_VALUE_MAX, got $stayOnWhilePluggedIn"
+                }
+                RootCommands.runChecked(listOf("settings", "put", "global", "stay_on_while_plugged_in", stayOnWhilePluggedIn.toString()))
+                RootCommands.runChecked(listOf("cmd", "wifi", "force-low-latency-mode", if (lowLatency) "enabled" else "disabled"))
+                if (wakeScreen) RootCommands.runChecked(listOf("input", "keyevent", "KEYCODE_WAKEUP"))
+            }
         }
 
     private fun hidKind(kind: String): HidKind = requireNotNull(HidKind.fromWireName(kind)) { "unknown HID kind: $kind" }
 
-    /** Image paths become canonical kernel paths before they reach the controller. */
+    /** Image paths become canonical kernel paths, checked as a set by inode, before they reach the controller. */
     private fun canonicalize(desired: Desired): Desired =
-        desired.copy(
-            slots =
-                desired.slots.map { slot: SlotSpec ->
-                    slot.copy(backingPath = PathGuard.requireImage(slot.backingPath, ImagePaths.allowedRoots))
-                },
-        )
+        canonicalizeDesired(desired) { path ->
+            ConfinedFiles.openImage(path, ImagePaths.allowedRoots).use { OpenedImage(it.path, it.identity) }
+        }
 
     /**
      * Enforces the caller check and rethrows failures as exception types Binder carries back to
@@ -160,5 +170,9 @@ class BootlegRootService : RootService() {
 
     private companion object {
         const val TAG = "BootlegRoot"
+        const val STAY_ON_VALUE_MIN = 0
+
+        // AC | USB | wireless.
+        const val STAY_ON_VALUE_MAX = 7
     }
 }

@@ -14,6 +14,8 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "0.1.0"
+        // The embedded Tailscale node (libgojni.so) is built for arm64 only.
+        ndk { abiFilters += "arm64-v8a" }
     }
     buildTypes {
         release {
@@ -40,6 +42,27 @@ android {
     }
 }
 
+// The Go remote transport (remote/) as a gomobile AAR. Rebuilt only when remote/ or the toolchain
+// changes; the output is cacheable, so other worktrees and clean builds reuse it.
+val remoteAar = rootProject.layout.projectDirectory.file("remote/build/bootlegremote.aar")
+val buildRemoteAar =
+    tasks.register<Exec>("buildRemoteAar") {
+        description = "Builds remote/build/bootlegremote.aar with gomobile (mise run remote:aar)"
+        val remoteDir = rootProject.layout.projectDirectory.dir("remote")
+        inputs
+            .files(fileTree(remoteDir) { exclude("build/**") })
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+            .withPropertyName("remoteSources")
+        inputs
+            .files(rootProject.layout.projectDirectory.file("mise.toml"), rootProject.layout.projectDirectory.file("mise.lock"))
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+            .withPropertyName("toolchain")
+        outputs.file(remoteAar).withPropertyName("aar")
+        outputs.cacheIf { true }
+        workingDir = rootProject.projectDir
+        commandLine("mise", "run", "--quiet", "remote:aar")
+    }
+
 roborazzi {
     outputDir.set(file("src/test/screenshots"))
 }
@@ -51,6 +74,8 @@ kotlin {
 
 dependencies {
     implementation(project(":core"))
+    implementation(files(remoteAar).builtBy(buildRemoteAar))
+    implementation(libs.zxing.core)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
     implementation(libs.compose.ui)

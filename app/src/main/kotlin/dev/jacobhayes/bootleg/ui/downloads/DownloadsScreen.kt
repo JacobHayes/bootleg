@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Downloading
@@ -54,12 +55,24 @@ import dev.jacobhayes.bootleg.ui.common.EmptyState
 fun DownloadsScreen(
     downloads: Downloads,
     wifiOnly: Boolean,
+    onBack: (() -> Unit)? = null,
 ) {
     val records by downloads.records.collectAsState()
     var pendingCancel by remember { mutableStateOf<DownloadRecord?>(null) }
     val sorted = records.values.sortedWith(compareByDescending<DownloadRecord> { it.isActive }.thenByDescending { it.createdAtMs })
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Downloads") }) }) { padding ->
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Downloads") },
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Library") }
+                    }
+                },
+            )
+        },
+    ) { padding ->
         if (sorted.isEmpty()) {
             EmptyState(
                 icon = Icons.Outlined.Downloading,

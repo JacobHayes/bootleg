@@ -11,12 +11,20 @@ import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.hid.HidTestSequence
+import dev.jacobhayes.bootleg.core.remote.LeaseHolder
+import dev.jacobhayes.bootleg.core.remote.Principal
 import dev.jacobhayes.bootleg.root.BootlegJson
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /**
  * Debug-only control surface for L4 tests, guarded by android.permission.DUMP (adb shell has it):
@@ -113,6 +121,45 @@ class CommandProvider : ContentProvider() {
                                     put("link", sent.link.toString())
                                 }.toString()
                             }
+                            // Remote (L4 check:device:remote). Approve/revoke here stand in for the in-app buttons.
+                            "REMOTE_ON" -> {
+                                withContext(Dispatchers.Main) { app.remote.setEnabled(true) }
+                                remoteStateJson(app)
+                            }
+                            "REMOTE_OFF" -> {
+                                withContext(Dispatchers.Main) { app.remote.setEnabled(false) }
+                                withTimeout(REMOTE_WAIT_MS) { app.remote.state.first { !it.running } }
+                                remoteStateJson(app)
+                            }
+                            "REMOTE_STATE" -> remoteStateJson(app)
+                            "REMOTE_APPROVE" -> {
+                                val nodeId =
+                                    requireNotNull(arguments.getString("node") ?: arg) { "missing --extra node:s:<stable node id>" }
+                                app.remote.approve(nodeId, arguments.getBoolean("rw", false))
+                                withTimeout(REMOTE_WAIT_MS) {
+                                    app.remote.state.first { state ->
+                                        state.status.approvals.any {
+                                            it.nodeId ==
+                                                nodeId
+                                        }
+                                    }
+                                }
+                                remoteStateJson(app)
+                            }
+                            "REMOTE_REVOKE" -> {
+                                val nodeId =
+                                    requireNotNull(arguments.getString("node") ?: arg) { "missing --extra node:s:<stable node id>" }
+                                app.remote.revoke(Principal.Node(nodeId))
+                                withTimeout(REMOTE_WAIT_MS) {
+                                    app.remote.state.first { state ->
+                                        state.status.approvals.none {
+                                            it.nodeId ==
+                                                nodeId
+                                        }
+                                    }
+                                }
+                                remoteStateJson(app)
+                            }
                             else -> throw IllegalArgumentException("unknown method $method")
                         }
                     }
@@ -144,6 +191,59 @@ class CommandProvider : ContentProvider() {
                 app.hid.leds.value
                     ?.toString(),
             )
+        }.toString()
+    }
+
+    private fun remoteStateJson(app: BootlegApp): String {
+        val state = app.remote.state.value
+        val status = state.status
+        return buildJsonObject {
+            put("enabled", state.enabled)
+            put("running", state.running)
+            put("backendState", state.tailnet.backendState)
+            put("dnsName", state.tailnet.fqdn)
+            putJsonArray("tailscaleIPs") { state.tailnet.tailscaleIPs.forEach { add(it) } }
+            put("needsLogin", state.tailnet.needsLogin)
+            put("localNetworkGranted", state.localNetworkGranted)
+            put("keepAwake", state.keepAwake)
+            put("error", state.error)
+            put(
+                "lease",
+                when (val holder = status.leaseHolder) {
+                    null -> "free"
+                    LeaseHolder.Local -> "local"
+                    is LeaseHolder.Remote -> "session:${holder.sessionId}"
+                },
+            )
+            putJsonArray("sessions") {
+                status.sessions.forEach { session ->
+                    addJsonObject {
+                        put("sessionId", session.sessionId)
+                        put("transport", session.transport)
+                        put("name", session.displayName)
+                        put("auth", session.auth.name.lowercase())
+                        put("holdsLease", session.holdsLease)
+                    }
+                }
+            }
+            putJsonArray("pending") {
+                status.pending.forEach { pending ->
+                    addJsonObject {
+                        put("nodeId", pending.nodeId)
+                        put("name", pending.displayName)
+                        put("user", pending.user)
+                    }
+                }
+            }
+            putJsonArray("approvals") {
+                status.approvals.forEach { approval ->
+                    addJsonObject {
+                        put("nodeId", approval.nodeId)
+                        put("name", approval.displayName)
+                        put("allowRw", approval.allowRw)
+                    }
+                }
+            }
         }.toString()
     }
 
@@ -184,5 +284,8 @@ class CommandProvider : ContentProvider() {
 
     private companion object {
         const val COMMAND_TIMEOUT_MS = 150_000L
+
+        /** Remote off waits for Go to close; approve/revoke wait one actor step. */
+        const val REMOTE_WAIT_MS = 15_000L
     }
 }

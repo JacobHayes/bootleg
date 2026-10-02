@@ -32,4 +32,7 @@ interface IBootlegRoot {
     byte[] hidReadOutput(String kind);
     // Releases everything on that function and closes it.
     void hidClose(String kind);
+    // Remote keep-awake knobs: Settings.Global stay_on_while_plugged_in (0-7), Wi-Fi forced
+    // low-latency mode, and (wakeScreen) a KEYCODE_WAKEUP, which turns the screen on but never unlocks.
+    void setKeepAwake(int stayOnWhilePluggedIn, boolean lowLatency, boolean wakeScreen);
 }

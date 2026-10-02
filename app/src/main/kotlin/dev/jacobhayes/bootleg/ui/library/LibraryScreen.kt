@@ -15,9 +15,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
+import androidx.compose.material.icons.outlined.Downloading
 import androidx.compose.material.icons.outlined.FileOpen
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -62,6 +65,7 @@ fun LibraryScreen(
     fileTasks: FileTasks,
     downloads: Downloads,
     onExposed: () -> Unit,
+    onShowDownloads: () -> Unit,
 ) {
     val images by backend.images.collectAsState()
     val tasks by fileTasks.progress.collectAsState()
@@ -101,6 +105,16 @@ fun LibraryScreen(
             TopAppBar(
                 title = { Text("Library") },
                 actions = {
+                    val activeDownloads = records.values.count { it.isActive }
+                    IconButton(onClick = onShowDownloads) {
+                        if (activeDownloads > 0) {
+                            BadgedBox(badge = { Badge { Text("$activeDownloads") } }) {
+                                Icon(Icons.Outlined.Downloading, contentDescription = "Downloads")
+                            }
+                        } else {
+                            Icon(Icons.Outlined.Downloading, contentDescription = "Downloads")
+                        }
+                    }
                     IconButton(onClick = { showBlankDialog = true }) {
                         Icon(Icons.AutoMirrored.Outlined.NoteAdd, contentDescription = "Create blank image")
                     }

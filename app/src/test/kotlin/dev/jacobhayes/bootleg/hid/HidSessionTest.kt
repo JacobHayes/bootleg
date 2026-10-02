@@ -5,7 +5,11 @@ import dev.jacobhayes.bootleg.core.hid.KeyUsage
 import dev.jacobhayes.bootleg.core.hid.KeyboardLeds
 import dev.jacobhayes.bootleg.core.hid.KeyboardReport
 import dev.jacobhayes.bootleg.core.hid.MouseReport
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -15,6 +19,12 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.concurrent.thread
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class HidSessionTest {
@@ -23,7 +33,8 @@ class HidSessionTest {
         val kind: HidKind,
         var results: () -> HidWriteResult = { HidWriteResult.WRITTEN },
     ) : HidEndpoint {
-        val written = mutableListOf<List<Byte>>()
+        // Written by the session's thread, read by the test's.
+        val written: MutableList<List<Byte>> = Collections.synchronizedList(mutableListOf())
         val outputReports = ArrayDeque<ByteArray>()
         var closed = false
 
@@ -302,4 +313,88 @@ class HidSessionTest {
                 session.leds.value,
             )
         }
+
+    @Test
+    fun `releaseAll racing many senders never lets input reach the host after the release`() {
+        val executor = Executors.newSingleThreadExecutor()
+        val scope = CoroutineScope(SupervisorJob() + executor.asCoroutineDispatcher())
+        try {
+            val opener = FakeOpener()
+            val session = HidSession(opener, scope, setOf(HidKind.MOUSE), { System.nanoTime() / 1_000_000 })
+
+            fun awaitReleased() {
+                val deadlineNs = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (session.state.value != HidLinkState.Open(hostListening = true) || session.releaseOwed) {
+                    check(System.nanoTime() < deadlineNs) { "release-all never went out: ${session.state.value}" }
+                    Thread.sleep(1)
+                }
+            }
+            session.start()
+            awaitReleased()
+            val mouse = opener.latest(HidKind.MOUSE)
+            repeat(ROUND_COUNT) { round ->
+                // Hold the writer so whatever the race leaves queued is still there when the release goes out.
+                val writerHeld = CountDownLatch(1)
+                val resumeWriter = CountDownLatch(1)
+                executor.execute {
+                    writerHeld.countDown()
+                    resumeWriter.await()
+                }
+                assertTrue(writerHeld.await(5, TimeUnit.SECONDS))
+                val writtenBefore = mouse.written.size
+                val go = CountDownLatch(1)
+                val acceptedAfterRelease = AtomicInteger()
+                val releaseCalled = CountDownLatch(1)
+                val senders =
+                    (0 until SENDER_COUNT).map {
+                        thread {
+                            go.await()
+                            repeat(OFFERS_PER_SENDER) {
+                                val releaseDone = releaseCalled.count == 0L
+                                if (session.offer(HidKind.MOUSE, mouseMove) == HidOffer.ACCEPTED &&
+                                    releaseDone
+                                ) {
+                                    acceptedAfterRelease.incrementAndGet()
+                                }
+                            }
+                        }
+                    }
+                go.countDown()
+                session.releaseAll()
+                releaseCalled.countDown()
+                senders.forEach { it.join() }
+                assertEquals(0, acceptedAfterRelease.get(), "round $round: input admitted while the release was owed")
+                resumeWriter.countDown()
+                awaitReleased()
+                val written =
+                    mouse.written
+                        .toList()
+                        .drop(writtenBefore)
+                        .map { it.toByteArray() }
+                val releaseIndex = written.indexOfLast(::isReleaseAll)
+                assertTrue(releaseIndex >= 0, "round $round: no release-all written")
+                assertEquals(0, written.size - releaseIndex - 1, "round $round: reports written after the release")
+            }
+            // Once the release is through, input flows again and lands after it.
+            assertEquals(HidOffer.ACCEPTED, session.offer(HidKind.MOUSE, mouseMove))
+            val deadlineNs = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (!mouse.written
+                    .last()
+                    .toByteArray()
+                    .contentEquals(mouseMove)
+            ) {
+                check(System.nanoTime() < deadlineNs) { "input after the release was never written" }
+                Thread.sleep(1)
+            }
+        } finally {
+            scope.cancel()
+            executor.shutdownNow()
+        }
+    }
+
+    private companion object {
+        const val ROUND_COUNT = 50
+        const val SENDER_COUNT = 4
+        const val OFFERS_PER_SENDER = 40
+    }
 }

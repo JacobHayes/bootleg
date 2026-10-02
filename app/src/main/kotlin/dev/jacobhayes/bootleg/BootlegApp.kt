@@ -12,6 +12,8 @@ import dev.jacobhayes.bootleg.download.DownloadScheduler
 import dev.jacobhayes.bootleg.download.DownloadStore
 import dev.jacobhayes.bootleg.download.Downloads
 import dev.jacobhayes.bootleg.hid.HidController
+import dev.jacobhayes.bootleg.remote.KeepAwake
+import dev.jacobhayes.bootleg.remote.RemoteManager
 import dev.jacobhayes.bootleg.service.BootlegBackendImpl
 import dev.jacobhayes.bootleg.storage.FileTasks
 import dev.jacobhayes.bootleg.storage.StoragePaths
@@ -19,11 +21,18 @@ import dev.jacobhayes.bootleg.ui.drives.DrivesController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.io.File
 
 /** Process-wide singletons (manual DI). */
 class BootlegApp : Application() {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    override fun onCreate() {
+        super.onCreate()
+        // A process that died while a remote session kept the phone awake left settings changed.
+        if (KeepAwake.hasLeftover(this)) appScope.launch { runCatching { remote.keepAwake.restoreLeftover() } }
+    }
 
     val systemBackend: BootlegBackendImpl by lazy { BootlegBackendImpl(this, appScope) }
 
@@ -38,6 +47,7 @@ class BootlegApp : Application() {
     val catalog by lazy { CatalogRepository(catalogScrapers(), catalogHttp, File(filesDir, "catalog-cache.json")) }
     val drives by lazy { DrivesController(backend, appScope) }
     val hid by lazy { HidController(backend, appScope).also { registerActivityLifecycleCallbacks(it.backgroundWatcher) } }
+    val remote by lazy { RemoteManager(this, systemBackend, hid, prefs, appScope) }
     val fileTasks by lazy { FileTasks(contentResolver, appScope, storeDir) { backend.refreshImages() } }
 
     val downloads by lazy {

@@ -14,6 +14,7 @@ junit = "5.13.4"
 ktlint = "14.2.0"
 robolectric = "4.17"
 roborazzi = "1.76.0"
+zxing = "3.5.4"
 
 [libraries]
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
@@ -41,6 +42,7 @@ robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectr
 roborazzi = { module = "io.github.takahirom.roborazzi:roborazzi", version.ref = "roborazzi" }
 roborazzi-compose = { module = "io.github.takahirom.roborazzi:roborazzi-compose", version.ref = "roborazzi" }
 compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 
 [plugins]

@@ -25,6 +25,15 @@ import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
+import dev.jacobhayes.bootleg.core.remote.ApprovalRecord
+import dev.jacobhayes.bootleg.core.remote.AuthStatus
+import dev.jacobhayes.bootleg.core.remote.LeaseHolder
+import dev.jacobhayes.bootleg.core.remote.PairingStatus
+import dev.jacobhayes.bootleg.core.remote.PendingApproval
+import dev.jacobhayes.bootleg.core.remote.Principal
+import dev.jacobhayes.bootleg.core.remote.RemoteStatus
+import dev.jacobhayes.bootleg.core.remote.SessionStatus
+import dev.jacobhayes.bootleg.core.remote.TokenRecord
 import dev.jacobhayes.bootleg.download.DownloadEngine
 import dev.jacobhayes.bootleg.download.DownloadNotifications
 import dev.jacobhayes.bootleg.download.DownloadRecord
@@ -34,6 +43,11 @@ import dev.jacobhayes.bootleg.download.DownloadStore
 import dev.jacobhayes.bootleg.download.Downloads
 import dev.jacobhayes.bootleg.download.VerifyState
 import dev.jacobhayes.bootleg.hid.HidController
+import dev.jacobhayes.bootleg.remote.HotspotInfo
+import dev.jacobhayes.bootleg.remote.HotspotState
+import dev.jacobhayes.bootleg.remote.RemoteActions
+import dev.jacobhayes.bootleg.remote.RemoteUiState
+import dev.jacobhayes.bootleg.remote.TailnetStatus
 import dev.jacobhayes.bootleg.storage.FileTasks
 import dev.jacobhayes.bootleg.storage.StoragePaths
 import dev.jacobhayes.bootleg.ui.catalog.CatalogScreen
@@ -43,6 +57,7 @@ import dev.jacobhayes.bootleg.ui.drives.DrivesController
 import dev.jacobhayes.bootleg.ui.drives.DrivesScreen
 import dev.jacobhayes.bootleg.ui.library.BlankImageDialog
 import dev.jacobhayes.bootleg.ui.library.LibraryScreen
+import dev.jacobhayes.bootleg.ui.remote.RemoteScreen
 import dev.jacobhayes.bootleg.ui.settings.SettingsScreen
 import dev.jacobhayes.bootleg.ui.theme.BootlegTheme
 import kotlinx.coroutines.MainScope
@@ -90,7 +105,7 @@ class ScreenshotTest {
         val backend = FakeBootlegBackend(initialImages = FakeBootlegBackend.demoImages, initialJournal = drivesJournal)
         val fileTasks = FileTasks(context.contentResolver, MainScope(), temp.newFolder("store")) {}
         capture("library") {
-            LibraryScreen(backend, DrivesController(backend, MainScope()), fileTasks, newDownloads(), onExposed = {})
+            LibraryScreen(backend, DrivesController(backend, MainScope()), fileTasks, newDownloads(), onExposed = {}, onShowDownloads = {})
         }
     }
 
@@ -118,6 +133,79 @@ class ScreenshotTest {
     fun control() {
         val backend = FakeBootlegBackend(initialJournal = Journal(desired = Desired(hid = HidSpec(keyboard = true, mouse = true))))
         capture("control") { ControlScreen(backend, HidController(backend, MainScope())) }
+    }
+
+    @Test
+    fun remoteOff() {
+        capture("remote_off") { remote(RemoteUiState(localNetworkGranted = false)) }
+    }
+
+    @Test
+    fun remoteSignIn() {
+        val tailnet = TailnetStatus(backendState = "NeedsLogin", loginURL = "https://login.tailscale.com/a/0123456789abcdef")
+        capture("remote_sign_in") {
+            remote(
+                RemoteUiState(enabled = true, running = true, tailnet = tailnet, localNetworkGranted = false, authKeyPath = AUTH_KEY_PATH),
+            )
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h1500dp-hdpi")
+    fun remoteOn() {
+        val status =
+            RemoteStatus(
+                sessions =
+                    listOf(
+                        SessionStatus(7, "tailnet", "laptop", AuthStatus.APPROVED, holdsLease = true),
+                        SessionStatus(9, "tailnet", "build-box", AuthStatus.PENDING, holdsLease = false),
+                    ),
+                pending = listOf(PendingApproval("nBUILDBOX11CNTRL", "build-box", "", listOf("tag:ci"), NOW_WALL_MS)),
+                approvals =
+                    listOf(
+                        ApprovalRecord(
+                            "nLAPTOP00000CNTRL",
+                            "laptop",
+                            "user@example.com",
+                            NOW_WALL_MS,
+                            NOW_WALL_MS + DAY_MS * 180,
+                            allowRw = true,
+                        ),
+                    ),
+                leaseHolder = LeaseHolder.Remote(7),
+                leaseEpoch = 41,
+            )
+        capture(
+            "remote_on",
+        ) { remote(RemoteUiState(enabled = true, running = true, tailnet = runningTailnet, status = status, keepAwake = true)) }
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h1500dp-hdpi")
+    fun remoteHotspot() {
+        val hotspot = HotspotInfo("DIRECT-bootleg-7f", "kq4v8z2mw9", "WPA", "192.168.49.1/24")
+        val status =
+            RemoteStatus(
+                tokens = listOf(TokenRecord("ab".repeat(32), "Mozilla/5.0 (Macintosh)", NOW_WALL_MS, NOW_WALL_MS + DAY_MS * 90)),
+                leaseHolder = LeaseHolder.Local,
+                pairing = PairingStatus("482913", PAIRING_EXPIRES_AT_ELAPSED_MS, lockedOut = false, attemptsInWindow = 1),
+            )
+        capture("remote_hotspot") {
+            remote(
+                RemoteUiState(
+                    enabled = true,
+                    running = true,
+                    tailnet = runningTailnet,
+                    status = status,
+                    hotspot = HotspotState.On(hotspot),
+                ),
+            )
+        }
+    }
+
+    @Composable
+    private fun remote(state: RemoteUiState) {
+        RemoteScreen(state, NoRemoteActions, nowElapsedMs = 0, onToggle = {}, onStartHotspot = {}, onGrantLocalNetwork = {}, onOpenUrl = {})
     }
 
     @Test
@@ -167,6 +255,18 @@ class ScreenshotTest {
     }
 
     private companion object {
+        const val AUTH_KEY_PATH = "/data/user/0/dev.jacobhayes.bootleg/files/ts-authkey"
+
+        // 2026-09-21 UTC; dates render through the default locale (Robolectric: en-US).
+        const val NOW_WALL_MS = 1_790_000_000_000L
+        const val DAY_MS = 24L * 60 * 60 * 1000
+        const val PAIRING_EXPIRES_AT_ELAPSED_MS = 95_000L
+        val runningTailnet =
+            TailnetStatus(
+                backendState = "Running",
+                tailscaleIPs = listOf("100.101.12.7", "fd7a:115c:a1e0::3601:c07"),
+                dnsName = "bootleg.example-tailnet.ts.net.",
+            )
         val store = StoragePaths.STORE_MEDIA_DIR
         val drivesJournal =
             Journal(
@@ -230,6 +330,36 @@ class ScreenshotTest {
                     createdAtMs = 1,
                 ),
             )
+    }
+
+    private object NoRemoteActions : RemoteActions {
+        override fun setEnabled(enabled: Boolean) = Unit
+
+        override fun approve(
+            nodeId: String,
+            allowRw: Boolean,
+        ) = Unit
+
+        override fun deny(nodeId: String) = Unit
+
+        override fun revoke(principal: Principal) = Unit
+
+        override fun setAllowRw(
+            principal: Principal,
+            allowRw: Boolean,
+        ) = Unit
+
+        override fun startHotspot() = Unit
+
+        override fun stopHotspot() = Unit
+
+        override fun enablePairing() = Unit
+
+        override fun disablePairing() = Unit
+
+        override fun resetPairingLockout() = Unit
+
+        override fun refreshPermissions() = Unit
     }
 
     private object NoHttp : Http {

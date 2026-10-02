@@ -139,6 +139,12 @@ class BootlegBackendImpl(
 
     suspend fun grantSelfStorage(): Boolean = call { it.grantSelfStorage() }
 
+    suspend fun setKeepAwake(
+        stayOnWhilePluggedIn: Int,
+        lowLatency: Boolean,
+        wakeScreen: Boolean,
+    ) = call { it.setKeepAwake(stayOnWhilePluggedIn, lowLatency, wakeScreen) }
+
     suspend fun refreshGadget() {
         val (state, journal) =
             call {

@@ -23,6 +23,8 @@ import dev.jacobhayes.bootleg.core.hid.MouseReport
 import dev.jacobhayes.bootleg.core.hid.TextTyper
 import dev.jacobhayes.bootleg.core.hid.TouchpadAction
 import dev.jacobhayes.bootleg.core.hid.UsLayout
+import dev.jacobhayes.bootleg.core.remote.HidPort
+import dev.jacobhayes.bootleg.core.remote.HidSendResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -41,6 +43,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** A long-running HID action (paste-as-typing, boot keys) with progress, one at a time. */
 data class HidJobProgress(
@@ -73,7 +76,15 @@ class HidController(
     private val sessionScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
     private val enableMutex = Mutex()
 
-    private var session: HidSession? = null
+    // Written on the main thread; the remote port reads it from the remote actor's thread.
+    @Volatile private var session: HidSession? = null
+    private val remoteConnectRequested = AtomicBoolean(false)
+
+    /**
+     * While Remote is on the session stays open when the app goes to the background (remote input
+     * needs it); backgrounding then only releases everything.
+     */
+    @Volatile var keepSessionInBackground: Boolean = false
     private var sessionWatchers: Job? = null
     private var activeJob: Job? = null
 
@@ -271,8 +282,47 @@ class HidController(
 
     fun onBackground() {
         cancelJob()
-        scope.launch { stopSession() }
+        if (keepSessionInBackground) {
+            session?.releaseAll()
+        } else {
+            scope.launch { stopSession() }
+        }
     }
+
+    /**
+     * The remote controller's view of the HID session. Nonblocking and callable from any thread. A
+     * report while no session is open asks the main thread to open one and reports UNAVAILABLE (the
+     * controller then waits for the owed release-all before taking more input).
+     */
+    val remotePort: HidPort =
+        object : HidPort {
+            override val releaseOwed: Boolean get() = session?.releaseOwed ?: false
+
+            override fun send(
+                kind: HidKind,
+                report: ByteArray,
+            ): HidSendResult {
+                val active = session
+                if (active == null || kind !in active.kinds || !active.isRunning) {
+                    if (remoteConnectRequested.compareAndSet(false, true)) {
+                        scope.launch {
+                            remoteConnectRequested.set(false)
+                            ensureSession()
+                        }
+                    }
+                    return HidSendResult.UNAVAILABLE
+                }
+                return when (active.offer(kind, report)) {
+                    HidOffer.ACCEPTED -> HidSendResult.ACCEPTED
+                    HidOffer.QUEUE_FULL -> HidSendResult.QUEUE_FULL
+                    HidOffer.UNAVAILABLE -> HidSendResult.UNAVAILABLE
+                }
+            }
+
+            override fun releaseAll() {
+                session?.releaseAll()
+            }
+        }
 
     private fun startJob(
         label: String,
