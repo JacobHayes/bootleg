@@ -12,8 +12,8 @@ ANDROID_SDK_ROOT = "{{config_root}}/.android-sdk"
 lockfile = true
 
 [tasks.check]
-description = "L0-L2: lint, compile (warnings as errors), unit + property + simulation tests"
-run = "./gradlew --console=plain -q ktlintCheck :core:test :app:testDebugUnitTest :app:assembleDebug"
+description = "L0-L2: lint, compile (warnings as errors), unit + property + simulation tests, UI screenshot goldens"
+run = "./gradlew --console=plain -q ktlintCheck :core:test :app:verifyRoborazziDebug :app:assembleDebug"
 
 [tasks."check:catalog"]
 description = "L3: live catalog smoke test against every distro (network)"
@@ -41,6 +41,10 @@ wait "$catalog" || catalog_status=$?
 [tasks.deploy]
 description = "Install the debug app on the phone and pre-grant root + storage access"
 run = ["./gradlew --console=plain -q :app:installDebug", "sh scripts/grant-root.sh"]
+
+[tasks."screenshots:record"]
+description = "Re-record the UI screenshot goldens in app/src/test/screenshots (look at the diff before committing)"
+run = "./gradlew --console=plain -q :app:recordRoborazziDebug --tests '*ScreenshotTest*'"
 
 [tasks.format]
 description = "Auto-format Kotlin sources"

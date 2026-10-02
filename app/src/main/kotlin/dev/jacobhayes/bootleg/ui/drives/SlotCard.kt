@@ -20,7 +20,6 @@ import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.SdStorage
 import androidx.compose.material3.AssistChip
-import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
@@ -40,7 +39,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.jacobhayes.bootleg.ImageFile
@@ -111,6 +109,8 @@ fun SlotCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(slot.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    // In the header, not the action row: there a chip next to the mode and button is squeezed to "…".
+                    StatusText(status)
                 }
                 SlotOverflowMenu(
                     canEject = status.kind == SlotStatusKind.EXPORTED && !busy,
@@ -126,7 +126,6 @@ fun SlotCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ModeChip(slot, onModeChange)
-                StatusChip(status, Modifier.weight(1f, fill = false))
                 Spacer(Modifier.weight(1f))
                 if (status.kind == SlotStatusKind.EXPORTED) {
                     FilledTonalButton(onClick = onEject, enabled = !busy) {
@@ -232,25 +231,16 @@ private fun ModeChip(
 }
 
 @Composable
-private fun StatusChip(
-    status: SlotStatus,
-    modifier: Modifier = Modifier,
-) {
+private fun StatusText(status: SlotStatus) {
     val colors = MaterialTheme.colorScheme
-    val (container, content) =
+    val color =
         when (status.kind) {
-            SlotStatusKind.EXPORTED -> colors.primaryContainer to colors.onPrimaryContainer
-            SlotStatusKind.EJECTED -> colors.surfaceVariant to colors.onSurfaceVariant
-            SlotStatusKind.FAILED -> colors.errorContainer to colors.onErrorContainer
-            SlotStatusKind.PENDING -> colors.secondaryContainer to colors.onSecondaryContainer
+            SlotStatusKind.EXPORTED -> colors.primary
+            SlotStatusKind.EJECTED -> colors.onSurfaceVariant
+            SlotStatusKind.FAILED -> colors.error
+            SlotStatusKind.PENDING -> colors.tertiary
         }
-    AssistChip(
-        onClick = {},
-        label = { Text(status.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        modifier = modifier,
-        colors = AssistChipDefaults.assistChipColors(containerColor = container, labelColor = content),
-        border = AssistChipDefaults.assistChipBorder(enabled = true, borderColor = Color.Transparent),
-    )
+    Text(status.label, style = MaterialTheme.typography.labelLarge, color = color, maxLines = 3, overflow = TextOverflow.Ellipsis)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -26,12 +27,21 @@ android {
         buildConfig = true
     }
     testOptions {
-        unitTests.all { it.useJUnitPlatform() }
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            it.useJUnitPlatform()
+            // Robolectric's FileDescriptor shim reaches into JDK internals.
+            it.jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED", "--add-opens=java.base/java.io=ALL-UNNAMED")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
     }
+}
+
+roborazzi {
+    outputDir.set(file("src/test/screenshots"))
 }
 
 kotlin {
@@ -57,4 +67,10 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.coroutines.test)
     testRuntimeOnly(libs.junit.launcher)
+    // Screenshot tests: Robolectric + Roborazzi run on JUnit 4 through the vintage engine.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.compose.ui.test.junit4)
+    testRuntimeOnly(libs.junit.vintage)
 }

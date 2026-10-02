@@ -53,29 +53,34 @@ fun ImageCard(
     onVerify: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    // Name and details get the full width; the action sits on its own row so long file names don't wrap mid-word.
     ElevatedCard(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                if (StoragePaths.autoMode(image.path) == LunMode.CDROM) Icons.Outlined.Album else Icons.Outlined.SdStorage,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.weight(1f)) {
-                Text(image.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    sizeLine(image),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Column(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (StoragePaths.autoMode(image.path) == LunMode.CDROM) Icons.Outlined.Album else Icons.Outlined.SdStorage,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
                 )
-                if (image.verifiedSha256 != null) VerifiedBadge()
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(image.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        sizeLine(image),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                ImageOverflowMenu(verifying, canVerify, onVerify, onDelete)
             }
-            FilledTonalButton(onClick = onExpose) {
-                Icon(Icons.Outlined.Usb, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Expose")
+            Row(Modifier.padding(start = 40.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { if (image.verifiedSha256 != null) VerifiedBadge() }
+                FilledTonalButton(onClick = onExpose) {
+                    Icon(Icons.Outlined.Usb, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Expose")
+                }
             }
-            ImageOverflowMenu(verifying, canVerify, onVerify, onDelete)
         }
     }
 }

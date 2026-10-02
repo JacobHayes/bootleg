@@ -27,13 +27,18 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
 
 | Task | Rungs | What |
 |---|---|---|
-| `mise run check` | L0–L2 | ktlint, compile with warnings as errors, unit + property + deterministic gadget simulation (offline) |
+| `mise run check` | L0–L2 | ktlint, compile with warnings as errors, unit + property + deterministic gadget simulation, UI screenshot goldens (offline) |
 | `mise run check:catalog` | L3 | live distro metadata/checksum/URL smoke test (network) |
-| `mise run check:device` | L4 | real phone end to end (local only, not CI) |
-| `mise run check:all` | L0–L4 | everything |
+| `mise run check:device` | L4 | real phone end to end, `scripts/check-device.sh` (local only, not CI; takes the device lock) |
+| `mise run check:all` | L0–L4 | `check`, then `check:catalog` and `check:device` in parallel |
 | `mise run fixtures:refresh` | | re-record catalog fixtures; review the diff before committing |
+| `mise run screenshots:record` | | re-record UI goldens (`app/src/test/screenshots/`); look at the PNGs before committing |
 | `mise run format` | | ktlint auto-fix |
 
+- UI changes: re-record the screenshot goldens and look at them (they render the screens against
+  `FakeBootlegBackend` with Robolectric, so no phone or unlock is needed).
+- L4 never exposes unformatted media (macOS shows a modal dialog), ejects on the Mac before the
+  phone drops a volume, and fails if DiskArbitration saw a mounted volume vanish.
 - Tests for network code are tagged `live` and stay out of the default run. Offline tests replay
   recorded fixtures.
 - A change isn't done until `mise run check` passes. Changes that touch the device run
