@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SystemRescue - Download</title>
+  <link rel="stylesheet" href="/system-rescue.css" type="text/css"/>
+  <meta name="generator" content="Hugo 0.140.2">
+  
+</head>
+
+<body>
+<div id="wrapper">
+    <div id="header">
+        <div id="toptitle">
+    <div id="head1">
+        <span id="head1logo">
+            <a href="https://www.system-rescue.org"><img src="/images/logo.png" alt="logo"/></a>
+        </span>
+    </div>
+</div>
+
+        <div id="topmenu">
+    <ul>
+        <li><a href="https://www.system-rescue.org/">Homepage</a></li>
+        <li><a href="https://forums.system-rescue.org">Forums</a></li>
+        <li><a href="/manual/">Manual</a></li>
+        <li><a href="/Books/">Book</a></li>
+        <li><a href="/disk-partitioning/">Disk&nbsp;Partitioning</a></li>
+        <li><a href="/lvm-guide-en/">LVM&nbsp;Guide</a></li>
+    </ul>
+</div>
+
+    </div>
+    <div id="contents">
+        <div id="colleft">
+    <h5>Site map</h5>
+      
+        <div><a href="/">Homepage</a></div>
+      
+      
+        <div><a href="/Download/">Download</a></div>
+      
+      
+        <div><a href="/Changes-x86/">ChangeLog</a></div>
+      
+      
+        <div><a href="/System-tools/">System tools</a></div>
+      
+      
+        <div><a href="/Installing-SystemRescue-on-a-USB-memory-stick/">Bootable USB</a></div>
+      
+      
+        <div><a href="/Detailed-packages-list/">Package list</a></div>
+      
+      
+        <div><a href="/Screenshots/">Screenshots</a></div>
+      
+      
+      
+        <div><a href="/Books/">Book</a></div>
+      
+      
+        <div><a href="/FAQ/">FAQ</a></div>
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+        <div><a href="/manual/Booting_SystemRescue/">Boot options</a></div>
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+    <hr/>
+    <div id="sponsors-left">
+    <hr>
+    <h5>Sponsors</h5>
+    <a href="https://www.fastly.com" target="_blank"><img src="/images/fastly_logo_large.png"
+         alt="fastly" width="90"/></a>
+    <br>
+    <a href="https://www.netcup.eu" target="_blank"><img src="/images/netcup_logo_large.png"
+         alt="netcup" width="90"/></a>
+</div>
+
+</div>
+
+        <div id="colcenter">
+            <h1>Download</h1>
+            <hr/>
+            
+            <h2 id="download-links">Download links</h2>
+<table>
+  <thead>
+      <tr>
+          <th style="text-align: center"></th>
+          <th style="text-align: center">SystemRescue 13.02 for amd64</th>
+      </tr>
+  </thead>
+  <tbody>
+      <tr>
+          <td style="text-align: center"><a href="https://sourceforge.net/"><img src="/images/sourceforge_logo_small.png" alt="Sourceforge"></a></td>
+          <td style="text-align: center">Download <a href="https://sourceforge.net/projects/systemrescuecd/files/sysresccd-x86/13.02/systemrescue-13.02-amd64.iso/download">systemrescue-13.02-amd64.iso</a> from Sourceforge</td>
+      </tr>
+      <tr>
+          <td style="text-align: center"><a href="https://www.fastly.com"><img src="/images/fastly_logo_small.png" alt="Fastly"></a></td>
+          <td style="text-align: center">Download <a href="https://fastly-cdn.system-rescue.org/releases/13.02/systemrescue-13.02-amd64.iso">systemrescue-13.02-amd64.iso</a> from Fastly</td>
+      </tr>
+      <tr>
+          <td style="text-align: center">Release details</td>
+          <td style="text-align: center">released on 2026-08-01 (1318 MiB)</td>
+      </tr>
+      <tr>
+          <td style="text-align: center">SHA256 checksum</td>
+          <td style="text-align: center"><a href="/releases/13.02/systemrescue-13.02-amd64.iso.sha256">systemrescue-13.02-amd64.iso.sha256</a></td>
+      </tr>
+      <tr>
+          <td style="text-align: center">SHA512 checksum</td>
+          <td style="text-align: center"><a href="/releases/13.02/systemrescue-13.02-amd64.iso.sha512">systemrescue-13.02-amd64.iso.sha512</a></td>
+      </tr>
+      <tr>
+          <td style="text-align: center">GnuPG Signature</td>
+          <td style="text-align: center"><a href="/releases/13.02/systemrescue-13.02-amd64.iso.asc">systemrescue-13.02-amd64.iso.asc</a></td>
+      </tr>
+  </tbody>
+</table>
+<h2 id="other-versions">Other versions</h2>
+<p>You can also download
+<a href="https://sourceforge.net/projects/systemrescuecd/files/sysresccd-x86/">previous versions</a>, or
+<a href="http://fastly-cdn.system-rescue.org/beta/">beta versions</a> if you want to have more recent
+versions of packages or to try the latest features. See here for
+<a href="/manual/Building_SystemRescue_from_Source/">Downloading and Building Sourcecode</a>.</p>
+<h2 id="applying-customizations">Applying customizations</h2>
+<p>Before you install SystemRescue on a boot device, you may want to apply your own
+customizations to the ISO image. This can be achieved easily through
+<a href="/scripts/sysrescue-customize/">sysrescue-customize</a>.</p>
+<h2 id="installation-on-a-usb-stick-or-internal-disk">Installation on a USB stick or internal disk</h2>
+<p>It is possible to use SystemRescue without having a DVD drive as it can be
+installed on <a href="/Installing-SystemRescue-on-a-USB-memory-stick/">USB sticks</a>,
+or on <a href="/manual/Installing_SystemRescue_on_the_disk/">a local disk</a>. In any
+case you will need to download the ISO image from the current page.</p>
+<h2 id="checking-the-downloaded-file">Checking the downloaded file</h2>
+<p>To confirm that the download was successful, you should download the checksum
+files and then run verification commands such as the following ones:</p>
+<pre tabindex="0"><code>sha256sum --check systemrescue-x.y.z.iso.sha256
+sha512sum --check systemrescue-x.y.z.iso.sha512
+</code></pre><p>These command will recalculate the checksum on the downloaded file, and compare
+it with the expected checksums. These checksum programs are part of
+<a href="https://www.gnu.org/software/coreutils/coreutils.html">coreutils</a>
+on Linux and should be pre-installed with most distributions.</p>
+<p>You can download <a href="http://www.labtestproject.com/files/sha256sum/sha256sum.exe">sha256sum.exe for windows</a>,
+and you can run the command from a cmd.exe terminal.</p>
+<h2 id="checking-the-signature">Checking the signature</h2>
+<p>You can also verify the signature of the ISO image using GnuPG. The signature
+is located in the ASC file named after the ISO image that you can get from the
+main download links at the top of this page. You will also need
+<a href="/security/signing-keys/gnupg-pubkey-fdupoux-20210704-v001.pem">the public signing key</a>.</p>
+<pre tabindex="0"><code>gpg --import gnupg-pubkey.txt
+gpg --verify systemrescue-x.y.z.iso.asc systemrescue-x.y.z.iso
+</code></pre><h2 id="errors-during-the-boot-process">Errors during the boot process</h2>
+<p>Various issues can cause SystemRescue to hangs or fail with unexpected errors
+during the boot process. Please do not report these as bugs unless you have
+verified the frequent causes of these issues:</p>
+<ul>
+<li>Boot medias such as DVD, and USB stick are often unreliable and bad
+blocks will cause problems. You can try another media to see if it makes a
+difference, and you can enable verification when you burn/copy the ISO image
+to make sure data written to the device can be read and match the original.</li>
+<li>Damaged RAM will cause all type of programs to behave unexpectedly. Computers
+memory can be tested using program such as memtest which is included with
+SystemRescue.</li>
+<li>You will also get problems if the system runs out of memory. So make sure your
+computers has at least 2GB of memory if you start with the default boot
+options or 4GB if you cache the system into RAM.</li>
+</ul>
+<h2 id="writing-the-iso-image-file-to-a-dvd">Writing the ISO image file to a DVD</h2>
+<p>On Linux you can use either command line tools such as cdrecord/wodim or
+graphical tools such as k3b, brasero or xfburn.</p>
+<h2 id="online-documentation">Online documentation</h2>
+<p><strong>Reading the <a href="/Quick_start_guide/">Quick Start Guide</a> is recommended</strong> if it
+is your first time using SystemRescue. You may also be interested in the
+<a href="/manual/">Complete documentation</a> for more details.</p>
+
+        </div>
+        <div id="colright">
+    <h5>Documentation</h5>
+<div><a href="/manual/">Manual&nbsp;(EN)</a></div>
+<div><a href="/lvm-guide-en/">LVM&nbsp;Guide</a></div>
+<div><a href="/disk-partitioning/">Disk&nbsp;partitioning</a></div>
+
+    <hr/>
+    <h5>Project</h5>
+<div><a href="https://gitlab.com/systemrescue/systemrescue-sources">Git&nbsp;repository</a></div>
+<div><a href="https://gitlab.com/systemrescue/systemrescue-website">Website&nbsp;sources</a></div>
+<div><a href="https://gitlab.com/systemrescue/systemrescue-sources/-/issues">Bug&nbsp;tracker</a></div>
+
+    <hr/>
+    
+</div>
+
+    </div>
+</div>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95cf4e85bb4c19e7a9bdbcba1788362987495" integrity="sha512-iIg7k2xntmwu6/uSb5tpc/hySgZc4eoL31yB29W6tJFo2akwjPWcEqnCEdJvGexCL0KEQwVYv5BlowfhVz26hg==" data-cf-beacon='{"version":"2024.11.0","token":"90ac617715734ea5a6a5ba8df951ffef","r":1,"spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>
+

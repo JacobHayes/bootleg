@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proxmox ISO Downloads</title>
+    <style>
+        :root {
+            --primary: #E57000;
+            --bg-body: #f3f4f6;
+            --bg-card: #ffffff;
+            --bg-muted: #f9fafb;
+            --text-main: #1f2937;
+            --text-muted: #6b7280;
+            --border: #e5e7eb;
+            --border-hover: #d1d5db;
+            --radius: 2px;
+            --shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-body: #18181b;
+                --bg-card: #27272a;
+                --bg-muted: #3f3f46;
+                --text-main: #f4f4f5;
+                --text-muted: #a1a1aa;
+                --border: #3f3f46;
+                --border-hover: #52525b;
+            }
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: var(--bg-body);
+            color: var(--text-main);
+            line-height: 1.5;
+            padding: 2rem 1rem;
+        }
+
+        .container { max-width: 900px; margin: 0 auto; }
+
+        header { text-align: center; margin-bottom: 3rem; }
+
+        /* Logo Link Styles */
+        header a { display: inline-block; text-decoration: none; }
+        header svg { height: 75px; width: auto; max-width: 100%; vertical-align: middle; }
+
+        /* Dynamic SVG coloring */
+        header svg path { fill: var(--text-main) !important; }
+        header svg .st0 { fill: var(--primary) !important; }
+
+        h2 {
+            font-size: 1.5rem; font-weight: 600;
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 0.5rem; margin: 2rem 0 1rem;
+        }
+        /* Announces a further architecture; everything below it belongs to that
+           one until the next divider. */
+        .arch-divider {
+            display: flex; align-items: center; gap: 1rem;
+            margin: 3.5rem 0 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.875rem; font-weight: 600;
+            letter-spacing: 0.08em; text-transform: uppercase;
+        }
+        .arch-divider::before, .arch-divider::after {
+            content: ""; flex: 1; height: 1px; background: var(--border);
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .info { flex: 1; min-width: 0; }
+        .filename { font-weight: 600; font-size: 1.1rem; display: block; word-break: break-all; }
+
+        .meta {
+            color: var(--text-muted); font-size: 0.875rem;
+            display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-top: 0.25rem;
+        }
+
+        .hash {
+            font-family: monospace;
+            background: var(--bg-muted);
+            padding: 0.1rem 0.4rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            font-size: 0.75rem;
+            word-break: break-all;
+            color: var(--text-main);
+        }
+        .actions {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            min-width: 260px;
+            flex-shrink: 0;
+        }
+        .btn-group {
+            display: flex;
+            gap: 0.5rem;
+            width: 100%;
+        }
+        .btn {
+            display: inline-flex; justify-content: center; align-items: center;
+            padding: 0.5rem 1rem; border-radius: var(--radius);
+            text-decoration: none; font-weight: 500; font-size: 0.875rem;
+            transition: 0.2s; border: 1px solid transparent; cursor: pointer;
+        }
+        .btn-primary {
+            background: var(--primary);
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 700;
+            width: 100%;
+        }
+        .btn-primary:hover { filter: brightness(110%); }
+        .btn-sec {
+            background: transparent; border-color: var(--border-hover);
+            color: var(--text-main);
+            padding: 0.4rem; font-size: 0.7rem;
+            flex: 1;
+            text-align: center;
+        }
+        .btn-sec:hover { background: var(--bg-muted); border-color: var(--text-muted); }
+
+        /* Collapse / Details Styles */
+        details { width: 100%; margin-top: 0.5rem; }
+        summary {
+            list-style: none;
+            cursor: pointer;
+            text-align: center;
+            padding: 0.4rem; /* Reduced height */
+            color: var(--text-muted);
+            font-size: 0.8rem; /* Slightly smaller text */
+            font-weight: 500;
+            border: 1px dashed var(--border);
+            border-radius: var(--radius);
+            margin-bottom: 1rem;
+            user-select: none;
+            transition: all 0.2s;
+        }
+        summary:hover {
+            background-color: var(--bg-muted);
+            color: var(--text-main);
+            border-color: var(--text-muted);
+        }
+        summary::-webkit-details-marker { display: none; }
+        summary::after { content: " ↓"; }
+        details[open] summary::after { content: " ↑"; }
+
+        /* Verify-info section */
+        .verify-info { margin-top: 3rem; }
+        .verify-info > summary { text-align: left; padding: 0.6rem 0.8rem; font-weight: 600; }
+        .verify-info .body {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.25rem;
+            margin-top: 0.5rem;
+        }
+        .verify-info h3 {
+            font-size: 1rem; font-weight: 600;
+            margin: 1.25rem 0 0.5rem;
+        }
+        .verify-info h3:first-of-type { margin-top: 0; }
+        .verify-info p { margin-bottom: 0.5rem; color: var(--text-main); }
+        .verify-info ul { margin: 0 0 0.5rem 1.25rem; }
+        .verify-info code {
+            font-family: monospace; font-size: 0.85rem;
+            background: var(--bg-muted); padding: 0.05rem 0.3rem;
+            border-radius: var(--radius);
+        }
+        .verify-info pre {
+            background: var(--bg-muted);
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius);
+            font-family: monospace; font-size: 0.85rem;
+            overflow-x: auto;
+            color: var(--text-main);
+        }
+
+        /* Desktop Layout */
+        @media (min-width: 768px) {
+            .card { flex-direction: row; align-items: center; justify-content: space-between; }
+            .actions { align-items: flex-end; }
+        }
+
+        footer { text-align: center; margin-top: 4rem; color: var(--text-muted); font-size: 0.875rem; }
+    </style>
+</head>
+<body>
+    
+    
+
+    <div class="container">
+        <header>
+            <a href="https://www.proxmox.com">  <svg class="logo" version="1.1" viewBox="0 0 384 64" xmlns="http://www.w3.org/2000/svg">
+    <style type="text/css">path { fill: #000; } .st0 { fill:#E57000; }</style>
+    <g transform="matrix(.65882 0 0 .65882 -12.696 -13.986)"><g id="_x31_">
+      <path class="st0" d="m100.6 69.8 24.9 27.3c-2.7 2.8-6.6 4.6-10.7 4.6s-8.4-1.9-11.1-4.9l-13.7-15.1-10.7-11.8 10.7-11.7 13.7-15.1c2.7-3 6.6-4.9 11.1-4.9s8 1.7 10.7 4.5l-24.9 27.3z"/>
+      <path class="st0" d="m52.1 69.8-24.9 27.3c2.7 2.8 6.6 4.6 10.7 4.6s8.4-1.9 11.1-4.9l13.7-15.1 10.7-11.8-10.7-11.7-13.7-15.1c-2.7-3-6.6-4.9-11.1-4.9s-8 1.7-10.7 4.5l24.9 27.3z"/>
+      <path d="m86.2 83.3-9.8-10.8-9.8 10.8-22.7 24.9c2.5 2.5 6 4.1 9.8 4.1s7.5-1.7 10.1-4.5l12.6-13.8 12.5 13.8c2.5 2.7 6.1 4.5 10.1 4.5s7.3-1.6 9.8-4.1l-22.7-24.9z"/>
+      <path d="m86.2 56.3-9.8 10.8-9.8-10.8-22.7-24.9c2.5-2.5 6-4.1 9.8-4.1s7.5 1.7 10.1 4.5l12.6 13.8 12.5-13.8c2.5-2.7 6.1-4.5 10.1-4.5s7.3 1.6 9.8 4.1l-22.7 24.9z"/>
+      <path d="m176.5 71.5c3.4 0 3.4-3.4 3.4-3.4v-8.5c0-3.4-3.4-3.4-3.4-3.4h-23.9v15.3zm17.1-15.3v13.6c0 7.6-6.2 13.6-13.7 13.6h-27.3c0 7.6-6.1 13.6-13.6 13.6v-49.4c0-2.8 2.3-5.1 5.1-5.1h35.8c7.6 0 13.7 6.2 13.7 13.7"/>
+      <path d="m238.9 68.1c3.4 0 3.4-3.4 3.4-3.4v-5.1c0-3.4-3.4-3.4-3.4-3.4h-23.8v11.8zm6.1 11.8 11 15.7c-1.9 1-4.1 1.6-6.3 1.6-4.7 0-8.7-2.3-11.2-5.8l-7.9-11.2h-15.5v3.4c0 7.6-6.2 13.6-13.7 13.6v-49.4c0-2.8 2.3-5.1 5.1-5.1h35.8c7.6 0 13.7 6.2 13.7 13.7v10.2c0 6.6-4.8 12.2-11 13.3"/>
+      <path d="m304.6 59.6c0-3.4-3.4-3.4-3.4-3.4h-20.4c-3.4 0-3.4 3.4-3.4 3.4v20.4c0 3.4 3.4 3.4 3.4 3.4h20.4c3.4 0 3.4-3.4 3.4-3.4zm13.7-3.4v27.2c0 7.6-6.1 13.6-13.7 13.6h-27.2c-7.6 0-13.7-6.1-13.7-13.6v-27.2c0-7.6 6.1-13.7 13.7-13.7h27.2c7.6 0 13.7 6.2 13.7 13.7"/>
+      <path class="st0" d="m365.8 69.8 21.3 23.4c-2.3 2.4-5.6 3.9-9.2 3.9s-7.2-1.6-9.5-4.2l-11.8-12.9-11.8 12.9c-2.3 2.6-5.8 4.2-9.5 4.2s-6.9-1.5-9.2-3.9l21.3-23.4-21.3-23.4c2.3-2.3 5.6-3.8 9.2-3.8s7 1.6 9.4 4.2l11.9 12.9 11.8-12.9c2.3-2.6 5.7-4.2 9.5-4.2s6.9 1.5 9.2 3.8z"/>
+      <path d="m463.1 47.7v49.4c-7.5 0-13.7-6.1-13.7-13.6v-26.1c0-0.7-0.5-1.2-1.1-1.2s-0.9 0.3-1.1 0.6l-15.1 33.4c-0.6 1.2-1.8 1.9-3.1 1.9s-2.6-0.9-3.1-2l-15.1-33.4c-0.2-0.3-0.6-0.6-1-0.6-0.7 0-1.2 0.5-1.2 1.2v26.1c0 7.6-6.2 13.6-13.7 13.6v-49.4c0-2.8 2.3-5.1 5.1-5.1h8.5c5.5 0 10.4 3.4 12.5 8.2v-0.2l8 17.6 8-17.6v0.2c2.1-4.8 6.9-8.2 12.4-8.2h8.6c2.8 0 5.1 2.3 5.1 5.2"/>
+      <path d="m511.7 59.6c0-3.4-3.4-3.4-3.4-3.4h-20.4c-3.4 0-3.4 3.4-3.4 3.4v20.4c0 3.4 3.4 3.4 3.4 3.4h20.4c3.4 0 3.4-3.4 3.4-3.4zm13.7-3.4v27.2c0 7.6-6.1 13.6-13.7 13.6h-27.2c-7.6 0-13.7-6.1-13.7-13.6v-27.2c0-7.6 6.1-13.7 13.7-13.7h27.2c7.6 0 13.7 6.2 13.7 13.7"/>
+      <path class="st0" d="m572.9 69.8 21.3 23.4c-2.3 2.4-5.6 3.9-9.2 3.9s-7.2-1.6-9.5-4.2l-11.8-12.9-11.8 12.9c-2.3 2.6-5.8 4.2-9.5 4.2s-6.9-1.5-9.2-3.9l21.3-23.4-21.3-23.4c2.3-2.3 5.6-3.8 9.2-3.8s7 1.6 9.4 4.2l11.9 12.9 11.8-12.9c2.3-2.6 5.7-4.2 9.5-4.2s6.9 1.5 9.2 3.8z"/>
+    </g></g>
+</svg></a>
+        </header>
+        <main>
+            
+            
+            <div class="group">
+                <h2>Proxmox Virtual Environment</h2>
+                
+                    
+                    
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-ve_9.2-1.iso</span>
+            <div class="meta">
+                <span>1.6G</span><span>2026-05-21</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-ve_9.2-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-ve_9.2-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-ve_9.2-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-ve_9.2-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+
+                    
+                    
+                    <details>
+                        <summary>Show 3 older versions</summary>
+                        
+                            
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-ve_9.1-1.iso</span>
+            <div class="meta">
+                <span>1.7G</span><span>2025-11-19</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 6d8f5afc78c0c66812d7272cde7c8b98be7eb54401ceb045400db05eb5ae6d22</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-ve_9.1-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-ve_9.1-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-ve_9.1-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-ve_9.1-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+                        
+                            
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-ve_8.4-1.iso</span>
+            <div class="meta">
+                <span>1.5G</span><span>2025-04-09</span>
+                <span class="hash" title="SHA256 Hash">SHA256: d237d70ca48a9f6eb47f95fd4fd337722c3f69f8106393844d027d28c26523d8</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-ve_8.4-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-ve_8.4-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-ve_8.4-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-ve_8.4-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+                        
+                            
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-ve_7.4-1.iso</span>
+            <div class="meta">
+                <span>1.0G</span><span>2023-03-23</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 55b672c4b0d2bdcbff9910eea43df3b269aaab3f23e7a1df18b82d92eb995916</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-ve_7.4-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-ve_7.4-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-ve_7.4-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-ve_7.4-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+                        
+                    </details>
+                    
+                
+            </div>
+            
+            
+            <div class="group">
+                <h2>Proxmox Backup Server</h2>
+                
+                    
+                    
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-backup-server_4.2-1.iso</span>
+            <div class="meta">
+                <span>1.4G</span><span>2026-04-28</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 2fb299deac3929253712c9c3dfc9237edbe70af83c8848467616b771a1d5453e</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-backup-server_4.2-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-backup-server_4.2-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-backup-server_4.2-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-backup-server_4.2-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+
+                    
+                    
+                    <details>
+                        <summary>Show 3 older versions</summary>
+                        
+                            
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-backup-server_4.1-1.iso</span>
+            <div class="meta">
+                <span>1.4G</span><span>2025-11-26</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 670f0a71ee25e00cc7839bebb3f399594f5257e49a224a91ce517460e7ab171e</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-backup-server_4.1-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-backup-server_4.1-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-backup-server_4.1-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-backup-server_4.1-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+                        
+                            
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-backup-server_3.4-1.iso</span>
+            <div class="meta">
+                <span>1.2G</span><span>2025-04-10</span>
+                <span class="hash" title="SHA256 Hash">SHA256: ed4777f570f2589843765fff9e942288ff16a6cc3728655733899188479b7e08</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-backup-server_3.4-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-backup-server_3.4-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-backup-server_3.4-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-backup-server_3.4-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+                        
+                            
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-backup-server_2.4-1.iso</span>
+            <div class="meta">
+                <span>822M</span><span>2023-03-29</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 721e21a88ae93dba73ca3e4a494b438190acadb99993ec755a19e721a86f0395</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-backup-server_2.4-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-backup-server_2.4-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-backup-server_2.4-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-backup-server_2.4-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+                        
+                    </details>
+                    
+                
+            </div>
+            
+            
+            <div class="group">
+                <h2>Proxmox Mail Gateway</h2>
+                
+                    
+                    
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-mail-gateway_9.1-1.iso</span>
+            <div class="meta">
+                <span>1.6G</span><span>2026-06-10</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 79402f6398c50a76fca66a32c3c0a50da3f71d35c1d7a1bea022e4b1c6c864d6</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-mail-gateway_9.1-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-mail-gateway_9.1-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-mail-gateway_9.1-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-mail-gateway_9.1-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+
+                    
+                    
+                    <details>
+                        <summary>Show 3 older versions</summary>
+                        
+                            
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-mail-gateway_9.0-1.iso</span>
+            <div class="meta">
+                <span>1.5G</span><span>2025-10-01</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 23bf1e50bba06f6f850360740c0388462b921b414d2e4f3ea859e5150f498c8e</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-mail-gateway_9.0-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-mail-gateway_9.0-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-mail-gateway_9.0-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-mail-gateway_9.0-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+                        
+                            
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-mail-gateway_8.2-1.iso</span>
+            <div class="meta">
+                <span>1.5G</span><span>2025-02-27</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 2a348db5bf588450d1d47a8746d3713efc390c7fe1fc5ddf379045542999b549</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-mail-gateway_8.2-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-mail-gateway_8.2-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-mail-gateway_8.2-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-mail-gateway_8.2-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+                        
+                            
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-mailgateway_7.3-1.iso</span>
+            <div class="meta">
+                <span>1.1G</span><span>2023-03-28</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 9085684327fc36d8006b7160d34733e916300a0ad6bf498ea83cfb901fc2d9d4</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-mailgateway_7.3-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-mailgateway_7.3-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-mailgateway_7.3-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-mailgateway_7.3-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+                        
+                    </details>
+                    
+                
+            </div>
+            
+            
+            <div class="group">
+                <h2>Proxmox Datacenter Manager</h2>
+                
+                    
+                    
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-datacenter-manager_1.1-1.iso</span>
+            <div class="meta">
+                <span>1.4G</span><span>2026-05-27</span>
+                <span class="hash" title="SHA256 Hash">SHA256: 11a55a069ba564220bd986241b57920a83781d40be18d6f2bf7b9b12696ae2cc</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-datacenter-manager_1.1-1.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-datacenter-manager_1.1-1.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-datacenter-manager_1.1-1.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-datacenter-manager_1.1-1.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+
+                    
+                    
+                    <details>
+                        <summary>Show 1 older versions</summary>
+                        
+                            
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-datacenter-manager_1.0-2.iso</span>
+            <div class="meta">
+                <span>1.4G</span><span>2025-12-11</span>
+                <span class="hash" title="SHA256 Hash">SHA256: b4b98ed3e8f4dabb1151ebb713d6e7109aeba00d95b88bf65f954dd9ef1e89e1</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-datacenter-manager_1.0-2.iso" class="btn btn-primary" download>Download ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-datacenter-manager_1.0-2.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-datacenter-manager_1.0-2.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-datacenter-manager_1.0-2.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+                        
+                    </details>
+                    
+                
+            </div>
+            
+            
+            <div class="arch-divider">ARM64</div>
+            
+            <div class="group">
+                <h2>Proxmox Virtual Environment</h2>
+                
+                    
+                    
+    <div class="card">
+        <div class="info">
+            <span class="filename">proxmox-ve_9.2-1-arm64.iso</span>
+            <div class="meta">
+                <span>1.5G</span><span>2026-08-04</span>
+                <span class="hash" title="SHA256 Hash">SHA256: b1619dcd1f5b1a6d67d77b59e7e2fa2033174551d1e1b9dc22b2171ec093abbd</span>
+            </div>
+        </div>
+        <div class="actions">
+            <a href="./proxmox-ve_9.2-1-arm64.iso" class="btn btn-primary" download>Download ARM64 ISO</a>
+            <div class="btn-group">
+                <a href="./proxmox-ve_9.2-1-arm64.iso.torrent" class="btn btn-sec" download title="Download Torrent">TORRENT</a>
+                <a href="./proxmox-ve_9.2-1-arm64.iso.sha256" class="btn btn-sec" download title="Download Checksum">CHECKSUM</a>
+                <a href="./proxmox-ve_9.2-1-arm64.iso.asc" class="btn btn-sec" download title="Download Signature">SIGNATURE</a>
+            </div>
+        </div>
+    </div>
+    
+
+                    
+                    
+                
+            </div>
+            
+        </main>
+
+        
+        
+        
+        
+        <details id="verify" class="verify-info">
+            <summary>How to verify a downloaded ISO</summary>
+            <div class="body">
+                <p>Each ISO ships with a detached OpenPGP signature
+                (<code>.asc</code>) signed by the matching release key.
+                Examples below use <code>proxmox-ve_9.2-1.iso</code>; substitute
+                the filename you downloaded.</p>
+
+                <h3>Fetch the release key</h3>
+                <p>Release keys are published at
+                <a href="https://enterprise.proxmox.com/debian/">enterprise.proxmox.com/debian/</a>
+                (not on public keyservers). Pick the one matching the ISO's
+                release:</p>
+                <pre>wget https://enterprise.proxmox.com/debian/proxmox-release-trixie.gpg</pre>
+                <p>Display the fetched key's fingerprint and confirm it
+                matches the value listed below before trusting it for any
+                verification step:</p>
+                <pre>gpg --show-keys ./proxmox-release-trixie.gpg</pre>
+                <ul>
+                
+                    <li>
+                        <strong>trixie</strong>
+                            (current):
+                        <code>24B30F06ECC1836A4E5EFECBA7BCD1420BFE778E</code>
+                    </li>
+                
+                    <li>
+                        <strong>bookworm</strong>
+                            (previous):
+                        <code>F4E136C67CDCE41AE6DE6FC81140AF8F639E0C39</code>
+                    </li>
+                
+                </ul>
+
+                <h3>Verify the signature</h3>
+                <p>GnuPG (<code>gpgv</code> needs no keyring import):</p>
+                <pre>gpgv --keyring ./proxmox-release-trixie.gpg \
+     proxmox-ve_9.2-1.iso.asc proxmox-ve_9.2-1.iso</pre>
+                <p>Sequoia (<code>sq</code>):</p>
+                <pre>sq verify --signer-file ./proxmox-release-trixie.gpg \
+          --signature-file proxmox-ve_9.2-1.iso.asc proxmox-ve_9.2-1.iso</pre>
+
+                <h3>Auditing the whole directory</h3>
+                <p>The combined <code>SHA256SUMS</code> covers every ISO and
+                is signed by both release keys
+                in <code>SHA256SUMS.asc</code>:</p>
+                <pre>gpgv --keyring ./proxmox-release-trixie.gpg \
+     SHA256SUMS.asc SHA256SUMS &amp;&amp; sha256sum -c SHA256SUMS</pre>
+                
+                <p>Clients still pinned to the previous release key
+                (bookworm) can use the standalone
+                signature:</p>
+                <pre>gpgv --keyring ./proxmox-release-bookworm.gpg \
+     SHA256SUMS.bookworm-key.asc SHA256SUMS</pre>
+                
+            </div>
+        </details>
+        
+
+        <footer>
+            <p>&copy; Proxmox Server Solutions GmbH. All rights reserved.</p>
+        </footer>
+    </div>
+</body>
+</html>

@@ -1,0 +1,104 @@
+---
+-
+  title: "Mini root filesystem"
+  desc: |
+    Minimal root filesystem.
+    For use in containers
+    and minimal chroots.
+  branch: v3.24
+  arch: x86_64
+  version: 3.24.2
+  flavor: alpine-minirootfs
+  file: alpine-minirootfs-3.24.2-x86_64.tar.gz
+  iso: alpine-minirootfs-3.24.2-x86_64.tar.gz
+  date: 2026-09-17
+  time: 17:32:03
+  size: 3701382
+  sha256: c5ca053cfe1d85c5b96dff8b9bc57045f7f184a30ffb6b65776409ca90388677
+  sha512: bb1cbdc0395826774d8843736624c8ddc225a76de7d70e04444f5390c54986e14b2fa3ad0ca367dfa36dddfc8ebe1d2b4cbcf5cc9993e85badaf96104518f1fc
+-
+  title: "Netboot"
+  desc: |
+    Kernel, initramfs and modloop for
+    netboot.
+    
+  branch: v3.24
+  arch: x86_64
+  version: 3.24.2
+  flavor: alpine-netboot
+  file: alpine-netboot-3.24.2-x86_64.tar.gz
+  iso: alpine-netboot-3.24.2-x86_64.tar.gz
+  date: 2026-09-17
+  time: 17:33:57
+  size: 392497909
+  sha256: bbdd643360fac384a7933d8bebc7132eb720002e58d1321edcde4a5a3c3b83c6
+  sha512: 4fd25160e376b4350222005899bcf18b1a1bdedf1f7fa4703b5df335ae5ef11244ef5bf5fbce3ec8ca9f5ab5fd3b702bd41b3534c7e7b376a309e9b567676493
+-
+  title: "Standard"
+  desc: |
+    Alpine as it was intended.
+    Just enough to get you started.
+    Network connection is required.
+  branch: v3.24
+  arch: x86_64
+  version: 3.24.2
+  flavor: alpine-standard
+  file: alpine-standard-3.24.2-x86_64.iso
+  iso: alpine-standard-3.24.2-x86_64.iso
+  date: 2026-09-17
+  time: 17:35:44
+  size: 370147328
+  sha256: 20c026e3a788bfb75fc8b50a54bcc12aee85e3c75909740bba6a6f4563d63296
+  sha512: 013ab9e0780d2fb73975d6dae0cf6ddcbe7eb1531e535c1c6c78bb2cadefd2d8a8aca3fffe2aae5853f6d0ea5f23de2dadbc18559724317a1d6a74be8d452354
+-
+  title: "Extended"
+  desc: |
+    Most common used packages included.
+    Suitable for routers and servers.
+    Runs from RAM.
+    Includes AMD and Intel microcode updates.
+  branch: v3.24
+  arch: x86_64
+  version: 3.24.2
+  flavor: alpine-extended
+  file: alpine-extended-3.24.2-x86_64.iso
+  iso: alpine-extended-3.24.2-x86_64.iso
+  date: 2026-09-17
+  time: 17:37:56
+  size: 1456766976
+  sha256: a22115a46a1bcd876234a6cd43797fe19f4acfc4512fb41ea64e16cc2ffb4d90
+  sha512: dd44546b7797f68ffb940ea44352568cc9a1c419074b5eda661b8d12af81b7056665b9855e6ac2ebe8c2914a1b549b16f3d666be43799d86bee9183cd9b1ffca
+-
+  title: "Virtual"
+  desc: |
+    Similar to standard.
+    Slimmed down kernel.
+    Optimized for virtual systems.
+  branch: v3.24
+  arch: x86_64
+  version: 3.24.2
+  flavor: alpine-virt
+  file: alpine-virt-3.24.2-x86_64.iso
+  iso: alpine-virt-3.24.2-x86_64.iso
+  date: 2026-09-17
+  time: 17:38:33
+  size: 69206016
+  sha256: 3ab424762af704b2c2a9e57df1dc37f982af260071504d977f2fb96822e7130b
+  sha512: 7563011cefca3f84c77ddab032d47448216e1fc9b730b7d09be9cc26c8d5a69c1b75c9a404f5168654c76128fa231d83b248e24466d6c5dd2655696f44220aba
+-
+  title: "Xen"
+  desc: |
+    Built-in support for Xen Hypervisor.
+    Includes packages targetted at Xen usage.
+    Use for Xen Dom0.
+  branch: v3.24
+  arch: x86_64
+  version: 3.24.2
+  flavor: alpine-xen
+  file: alpine-xen-3.24.2-x86_64.iso
+  iso: alpine-xen-3.24.2-x86_64.iso
+  date: 2026-09-17
+  time: 17:40:51
+  size: 1528430592
+  sha256: f3c8afed17e50017e2919e3995a8ef42dcead5c7bad6889f0a4ef41bd6251dba
+  sha512: 4da399b383a2f2656366d1b90222584369d386b7aeed8c91880bd91eabb80e8b1560cf10c2a980fe0971513afd5d74e9223a3be0133bbc131c1a60b2b0a16bda

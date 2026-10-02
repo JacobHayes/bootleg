@@ -1,0 +1,31 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA256
+
+# AlmaLinux-10.2-aarch64-boot.iso: 1128263680 bytes
+SHA256 (AlmaLinux-10.2-aarch64-boot.iso) = 20807d65338627a0afa3d5fbd3bee222115d66ce34ac1e4647b0af8fc6c4aa23
+# AlmaLinux-10-latest-aarch64-boot.iso: 1128263680 bytes
+SHA256 (AlmaLinux-10-latest-aarch64-boot.iso) = 20807d65338627a0afa3d5fbd3bee222115d66ce34ac1e4647b0af8fc6c4aa23
+# AlmaLinux-10.2-aarch64-dvd.iso: 9588244480 bytes
+SHA256 (AlmaLinux-10.2-aarch64-dvd.iso) = bc3790b1200254790e03f1d941162a9f9082d46dcdff841b83f348501625b29e
+# AlmaLinux-10-latest-aarch64-dvd.iso: 9588244480 bytes
+SHA256 (AlmaLinux-10-latest-aarch64-dvd.iso) = bc3790b1200254790e03f1d941162a9f9082d46dcdff841b83f348501625b29e
+# AlmaLinux-10.2-aarch64-minimal.iso: 1657339904 bytes
+SHA256 (AlmaLinux-10.2-aarch64-minimal.iso) = ca5dd9b7e1193de5881df850a93b611c6ba0ba8c5860f54ee822c53585b3014d
+# AlmaLinux-10-latest-aarch64-minimal.iso: 1657339904 bytes
+SHA256 (AlmaLinux-10-latest-aarch64-minimal.iso) = ca5dd9b7e1193de5881df850a93b611c6ba0ba8c5860f54ee822c53585b3014d
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCAAdFiEE7m23uY9b9e3Z2g3l3uXBHMKh5XIFAmoSHHUACgkQ3uXBHMKh
+5XIN5Q//dIGt3tRw6WybeZDKjc2oTThfKljNDkDEbadI2Klp0b2A2TUt+I7NMdA1
+Zo0DTuTCxu8s0OOaXXW9eOIXripp3fBdelCECiBeXK4Q07wWU+ARdASga5DvUqga
+rJUyGSd+1+2OMex8gWfTXHX+W7lRKF/QfLS2hR+56CLrMOf00dxwfQWje8Ax+c6V
+8aidTNueCH+zGDnTUWmUyXEooRGpxUNqZ5XR8vE0mUmz955pvQvFyLpiJxTILmhk
+iynYibGqquKgiTsikDllK3MgnlaRsEfYpaTPMhMWZWxvJ5eCdFvKpixvZ4Ib5wmg
+w6Fk6SWWC73pfmlYr6oyI+sBhMA3Ellau0mA1LD7ywGCgDrGoHSs3qCNUrOT530u
+emEsp7YtRZ2JIJIMktB2W2lhAWtDxSki08C2CQ0rNy+YyEYjCfSFr8Zs8zk/QRcn
+Ton9FGNAu95L+CJa4gW1QhG51UqgEXKDN9sBjTYjJgM5ws+q8GhR6hj0zsBp8ttD
+P178yCbEMpFn5GIPV8lNTTBTFiYviTuMCSmSSwBBgxOVZnnyUWoSyT1jZ0ZajNgY
+XItHhNgQTIrOWMIlQpAY84i3wZLCGf3EFDk35no17ztyhFEYZ6a39XzvHcv6MdOX
+PCilP2jqlrDi/xPjKpDOvzlTVdg1J2642hP8tYGJqOHndn+tU8k=
+=4GLv
+-----END PGP SIGNATURE-----

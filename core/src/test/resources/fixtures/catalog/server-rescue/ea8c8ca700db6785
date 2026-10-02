@@ -1,0 +1,31 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA256
+
+# AlmaLinux-9.8-aarch64-boot.iso: 1458331648 bytes
+SHA256 (AlmaLinux-9.8-aarch64-boot.iso) = 144b4a6c0535dc393864c82238c96e196f703c1ba7ce0096551db517f55310dc
+# AlmaLinux-9-latest-aarch64-boot.iso: 1458331648 bytes
+SHA256 (AlmaLinux-9-latest-aarch64-boot.iso) = 144b4a6c0535dc393864c82238c96e196f703c1ba7ce0096551db517f55310dc
+# AlmaLinux-9.8-aarch64-dvd.iso: 13012508672 bytes
+SHA256 (AlmaLinux-9.8-aarch64-dvd.iso) = 916ec3ec8ceff4ea206daf1a030af77f811cdfcbef598c58639b6ddf39aeaf0f
+# AlmaLinux-9-latest-aarch64-dvd.iso: 13012508672 bytes
+SHA256 (AlmaLinux-9-latest-aarch64-dvd.iso) = 916ec3ec8ceff4ea206daf1a030af77f811cdfcbef598c58639b6ddf39aeaf0f
+# AlmaLinux-9.8-aarch64-minimal.iso: 2608277504 bytes
+SHA256 (AlmaLinux-9.8-aarch64-minimal.iso) = 08913740ab695c5f1003165c1d0e41c0615d0ffe4114ab92a8e13ae49fb691ac
+# AlmaLinux-9-latest-aarch64-minimal.iso: 2608277504 bytes
+SHA256 (AlmaLinux-9-latest-aarch64-minimal.iso) = 08913740ab695c5f1003165c1d0e41c0615d0ffe4114ab92a8e13ae49fb691ac
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCAAdFiEEvxisKHYXiQjW5xJn02y4bLhrNxYFAmoSp0IACgkQ02y4bLhr
+Nxbjnw//UF5dfWco0KxlabFdOo2F8Limw/JGV9Ki4MTP0cCSeJ2+MJIcHxGdUi9W
+QYt8CnpVOjprj+5KLgUb3IGpnGbDMrJ47Es0LUmKBYuj1OtrVQR5YHDpVXPoHgUe
+GVE7pAkBGGYRPZ6Tbl2IrpYARR7R2sE+kVmOMWz5jHaGjkIKuOf5f+LC3+7Ew9eV
+IKCo6/psnWWivKENshmNVV5zx1//RsVjh671A3Bpjk+XT0w8z820pTe7es/DWZmn
+f/50q48HxmrHb4sc6PGyOxvyLyvxHWsqvHClNr/3zoFmM4gxbO2dgPpgVWj+p8+4
+4IRLx+WqFycawWxBsoN/DxHdcfgeXO1ooNRy9T5r7X1xNAZBhTnqiLgymWH/+X6R
+11NYqBGnGarY29i6BfAh2J5Rk4dy1eYsbA2EneA36SjlGJkoZ5rFqZQydpeBM7wM
+QS+WLpbsXWQcfx1iLQ6gthiQ/CGAt2aX1xIDbW4Ul+xTdEew9UUtpgfrvyt3ihuP
+4w/ZhIE3FFv6+YVHwkQSYGYHzw023rdQaC0OTnpf2bk/JI//UUZhPD4ZUugDcLS5
+1eT+7jhcq1XPXWdIimLtXcd4jIwtc4y1jzJMUa0I8xmwTXTVRLWlkVMRWAGkXYDk
+fe0/9CjAX00wu6kk6Zt1jYYLhb0Bapr9pcE8YV+uT5X/rQlEWoo=
+=iwNG
+-----END PGP SIGNATURE-----
