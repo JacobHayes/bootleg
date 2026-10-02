@@ -12,8 +12,11 @@ ANDROID_SDK_ROOT = "{{config_root}}/.android-sdk"
 lockfile = true
 
 [tasks.check]
-description = "L0-L2: lint, compile (warnings as errors), unit + property + simulation tests, UI screenshot goldens"
-run = "./gradlew --console=plain -q ktlintCheck :core:test :app:verifyRoborazziDebug :app:assembleDebug"
+description = "L0-L2: lint, compile (warnings as errors), unit + property + simulation tests, UI screenshot goldens, Go remote tests"
+run = [
+  "./gradlew --console=plain -q ktlintCheck :core:test :app:verifyRoborazziDebug :app:assembleDebug",
+  "mise run remote:test",
+]
 
 [tasks."check:catalog"]
 description = "L3: live catalog smoke test against every distro (network)"
