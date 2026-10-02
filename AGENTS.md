@@ -31,7 +31,8 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
 | `mise run check:catalog` | L3 | live distro metadata/checksum/URL smoke test (network) |
 | `mise run check:device` | L4 | real phone end to end, `scripts/check-device.sh` (local only, not CI; takes the device lock) |
 | `mise run check:device:hid` | L4 | HID only: Mac enumerates keyboard + mouse, harmless input, off again (<30s) |
-| `mise run check:all` | L0–L4 | `check`, then `check:catalog` and `check:device` in parallel |
+| `mise run check:device:remote` | L4 | Remote: the real `bootleg` CLI over the tailnet (pending, approve, RO mount, harmless HID, revoke) |
+| `mise run check:all` | L0–L4 | `check`, then `check:catalog` in parallel with `check:device` and `check:device:remote` |
 | `mise run fixtures:refresh` | | re-record catalog fixtures; review the diff before committing |
 | `mise run screenshots:record` | | re-record UI goldens (`app/src/test/screenshots/`); look at the PNGs before committing |
 | `mise run format` | | ktlint auto-fix |

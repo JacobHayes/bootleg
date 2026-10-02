@@ -353,6 +353,10 @@ required for direct LAN paths and incoming hotspot connections. Log upload is of
   4. Release-all on the priority lane.
   5. New input is refused until the HidSession owed-release barrier clears.
 
+  That's the controller's state order. When a step's effects are dispatched, HID effects
+  (release-all first) go out before any transport or store call. If any port throws mid-step,
+  the actor releases HID, closes every session and fails closed.
+
   Release retries back off for up to 60s, then the session reports `release_pending` until the
   HID node reopens or HID is turned off. The host can't get a release while its USB is down
   (documented limit).
@@ -377,7 +381,8 @@ required for direct LAN paths and incoming hotspot connections. Log upload is of
     Browsers get a host-only HttpOnly SameSite=Strict cookie. The CLI keeps a 0600 file. Tokens
     never appear in logs or URLs.
   - **Ingress:** the listener binds the hotspot address. Each connection's local address must
-    equal it and its remote address must be in the hotspot subnet, or it's rejected. The
+    equal it and its remote address must be in the hotspot subnet and not the phone's own
+    hotspot address (a local app looping back through the hotspot IP), or it's rejected. The
     reservation ending closes the listener and its sessions.
   - **Accepted risk (no TLS):** a malicious hotspot participant could sniff a token over plain
     HTTP.
@@ -386,12 +391,19 @@ required for direct LAN paths and incoming hotspot connections. Log upload is of
   - A missing Origin is allowed only for non-browser clients that authenticate by WhoIs or
     bearer token, and cookies are ignored on that path. The one exception is the CLI's first
     `/pair`, which goes through the enabled, code-authenticated, globally limited bootstrap.
-  - No CORS. CSP `default-src 'self'; frame-ancestors 'none'` and `X-Frame-Options: DENY`.
+  - No CORS. CSP `default-src 'self'; connect-src 'self' ws://<host>; frame-ancestors 'none'`
+    (older Safari doesn't let `'self'` cover `ws:`; `<host>` is the already-checked Host) and
+    `X-Frame-Options: DENY`.
+  - `GET /api/transport` tells the page which transport it's on and whether a pairing cookie is
+    present (`{transport, hasToken}`), so the hotspot page can show the pairing form. It reveals
+    nothing about the token.
 - **Plain HTTP on the tailnet:** WireGuard encrypts the path. The page is HTTP and the socket is
   `ws://`, so there's no mixed content.
   - There are no secure-context APIs, so paste goes through a textarea and pointer lock has a
     drag fallback.
-  - The CLI pins the tailnet host and refuses redirects and proxies.
+  - The CLI resolves the host once and pins that address. Without a token file it only talks
+    to an address in Tailscale's ranges (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), so a hijacked
+    name on the LAN gets nothing. It refuses redirects and proxies.
 
 ### Go↔Kotlin bridge (gomobile)
 `remote/PROTOCOL.md` is the exact contract (bridge, connJson, messages, errors, close codes,
@@ -458,18 +470,69 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
 - **Reconnect:** a reconnect gets a fresh session and snapshot. Nothing is replayed.
 
 ### Android
+- **Build:** `:app` depends on `remote/build/bootlegremote.aar` through the `buildRemoteAar` Gradle
+  task (`mise run remote:aar`). Its inputs are `remote/` (minus `build/`) and `mise.toml`/
+  `mise.lock`, and its output is cacheable, so `mise run check` only re-runs gomobile when Go
+  code changes (warm: an up-to-date check). The APK is arm64-only (`libgojni.so`).
+- **RemoteManager** (`app/.../remote/`) owns the node and the controller in the app process:
+  - `Bootlegremote.start(noBackupFilesDir/tailscale, "bootleg", authKey, callbacks)`. The hostname
+    is `bootleg`; the CLI defaults to it.
+  - `RemoteActor.create(...)` with the ports: `GoTransport` (gomobile statics),
+    `RemoteDevice` (the same `BootlegBackend` as the Drives screen; `setHid` goes through
+    `HidController.setSpec` so the HID session closes before the functions go and reopens
+    after), `HidController.remotePort` (the app's `HidSession`; `releaseOwed` is its owed
+    release-all barrier), approval/pairing stores as atomic JSON files (temp, fsync, rename,
+    directory fsync) in `noBackupFilesDir/remote`, and notifications. The actor runs on
+    `Dispatchers.IO.limitedParallelism(1)`; device calls on another single-thread lane.
+  - While Remote is on, the HID session stays open in the background (backgrounding only
+    releases everything) and reopens whenever HID is enabled, so remote input finds it open.
+  - Kotlin supplies the interface list (`NetworkInterfaces`) and forwards default-network
+    changes (`registerDefaultNetworkCallback` → `Bootlegremote.networkChanged`).
+  - Dev/test enrollment: an auth key in `filesDir/ts-authkey` registers the node and is deleted
+    once it reaches Running (status is read once more after `start` returns, since callbacks
+    during `start` are dropped). Users sign in through `loginURL` (the Remote screen opens the
+    browser). Node state persists, so later starts need neither.
 - **RemoteService:** `connectedDevice` FGS with `FOREGROUND_SERVICE_CONNECTED_DEVICE`;
   `CHANGE_WIFI_STATE` (hotspot) is the prerequisite.
-  - It starts only from a visible user action. Remote is off by default and not started on boot
-    in v1.
-  - Approvals also work in-app when notifications are denied.
-- **Permissions:** `ACCESS_LOCAL_NETWORK` is requested when Remote is turned on, with an
-  explanation. `NEARBY_WIFI_DEVICES` is required for the hotspot.
-- **Keep-awake:** counts authenticated live sessions only.
-  - Prior settings are persisted, and restored by the app on its next process start whether or
-    not Remote is turned back on.
+  - It starts only from a visible user action (the Remote switch). Remote is off by default and
+    not started on boot in v1; after a process death the sticky service restarts the node only
+    if the switch is still on. If Android refuses the FGS start (a background caller such as the
+    debug hook), the node still runs while the process lives.
+  - One silent channel (`remote`) for the service notification and the "waiting for approval"
+    one; both only open the Remote tab. Approvals also work in-app when notifications are
+    denied.
+- **UI:** a Remote tab (Downloads moved under Library: a top-bar button with the active count;
+    Catalog still links to it; the bottom bar stays at 6). Switch, tailnet status (name, IPs,
+    sign-in button), pending approvals with Approve (+ "Allow writable disks") / Deny, the
+    controller (holder, local-priority chip, release-pending, keep-awake), connected sessions,
+    approved devices (RW switch, revoke), offline mode (LocalOnlyHotspot, Wi-Fi QR code drawn
+    from zxing's matrix, URL, pairing code with countdown, lockout reset) and paired tokens.
+- **Local capture:** the Control tab resumed → `localCaptureStarted`, paused or left →
+  `localCaptureStopped`.
+- **Permissions:** `ACCESS_LOCAL_NETWORK` is requested when Remote is turned on, after an
+  explanation ("Use relays only" skips it; a warning card offers it again).
+  `NEARBY_WIFI_DEVICES` (`neverForLocation`) is requested when the hotspot starts.
+- **Hotspot address:** the LocalOnlyHotspot interface isn't a `Network` apps can query, so the
+  app takes the new up, private-IPv4 `wlanN`/`swlanN`/`apN` interface that isn't the default
+  network's and passes its CIDR to `Bootlegremote.startHotspot`.
+- **Hotspot lifecycle:** `OfflineMode` shares the node's lifecycle mutex. Every stop (the
+  hotspot's or the node's) bumps a generation; Go's listener starts only under that lock, after
+  Android's start returns, if the generation and the node are unchanged. A superseded start
+  closes its late reservation and never starts the listener. Android's start is bounded (15s).
+- **Keep-awake:** counts authenticated (approved) live sessions only.
+  - App side: a `WIFI_MODE_FULL_LOW_LATENCY` Wi-Fi lock and a partial wake lock. Root side
+    (`IBootlegRoot.setKeepAwake`, fixed argv): `stay_on_while_plugged_in` 7, `cmd wifi
+    force-low-latency-mode enabled` and `input keyevent KEYCODE_WAKEUP` (screen on, never
+    unlocks).
+  - The prior `stay_on_while_plugged_in` is persisted (`keepawake-prior.json`) before the first
+    change and restored when the last session ends, or by the app on its next process start
+    whether or not Remote is turned back on. Forced low-latency mode can't be read back, so
+    restoring turns it off.
   - The FGS isn't assumed to exempt the app from Doze. Unplugged idle and reconnect behaviour
     is tested manually.
+- **Debug hooks** (debug builds, DUMP-protected `CommandProvider`): `REMOTE_ON`, `REMOTE_OFF`,
+  `REMOTE_STATE`, `REMOTE_APPROVE --extra node:s:<id>`, `REMOTE_REVOKE --extra node:s:<id>`.
+  They stand in for the in-app buttons while the screen is locked.
 
 ### CLI (`remote/cmd/bootleg`)
 - **Connection:** uses the Mac's own Tailscale. Offline, it takes `--host` plus a 0600 token file.
@@ -477,6 +540,14 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   `key <chord> [--repeat --interval]`, `bootkey`, `lease take|takeover|release`, `pair <code>`.
 - **`kbd`:** decoded text and key taps only, since terminals don't report key-up. It restores
   the terminal and sends release-all on signals and errors.
+- **Takeover consent:** `kbd` and `lease take|takeover` prompt on a `lease.takeover_request`
+  ("<name> asks for control. Allow? [y/N]"): in `kbd` the next y/n keystroke answers (and isn't
+  typed), in `lease` a line from stdin; no answer within `timeoutMs` declines. One-shot commands
+  decline at once so the requester isn't left waiting 30 s. The web UI shows an Allow / Decline
+  card. Clients drop queued input whenever the lease epoch or holder changes.
+- **Dense LUNs:** `mount` appends at LUN n (the next one); `--lun N` only replaces an existing
+  slot. The web UI offers "LUN k (replace)" and "LUN n (new)". Both default the mode to the
+  image's `defaultMode`.
 - **Exit codes and deadlines:** 0 ok, 2 usage, 3 auth or pending, 4 lease, 5 device, 6 timeout.
   Every command has a deadline.
 
@@ -493,19 +564,30 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   and lengths, rate limits, and the bridge against a fake Kotlin, including slow consumers.
 - **Every check:** `mise run check` runs `go test` and a cached AAR/Kotlin compile check (the
   inputs-tracked Gradle task rebuilds only when `remote/` changes).
-- **L4 `check:device:remote`** (under 30s warm, takes the device lock):
-  1. CLI auth over the tailnet.
-  2. Mount the RO FAT fixture and host-eject it.
-  3. Harmless HID.
-  4. Revoke → the next command fails with auth and the session closes.
-  5. Re-approve through a debug, DUMP-protected provider hook.
-  6. Cleanup.
+- **L4 `check:device:remote`** (`scripts/check-device-remote.sh`, ~35s warm, takes the device
+  lock; the real `bootleg` CLI built into `build/bin`, over wireless adb because mounts and HID
+  re-enumerate USB):
+  1. Remote on through the debug hook; wait for the node to be Running. Any earlier approval of
+     this Mac is revoked first, so every run starts unapproved.
+  2. `status` → pending, exit 3; approve through the hook; `status` → approved.
+  3. `mount` a cached, formatted 8 MB FAT image (copied into the library as
+     `zz-bootleg-l4-remote.img`) read-only; the Mac mounts it read-only and reads it;
+     `diskutil eject`.
+  4. `hid on`, F24 and Shift taps only, `hid off`; the Mac enumerates and drops both devices.
+  5. A background `bootleg lease take` holds a live session; revoke through the hook → it exits
+     3 within 5s and the next `status` exits 3.
+  6. Drives off, gadget clean (`function0` → `ffs.adb`), Remote off, USB adb back. An EXIT trap
+     ejects, revokes and turns Remote and the drives off whatever happens.
+  The time is mostly three gadget re-enumerations (mount, `hid on`, `hid off`) plus the final
+  drives-off, 3.5–4s each, so it misses the 30s target by about 5s.
 - **Known gaps:**
   - Host-captured releases need a Mac capture helper. That needs the user to grant Input
     Monitoring once; until then releases are proved by phone-side `HID_STATE` plus
     enumeration.
-  - A never-approved identity through the real transport needs a second tailnet identity (an
-    ephemeral key from the user). Until then it's covered at L2.
+  - A never-approved identity through the real transport is covered by revoking this Mac
+    first. A *denied* or evicted identity, and two identities at once (takeover between
+    computers), need a second tailnet identity (an ephemeral key from the user); until then
+    they're covered at L2 and by the CLI's fake-phone tests.
   - Hotspot hardware checks are manual; the hotspot policy is tested at L2.
 - **Scope:** catalog downloads from the remote are deferred.
 
