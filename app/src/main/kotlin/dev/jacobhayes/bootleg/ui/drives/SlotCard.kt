@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Album
 import androidx.compose.material.icons.outlined.Eject
 import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.SdStorage
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -89,6 +90,7 @@ fun SlotCard(
     onModeChange: (LunMode?) -> Unit,
     onEject: () -> Unit,
     onForceEject: () -> Unit,
+    onReinsert: () -> Unit,
     onChangeImage: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -133,21 +135,37 @@ fun SlotCard(
                         Text("Eject")
                     }
                 }
+                if (status.kind == SlotStatusKind.EJECTED || status.kind == SlotStatusKind.FAILED) {
+                    FilledTonalButton(onClick = onReinsert, enabled = !busy) {
+                        Icon(Icons.Outlined.Replay, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Re-insert")
+                    }
+                }
             }
         }
     }
-    if (confirmForce) {
-        ConfirmDialog(
-            title = "Force eject slot ${index + 1}?",
-            body =
-                "The host asked to keep this disk mounted. Force ejecting can corrupt data the computer hasn't " +
-                    "written yet. Only continue if you can't eject it on the computer.",
-            confirmLabel = "Force eject",
-            destructive = true,
-            onConfirm = onForceEject,
-            onDismiss = { confirmForce = false },
-        )
-    }
+    if (confirmForce) ForceEjectDialog(index, onConfirm = onForceEject, onDismiss = { confirmForce = false })
+}
+
+@Composable
+fun ForceEjectDialog(
+    lun: Int,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    hostRefused: Boolean = false,
+) {
+    val lead = if (hostRefused) "The computer is still using slot ${lun + 1}, so it refused the eject. " else ""
+    ConfirmDialog(
+        title = "Force eject slot ${lun + 1}?",
+        body =
+            lead + "Eject the disk on the computer first if you can. Force ejecting can corrupt data the " +
+                "computer hasn't written yet, and macOS may show a stale volume until the drive reconnects.",
+        confirmLabel = "Force eject",
+        destructive = true,
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
+    )
 }
 
 @Composable

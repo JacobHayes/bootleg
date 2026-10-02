@@ -60,6 +60,7 @@ class FakeBootlegBackend(
         force: Boolean,
     ): ApplyResult {
         delay(latencyMs)
+        if (ejectPreventedByHost && !force) return ApplyResult.NeedsAttention("host prevents removal; force eject?")
         journalFlow.update { it.copy(slotIntents = it.slotIntents + (lun to SlotIntent.USER_EJECTED)) }
         val state = stateFor(journalFlow.value)
         gadgetFlow.value = state
@@ -68,7 +69,8 @@ class FakeBootlegBackend(
 
     override suspend fun reinsert(lun: Int): ApplyResult {
         delay(latencyMs)
-        journalFlow.update { it.copy(slotIntents = it.slotIntents + (lun to SlotIntent.EXPORTED)) }
+        require(lun in journalFlow.value.desired.slots.indices) { "no slot $lun" }
+        journalFlow.update { it.copy(slotIntents = it.slotIntents + (lun to SlotIntent.EXPORTED), slotFailures = it.slotFailures - lun) }
         val state = stateFor(journalFlow.value)
         gadgetFlow.value = state
         return ApplyResult.Applied(state, reenumerated = false)
@@ -100,6 +102,9 @@ class FakeBootlegBackend(
         imagesFlow.update { images -> images.filterNot { it.path == path } }
         return Result.success(Unit)
     }
+
+    /** Simulates macOS holding the volume mounted: a normal eject is refused (EBUSY). */
+    var ejectPreventedByHost = false
 
     fun setRootStatus(status: RootStatus) {
         rootFlow.value = status

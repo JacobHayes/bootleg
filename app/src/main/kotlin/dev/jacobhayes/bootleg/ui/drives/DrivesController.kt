@@ -2,6 +2,7 @@ package dev.jacobhayes.bootleg.ui.drives
 
 import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
+import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.Journal
@@ -32,6 +33,8 @@ data class DrivesUiState(
     val dirty: Boolean = false,
     val busy: Boolean = false,
     val message: String? = null,
+    /** LUN whose normal eject the host refused; the UI offers Force eject for it. */
+    val forceEjectOffer: Int? = null,
 )
 
 /**
@@ -45,12 +48,13 @@ class DrivesController(
     private val draft = MutableStateFlow<List<DraftSlot>?>(null)
     private val busy = MutableStateFlow(false)
     private val message = MutableStateFlow<String?>(null)
+    private val forceEjectOffer = MutableStateFlow<Int?>(null)
 
     val state: StateFlow<DrivesUiState> =
-        combine(draft, backend.journal, busy, message) { draft, journal, busy, message ->
+        combine(draft, backend.journal, busy, message, forceEjectOffer) { draft, journal, busy, message, offer ->
             val applied = slotsOf(journal)
             val slots = draft ?: applied
-            DrivesUiState(slots, dirty = draft != null && draft != applied, busy = busy, message = message)
+            DrivesUiState(slots, dirty = draft != null && draft != applied, busy = busy, message = message, forceEjectOffer = offer)
         }.stateIn(scope, SharingStarted.Eagerly, DrivesUiState())
 
     val canAddSlot: Boolean get() = state.value.slots.size < GadgetLimits.LUN_COUNT_MAX
@@ -104,7 +108,23 @@ class DrivesController(
     fun eject(
         lun: Int,
         force: Boolean,
-    ) = run(if (force) "Force ejecting" else "Ejecting") { backend.eject(lun, force) }
+    ) = run(if (force) "Force ejecting" else "Ejecting") {
+        forceEjectOffer.value = null
+        backend.eject(lun, force).also { offerForceEjectIfPrevented(lun, it) }
+    }
+
+    fun reinsert(lun: Int) = run("Re-inserting") { backend.reinsert(lun) }
+
+    fun dismissForceEjectOffer() {
+        forceEjectOffer.value = null
+    }
+
+    private fun offerForceEjectIfPrevented(
+        lun: Int,
+        result: ApplyResult,
+    ) {
+        if (result is ApplyResult.NeedsAttention && result.reason.startsWith(EJECT_PREVENTED_REASON)) forceEjectOffer.value = lun
+    }
 
     fun ejectAll() =
         run("Ejecting all") {
@@ -114,6 +134,7 @@ class DrivesController(
             var last: ApplyResult? = null
             for (lun in luns) {
                 last = backend.eject(lun, force = false)
+                offerForceEjectIfPrevented(lun, last)
                 if (last is ApplyResult.Failed || last is ApplyResult.NeedsAttention) break
             }
             last
@@ -146,6 +167,9 @@ class DrivesController(
     }
 
     companion object {
+        /** Prefix of the NeedsAttention reason when the host has the medium mounted (EBUSY). */
+        const val EJECT_PREVENTED_REASON = DefaultGadgetController.EJECT_PREVENTED_REASON
+
         fun slotsOf(journal: Journal): List<DraftSlot> =
             journal.desired.slots.sortedBy { it.lun }.map { spec ->
                 val auto = StoragePaths.autoMode(spec.backingPath)

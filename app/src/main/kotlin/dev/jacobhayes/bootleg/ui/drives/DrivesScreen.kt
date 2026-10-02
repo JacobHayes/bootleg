@@ -109,6 +109,14 @@ fun DrivesScreen(
             onDismiss = { picker = null },
         )
     }
+    state.forceEjectOffer?.let { lun ->
+        ForceEjectDialog(
+            lun = lun,
+            hostRefused = true,
+            onConfirm = { controller.eject(lun, force = true) },
+            onDismiss = controller::dismissForceEjectOffer,
+        )
+    }
     if (confirmEjectAll) {
         ConfirmDialog(
             title = "Eject all drives?",
@@ -173,6 +181,7 @@ private fun SlotList(
                 onModeChange = { controller.setMode(index, it) },
                 onEject = { controller.eject(index, force = false) },
                 onForceEject = { controller.eject(index, force = true) },
+                onReinsert = { controller.reinsert(index) },
                 onChangeImage = { onChangeImage(index) },
                 onRemove = { controller.removeSlot(index) },
             )

@@ -73,6 +73,26 @@ class DrivesControllerTest {
         }
 
     @Test
+    fun `host refusing an eject offers force eject, and reinsert re-exports`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val backend = FakeBootlegBackend()
+            val controller = DrivesController(backend, backgroundScope)
+            controller.addSlot(iso)
+            controller.apply()
+            backend.ejectPreventedByHost = true
+            controller.eject(0, force = false)
+            assertEquals(0, controller.state.value.forceEjectOffer)
+            assertEquals(SlotIntent.EXPORTED, backend.journal.value.slotIntents[0])
+
+            controller.eject(0, force = true)
+            assertNull(controller.state.value.forceEjectOffer)
+            assertEquals(SlotIntent.USER_EJECTED, backend.journal.value.slotIntents[0])
+
+            controller.reinsert(0)
+            assertEquals(SlotIntent.EXPORTED, backend.journal.value.slotIntents[0])
+        }
+
+    @Test
     fun `slot limit is enforced`() =
         runTest(UnconfinedTestDispatcher()) {
             val controller = DrivesController(FakeBootlegBackend(), backgroundScope)
