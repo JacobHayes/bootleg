@@ -17,6 +17,21 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
 - macOS can't open `/dev/rdiskN` without sudo (root:operator), so host-side checks rely on
   auto-mounted filesystems and `diskutil info`.
 - `newfs_msdos`, `mkfs.exfat`, `mke2fs` and `losetup` (toybox) are on the phone.
+- Writing `/proc/self/fd/N` (an O_NOFOLLOW fd held by the root process) into `lun.N/file` works,
+  and `file` reads back as the real path (`/data/media/0/bootleg/x.img`).
+- macOS sets prevent-removal on a mounted LUN, so a normal eject (`file=""`) fails with EBUSY.
+  `forced_eject=1` empties the LUN, but macOS keeps the volume "mounted" (≥ 30s; accessing it hangs)
+  until the next re-enumeration. Ejecting on the Mac (`diskutil eject`) clears the LUN by itself
+  (recorded as `HostEjected`). While `file` is set, writes to `ro` fail even with an unchanged value.
+- libsu returns the root binder to the app by broadcast, and Android delivers broadcasts to a
+  process one at a time. Code that waits for the first root bind inside a broadcast receiver
+  (`goAsync`) deadlocks until it times out, so receivers hand work to the service, and the debug
+  control surface is a content provider.
+- Magisk 31's `magisk --sqlite` crashes `magiskd` when a selected column is NULL (root is then
+  gone until reboot). Only select non-NULL columns.
+- toybox `losetup -a` shows no backing file names (APEX loops), so stale loop devices are found per
+  image with `losetup -j FILE`. `newfs_msdos` defaults to 4 KiB clusters, too few for FAT32 below
+  ~260 MiB, so small images use 512 B clusters (`-c 1`).
 
 ## Modules
 
@@ -96,7 +111,8 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
 - **HAL races.** If the UDC gets bound by someone else (HAL, dead-man) during one of our
   transitions, the host may have enumerated a half-built gadget, so the replan forces one more
   unbind/bind even when the topology already looks right.
-- **Backing-file identity.** Root opens the image (`O_NOFOLLOW`), `fstat`s it, and writes
+- **Backing-file identity.** Root opens the image without following symlinks anywhere below the
+  allowed root (see Root boundary), `fstat`s it, and writes
   `/proc/<rootpid>/fd/<n>` into `lun/file`. The kernel opens the same inode, which closes the
   check-then-open race. Duplicate exports are rejected by `(st_dev, st_ino)` whenever any copy is
   RW. `ro` is changed only while the LUN has no file, and in-place swaps require `removable=1`.
@@ -109,17 +125,29 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
 - libsu `RootService` in daemon mode. Gadget state lives in the kernel, so it survives a crash of
   the app or the root process. Media stays exported when the UI dies. On restart the service
   reads the actual state and adopts it.
-- The AIDL API is typed. It never takes shell strings or free-form paths:
-  - `readGadget()`
-  - `apply(desired: list of {lun, imageId, mode})`
-  - `ejectLun(i, force)`
-  - `openHid(kind) → ParcelFileDescriptor`
-  - `createBlankImage(name, sizeBytes, format)`
-  - `setRemotePowerProfile(on)`
+- The AIDL API (`IBootlegRoot`) is typed. Structured values cross as kotlinx.serialization JSON;
+  it never takes shell strings, and root runs programs by argv only:
+  - `readGadget()`, `readJournal()`
+  - `apply(desired)`, `eject(lun, force)`, `reinsert(lun)`, `reconcile()`, `bootlegOff()`
+  - `createBlankImage(name, sizeBytes, format, preallocate)`, `deleteImage(path)`, `listImages()`
+  - `grantSelfStorage()`
+  - later: `openHid(kind) → ParcelFileDescriptor`, `setRemotePowerProfile(on)`
 
-  `imageId` resolves to a canonical real path under `/data/media/0/bootleg/` or another allowed
-  root. Symlinks are rejected; the file is opened by fd and checked (`fstat`) before its path
-  goes into `lun/file`. Caller check: the binder caller's uid must equal the app's uid.
+  Image paths (`/sdcard/...` is mapped to `/data/media/0/...`) must be normalized (no `.`, `..` or
+  empty components), inside an allowed root (`/data/media/0/`), and regular files; a path through
+  a symlink is rejected. Root walks the path from a directory fd of the root, opening each
+  component `O_NOFOLLOW` relative to the previous fd (`/proc/self/fd/<dirfd>/<name>`, since
+  `android.system.Os` has no `openat`), so a directory swapped for a symlink mid-check can't
+  redirect it. Each directory and the final file are checked with `fstat` (directory, then
+  regular file, all on the root's `st_dev`), and `/proc/self/fd/N` of the final fd goes into
+  `lun/file`. Deletes are confined to `/data/media/0/bootleg/`, unlink by name inside the walked
+  parent fd, and refuse exported files. Caller check: the binder caller's uid must equal the app's
+  uid. Calls are serialized (the controller isn't thread-safe); image formatting has its own lock
+  so it never blocks an eject. A delete takes the image lock and then the gadget lock (never the
+  other order), so no apply can export the file between the exported check and the unlink.
+- With no journal (first start), the root service adopts Bootleg's live exports (`apply` of the
+  live state) instead of letting `reconcile` remove them.
+- The journal lives at `/data/adb/bootleg/journal.json` (dir 0700), written temp + fsync + rename.
 - HID: the root process opens `/dev/hidgN` and hands back the fd. The app writes reports
   directly, with no shell per report. The fd is reopened on `ENXIO`/`ESHUTDOWN` (host off).
 
@@ -130,11 +158,15 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
 - Picking a file: if its `/sdcard/...` path maps to `/data/media/0/...`, use it in place. If the
   picker returns a document-provider URI with no usable path, offer "Import" (copy into the store).
 - The app grants itself `MANAGE_EXTERNAL_STORAGE` via root `appops` so it can browse files.
-- Blank images: `truncate` (sparse). For formatted images: write the MBR (Kotlin, one partition at
-  1 MiB), `losetup -o 1048576 --sizelimit`, then `newfs_msdos -F 32` / `mkfs.exfat` /
-  `mke2fs -t ext4`. The loop device is detached in a finally block, and stale
-  `bootleg` loop devices are swept on start (crash cleanup). FAT32 needs ≥ 33 MiB; MBR caps at 2 TiB. Formatters are
-  probed at startup.
+- Blank images: `ftruncate` (sparse) or `posix_fallocate` (preallocate). For formatted images:
+  write the MBR (Kotlin, one partition at 1 MiB), `losetup -f -s -o 1048576 -S <bytes>`, then
+  `newfs_msdos -F 32 -o 2048` / `mkfs.exfat` / `mke2fs -t ext4`. The loop device is detached in a
+  finally block; if `losetup` fails, times out or prints anything but one loop device, whatever
+  it attached is found with `losetup -j <file>` and detached. Loop devices still attached to store
+  images are swept on start (crash cleanup). Names match `[A-Za-z0-9._-]` and end in `.img`
+  (≤ 100 chars). FAT32 needs a ≥ 33 MiB partition; MBR caps at 2 TiB. New files get the store
+  directory's owner, group (0660) and SELinux label, then a media scan, so the app,
+  MediaProvider and MTP see them.
 
 ## Catalog
 
