@@ -38,6 +38,10 @@ wait "$catalog" || catalog_status=$?
 [ "$device_status" -eq 0 ] && [ "$catalog_status" -eq 0 ]
 '''
 
+[tasks."check:device:hid"]
+description = "L4 HID: enumerate keyboard + mouse on the Mac, send only harmless input, turn off (needs `mise run deploy`)"
+run = "sh scripts/check-device-hid.sh"
+
 [tasks.deploy]
 description = "Install the debug app on the phone and pre-grant root + storage access"
 run = ["./gradlew --console=plain -q :app:installDebug", "sh scripts/grant-root.sh"]

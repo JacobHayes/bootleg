@@ -364,9 +364,14 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   reconfiguration op at the moment it reaches the kernel model: stably bound with `Mutating`
   journaled, or inside a window with nothing linked.
 - L4 HID capture (`mise run check:device:hid`, `scripts/check-device-hid.sh`): the Mac's
-  `hidutil` must list both Bootleg devices with the expected usage pages. A Swift capture helper records events while F24 and Shift taps and cancelling
-  mouse deltas are sent, and asserts that exactly those were seen. If macOS denies capture
-  (Input Monitoring), the test falls back to enumeration only.
+  `hidutil` must list both Bootleg devices with the expected usage pages. A Swift capture helper
+  (`scripts/hidcapture.swift`, IOHIDManager on the gadget's vendor/product) records input values
+  while F24 and Shift taps and cancelling mouse deltas are sent, and the check asserts that exactly
+  those were seen. Without Input Monitoring for the terminal the helper prints SKIP (it only calls
+  `IOHIDCheckAccess`, never anything that prompts) and the check falls back to enumeration plus
+  written-report counts. A device another app has seized (Karabiner-Elements seizes keyboards)
+  can't be opened; that device's capture is skipped the same way. An EXIT/INT/TERM trap turns HID
+  off again once the check has enabled it.
 - L3 tolerates upstream flakiness, not breakage: a scraper (and each image probe or sums fetch)
   that fails on a timeout, connection reset, 5xx, 425 or 429 is retried once (both scraper attempts
   share a 32s budget). At most one scraper per run may still fail that way; it is skipped with a

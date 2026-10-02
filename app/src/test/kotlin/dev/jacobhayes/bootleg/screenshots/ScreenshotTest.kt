@@ -20,6 +20,7 @@ import dev.jacobhayes.bootleg.core.catalog.HttpResponse
 import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.catalog.Scraper
 import dev.jacobhayes.bootleg.core.gadget.Desired
+import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
@@ -32,9 +33,11 @@ import dev.jacobhayes.bootleg.download.DownloadStatus
 import dev.jacobhayes.bootleg.download.DownloadStore
 import dev.jacobhayes.bootleg.download.Downloads
 import dev.jacobhayes.bootleg.download.VerifyState
+import dev.jacobhayes.bootleg.hid.HidController
 import dev.jacobhayes.bootleg.storage.FileTasks
 import dev.jacobhayes.bootleg.storage.StoragePaths
 import dev.jacobhayes.bootleg.ui.catalog.CatalogScreen
+import dev.jacobhayes.bootleg.ui.control.ControlScreen
 import dev.jacobhayes.bootleg.ui.downloads.DownloadsScreen
 import dev.jacobhayes.bootleg.ui.drives.DrivesController
 import dev.jacobhayes.bootleg.ui.drives.DrivesScreen
@@ -103,6 +106,18 @@ class ScreenshotTest {
         val downloads = newDownloads()
         sampleDownloads.forEach(downloads.store::put)
         capture("downloads") { DownloadsScreen(downloads, wifiOnly = true) }
+    }
+
+    @Test
+    fun controlOff() {
+        val backend = FakeBootlegBackend()
+        capture("control_off") { ControlScreen(backend, HidController(backend, MainScope())) }
+    }
+
+    @Test
+    fun control() {
+        val backend = FakeBootlegBackend(initialJournal = Journal(desired = Desired(hid = HidSpec(keyboard = true, mouse = true))))
+        capture("control") { ControlScreen(backend, HidController(backend, MainScope())) }
     }
 
     @Test

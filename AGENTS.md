@@ -30,6 +30,7 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
 | `mise run check` | L0–L2 | ktlint, compile with warnings as errors, unit + property + deterministic gadget simulation, UI screenshot goldens (offline) |
 | `mise run check:catalog` | L3 | live distro metadata/checksum/URL smoke test (network) |
 | `mise run check:device` | L4 | real phone end to end, `scripts/check-device.sh` (local only, not CI; takes the device lock) |
+| `mise run check:device:hid` | L4 | HID only: Mac enumerates keyboard + mouse, harmless input, off again (<30s) |
 | `mise run check:all` | L0–L4 | `check`, then `check:catalog` and `check:device` in parallel |
 | `mise run fixtures:refresh` | | re-record catalog fixtures; review the diff before committing |
 | `mise run screenshots:record` | | re-record UI goldens (`app/src/test/screenshots/`); look at the PNGs before committing |

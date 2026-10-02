@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Downloading
 import androidx.compose.material.icons.outlined.Inventory2
+import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Usb
 import androidx.compose.material3.Badge
@@ -29,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import dev.jacobhayes.bootleg.BootlegApp
 import dev.jacobhayes.bootleg.ui.catalog.CatalogScreen
+import dev.jacobhayes.bootleg.ui.control.ControlScreen
 import dev.jacobhayes.bootleg.ui.downloads.DownloadsScreen
 import dev.jacobhayes.bootleg.ui.drives.DrivesScreen
 import dev.jacobhayes.bootleg.ui.library.LibraryScreen
@@ -39,6 +41,7 @@ enum class Tab(
     val icon: ImageVector,
 ) {
     DRIVES("Drives", Icons.Outlined.Usb),
+    CONTROL("Control", Icons.Outlined.Keyboard),
     LIBRARY("Library", Icons.Outlined.Inventory2),
     CATALOG("Catalog", Icons.Outlined.CloudDownload),
     DOWNLOADS("Downloads", Icons.Outlined.Downloading),
@@ -73,6 +76,7 @@ fun BootlegRoot(
         Box(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()) {
             when (selectedTab) {
                 Tab.DRIVES -> DrivesScreen(app.backend, app.drives, browse)
+                Tab.CONTROL -> ControlScreen(app.backend, app.hid)
                 Tab.LIBRARY ->
                     LibraryScreen(app.backend, app.drives, app.fileTasks, app.downloads, onExposed = { onSelectTab(Tab.DRIVES) })
                 Tab.CATALOG -> CatalogScreen(app.catalog, app.downloads, onShowDownloads = { onSelectTab(Tab.DOWNLOADS) })
