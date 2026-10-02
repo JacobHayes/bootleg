@@ -30,8 +30,12 @@ core/      pure Kotlin/JVM, no Android deps; everything that can be tested fast
 app/       Android app (Compose, Material 3)
   root/      RootService (libsu, daemon mode) with a typed AIDL API (below)
   service/   BootlegService (foreground, type connectedDevice), reconcile, notification,
-             keep-awake policy; DownloadJobService (user-initiated data transfer jobs)
-  ui/        Library, Catalog, Slots, Blank image creator, HID (touchpad/keyboard), Remote
+             keep-awake policy
+  download/  DownloadJobService (user-initiated data transfer jobs), engine, pure resume planner
+  catalog/   CatalogRepository (runs core scrapers, caches last good result), OkHttp `Http`
+  ui/        Drives (slots), Library, Catalog, Downloads, Settings, Blank image creator,
+             HID (touchpad/keyboard), Remote. The UI talks to the system side only through
+             `BootlegBackend`
   tile/      Quick Settings TileService
   boot/      BOOT_COMPLETED receiver → restore last desired state (opt-in)
 remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI → AAR (gomobile);

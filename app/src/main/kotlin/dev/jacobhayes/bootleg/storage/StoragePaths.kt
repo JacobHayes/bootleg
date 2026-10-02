@@ -1,6 +1,8 @@
 package dev.jacobhayes.bootleg.storage
 
 import dev.jacobhayes.bootleg.core.gadget.LunMode
+import java.io.File
+import java.nio.file.Files
 
 /**
  * Path conventions for the image store. The app reads/writes through the FUSE view
@@ -53,6 +55,26 @@ object StoragePaths {
             "img", "raw", "bin" -> "Disk image"
             else -> "File"
         }
+
+    /**
+     * Staging file for an import of [name]. Hidden (leading dot, never a valid image name), so it can't
+     * collide with a download's `<name>.partial` or with another image.
+     */
+    fun importStagingName(name: String): String = ".$name.import$PARTIAL_SUFFIX"
+
+    /** Staging file for the image extracted from a zipped download of [name]; hidden like [importStagingName]. */
+    fun extractStagingName(name: String): String = ".$name.extract$PARTIAL_SUFFIX"
+
+    /**
+     * Moves a finished staging file into place, refusing to replace an existing image (a download and an
+     * import of the same name can both finish). Throws FileAlreadyExistsException then.
+     */
+    fun moveIntoPlace(
+        staging: File,
+        target: File,
+    ) {
+        Files.move(staging.toPath(), target.toPath())
+    }
 
     fun isValidImageName(name: String): Boolean =
         name.isNotBlank() &&
