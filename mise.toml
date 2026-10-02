@@ -19,6 +19,25 @@ run = "./gradlew --console=plain -q ktlintCheck :core:test :app:testDebugUnitTes
 description = "L3: live catalog smoke test against every distro (network)"
 run = "./gradlew --console=plain -q :core:test -Plive --rerun"
 
+[tasks."check:device"]
+description = "L4: end-to-end on the real phone with this Mac as USB host (local only; takes the device lock)"
+run = "bash scripts/check-device.sh"
+
+[tasks."check:all"]
+description = "L0-L4: check, then the live catalog and the device checks in parallel"
+run = '''
+set -eu
+mise run check
+mise run check:catalog > build/check-catalog.log 2>&1 &
+catalog=$!
+device_status=0
+bash scripts/check-device.sh --skip-build || device_status=$?
+catalog_status=0
+wait "$catalog" || catalog_status=$?
+[ "$catalog_status" -eq 0 ] && echo "check:catalog PASS" || { cat build/check-catalog.log; echo "check:catalog FAIL"; }
+[ "$device_status" -eq 0 ] && [ "$catalog_status" -eq 0 ]
+'''
+
 [tasks.deploy]
 description = "Install the debug app on the phone and pre-grant root + storage access"
 run = ["./gradlew --console=plain -q :app:installDebug", "sh scripts/grant-root.sh"]

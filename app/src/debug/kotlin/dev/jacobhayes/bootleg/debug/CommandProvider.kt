@@ -58,6 +58,7 @@ class CommandProvider : ContentProvider() {
                                 result(backend.apply(BootlegJson.decodeFromString<Desired>(desired)))
                             }
                             "EJECT" -> result(backend.eject(arguments.getInt("lun", 0), arguments.getBoolean("force", false)))
+                            "REINSERT" -> result(backend.reinsert(arguments.getInt("lun", 0)))
                             "EJECT_ALL" -> result(backend.ejectAll())
                             "OFF" -> result(backend.bootlegOff())
                             "RECONCILE" -> result(backend.reconcile())
