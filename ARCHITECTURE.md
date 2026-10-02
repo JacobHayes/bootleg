@@ -32,6 +32,16 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
 - toybox `losetup -a` shows no backing file names (APEX loops), so stale loop devices are found per
   image with `losetup -j FILE`. `newfs_msdos` defaults to 4 KiB clusters, too few for FAT32 below
   ~260 MiB, so small images use 512 B clusters (`-c 1`).
+- The HAL rebinds the UDC by itself after any unbind: ~350ms later when sampled every 50ms, once
+  ~700ms (adbd reopening FunctionFS triggers it). It also drops the UDC once 5–560ms after one of
+  our binds and rebinds 0.5–1s after that. Writing the UDC to bind takes 61–76ms and to unbind
+  9–20ms (root shell builtins timed with `EPOCHREALTIME`, no fork in the timed span), so with
+  in-process IO a switch (unbind → links → bind) is unbound for ~70–95ms (measured for 3 LUNs, for
+  HID, and for a detach + relink). Configfs refuses `symlink` into `configs/b.1` while bound
+  (EINVAL), and refuses `lun.N` mkdir/rmdir and HID attribute writes while the function is linked.
+  The kernel refuses to bind a config with no functions linked (EINVAL).
+  Unlinking from a bound config force-unbinds it. Forking `getprop` costs ~110ms per read, so USB
+  properties are read in-process (`android.os.SystemProperties` by reflection).
 
 ## Modules
 
@@ -63,22 +73,58 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
   `functions/hid.bootleg_kbd`, `functions/hid.bootleg_mouse`, and same-named links in
   `configs/b.1`. It never writes any other path except `UDC` (unbind/rebind). It does not
   snapshot or restore foreign state.
-- **Planner** (pure): `plan(current, desired) -> List<Op>`, where Op is `Unbind`, `Mkdir`, `Write`,
-  `Symlink`, `Unlink`, `Rmdir`, `Bind`. Changes that re-enumerate (unbind → change → bind): LUN
-  count, HID function set, any `cdrom` or `ro` change on a LUN. Changes done in place, without
-  re-enumerating: swapping media on a LUN whose type stays the same (write `file=""`, then the new
-  path), or ejecting. Links are only ever created while the UDC is unbound (configfs rejects a
-  link into a bound config).
+- **Planner** (pure): `plan(current, desired) -> Plan`, a list of stages built from Ops (`Unbind`,
+  `Mkdir`, `Write`, `Symlink`, `Unlink`, `Rmdir`, `Bind`). Because the HAL rebinds a few hundred ms
+  after any unbind, each stage keeps the unbound window down to relinking:
+  - **Prepare** (bound): everything legal on an *unlinked* function: mkdir functions and LUNs,
+    LUN attributes and `file`, HID `subclass`/`protocol`/`report_length`/`report_desc`. A new
+    function is complete before its link appears. On a *linked* function only in-place media swaps
+    run (`file=""`, then the new path).
+  - **Switch**: unbind → unlink removed functions → link new ones → bind. Nothing else.
+  - **Cleanup** (bound): rmdir functions (and their LUNs) that are now unlinked and unwanted.
+
+  A linked `mass_storage.bootleg` whose LUN set, `ro`/`cdrom`, `removable` or `nofua` must change
+  needs reconfiguring while unlinked, so the plan has two stages: a detach switch (unbind → unlink
+  → bind; the host sees the gadget without disks, which also clears the host's prevent-removal),
+  then prepare reconfigures it while bound and unlinked, and a second switch relinks it.
+
+  **Nothing linked.** The kernel can't bind a config without functions, so when nothing at all is
+  linked during a switch (USB debugging off, no other functions) the UDC can't be bound for
+  prepare or cleanup. Only then does work move into the window, as one bounded op list (≤ 80 ops;
+  attribute IO ≤ 2ms each) between the unlinks and the links: a detach with nothing else linked
+  becomes a single switch (unbind → unlink → reconfigure → relink → bind), an export from nothing
+  builds its functions there, and a teardown that leaves nothing linked removes them there and
+  stays unbound. The host sees no device meanwhile and the HAL's rebind can't bind an empty config.
+
+  Changes that re-enumerate: LUN count, HID function set, any `cdrom` or `ro` change (two switches
+  each for the mass-storage ones, one when nothing else is linked). Changes done in place, without
+  re-enumerating: swapping media on a LUN whose type stays the same, or ejecting. The planner
+  asserts that no bound-phase op relinks, touches a linked function beyond a media swap, or is
+  planned while nothing is linked, and that window ops run only while nothing is linked.
 - **Ejection.** A normal eject writes `file=""`. If the host prevents removal, Bootleg tells the
   user and offers "Force eject" (`forced_eject`). An eject started by the host (`file` becomes
   empty) is recorded as `HostEjected`, and Bootleg never re-inserts that media on its own. With the
   journal idle, an existing LUN whose `file` is empty (and whose `ro`/`cdrom` still match the slot)
   is a host eject even if the HAL has since unbound the UDC or our link was removed; a missing or
   recreated LUN is not. A forced eject also clears the host's prevent-removal flag.
-- **Executor** (root): before running any destructive op, re-read the paths it touches; if foreign
-  state changed since planning, abort and replan (at most 3 times). After applying, read back
-  and assert the invariants:
-  - our links exist and the UDC is bound;
+- **Executor** (root, in-process file IO, no shell per op): before each prepare/cleanup op it
+  re-reads the owned state (functions, links, LUNs; no USB properties) and aborts and replans (at
+  most 3 times) if it changed. Inside a switch it re-reads only the UDC and our own links, and
+  writes no journal. If the HAL rebinds mid-switch (UDC found bound, or a link refused), the switch
+  re-arms the dead-man, unbinds again and carries on, at most 5 times; a UDC already bound by the
+  HAL after our last relink is accepted, since the host then saw the finished gadget.
+
+  **Stable bound.** Every prepare/cleanup op runs with the UDC *stably* bound: bound for 1s, and
+  after our own bind also at least 1.6s past it (the HAL's drop comes ≤ 600ms after our bind and
+  its rebind ≤ 1s after that, and both can fall between two polls). The wait is bounded (3s) and
+  true only once the full interval has passed. `apply`, `reinsert` and `reconcile` start with it
+  (sampled during the HAL-quiet wait, so a steady gadget costs nothing extra), the executor repeats
+  it before each prepare and cleanup list and after each of its binds, and a UDC the HAL drops
+  between ops stops the stage and replans. If the UDC is still unbound after the wait (the HAL
+  didn't rebind), the controller binds it (≤ 3 tries) and waits again. A UDC that keeps dropping
+  returns `NeedsAttention` without reconfiguring anything; one that can't be bound at the end of
+  an operation leads to Bootleg-off. Then it reads back and asserts the invariants:
+  - our links exist and the UDC is bound (unless nothing at all is linked);
   - `cdrom=1 ⇒ ro=1`;
   - ≤ 8 LUNs;
   - no writable file is exported twice;
@@ -92,24 +138,29 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
   unaffected exports stay in place. The full **Bootleg-off** (remove all our functions, rebind) is
   used only when the UDC can't be bound at all, or when the user asks for an emergency teardown.
 - **Journal.** The desired state, each slot's intent (`Exported`, `HostEjected`, `UserEjected`,
-  `Failed`) and the in-flight transition (`Unbinding` → `Mutating` → `Binding`) are persisted to app
-  storage before each step. On start or after a crash, reconcile reads the journal plus the full
-  live state (UDC, links, functions, LUN attributes) and finishes or reverts the transition.
-- **Dead-man UDC rebind.** Before any unbind, the executor starts a detached root shell
-  (`sleep 15; [ -z "$(cat UDC)" ] && echo <udc> > UDC`) that runs independently of the executor
-  process. If the executor dies mid-transition, the gadget still comes back (ADB included).
+  `Failed`) and the in-flight transition (`Mutating` for prepare/cleanup, `Unbinding` for a whole
+  switch) are persisted to app storage before each phase, never inside the unbound window. On
+  start or after a crash, reconcile reads the journal plus the full live state (UDC, links,
+  functions, LUN attributes) and finishes or reverts the transition; leftover unlinked owned
+  functions are reconfigured and linked, or removed.
+- **Dead-man UDC rebind.** Before every unbind (including a re-unbind after a HAL rebind), the
+  executor starts a detached root shell (`sleep 15; [ -z "$(cat UDC)" ] && echo <udc> > UDC`) that
+  runs independently of the executor process. If the executor dies mid-transition, the gadget
+  still comes back (ADB included); in practice the HAL usually rebinds first.
 - **ADB contract.** USB ADB drops for a few seconds on every re-enumeration. Recovery is bounded
   (dead-man ≤ 15s). Wireless ADB is the debugging path during that window.
 - **Reconcile.** Triggered by `ACTION_USB_STATE`, service start, or a user action, with no
   periodic polling while idle. It waits (≤ 10s) for the HAL to go quiet: `sys.usb.config`
   unchanged for 1s, and equal to `sys.usb.state` when that is set (the Pixel 6 leaves
-  `sys.usb.state` empty; a stable empty config with an empty state also counts as quiet). Then it compares the full state to the journal: UDC bound, links, LUN
+  `sys.usb.state` empty; a stable empty config with an empty state also counts as quiet). The UDC
+  then gets the stable-bound wait, so the HAL rebinds rather than us; if it won't stay bound,
+  reconcile returns `NeedsAttention` instead of acting. Then it compares the full state to the journal: UDC bound, links, LUN
   `file`/`ro`/`cdrom`. `HostEjected`/`UserEjected` slots are never re-inserted (only an explicit
   re-insert or a changed slot in `apply` brings media back). A LUN emptied while the journal phase
   is not idle is our own interrupted swap, not a host eject. It is rate-limited to 1 attempt per
   2s, with a maximum of 5 attempts before `NeedsAttention`.
-- **HAL races.** If the UDC gets bound by someone else (HAL, dead-man) during one of our
-  transitions, the host may have enumerated a half-built gadget, so the replan forces one more
+- **HAL races.** If the UDC gets bound by someone else (HAL, dead-man) while one of our switches
+  was interrupted, the host may have enumerated a half-built gadget, so the replan forces one more
   unbind/bind even when the topology already looks right.
 - **Backing-file identity.** Root opens the image without following symlinks anywhere below the
   allowed root (see Root boundary), `fstat`s it, and writes
@@ -274,8 +325,16 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
 - L2 adds crash-at-every-op tests: for each prefix of a plan, kill the executor, then run
   reconcile against the fake configfs plus the journal and assert convergence. The
   `HostEjected` state must be preserved.
-- L4 HID capture: the Mac's `hidutil`/`ioreg` must list both Bootleg devices with the expected
-  usage pages. A Swift capture helper records events while F24 and Shift taps and cancelling
+- The L2 gadget suites run against a fake HAL that behaves as measured (rebind 350–700ms after any
+  unbind, post-bind drop and rebind) with per-op costs on a fake clock taken from the device
+  (UDC unbind 20ms, bind 70ms, the slow end of the measurements) or estimated (journal fsync 5ms,
+  dead-man fork 20ms, attribute IO ≤ 2ms). Clean runs assert that nobody else binds inside our
+  unbound window and that every window, from the start of the unbind write to the end of the bind,
+  stays under 95ms: the two UDC writes plus ≤ 6 relinks with their re-reads, so a journal fsync,
+  dead-man fork, poll or getprop inside the window fails it. Controller tests audit every
+  reconfiguration op at the moment it reaches the kernel model: stably bound with `Mutating`
+  journaled, or inside a window with nothing linked.
+- L4 HID capture: the Mac's `hidutil`/`ioreg` must list both Bootleg devices with the expected usage pages. A Swift capture helper records events while F24 and Shift taps and cancelling
   mouse deltas are sent, and asserts that exactly those were seen. If macOS denies capture
   (Input Monitoring), the test falls back to enumeration only.
 - L3 tolerates upstream flakiness, not breakage: a scraper (and each image probe or sums fetch)
