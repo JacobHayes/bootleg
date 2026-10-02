@@ -27,7 +27,7 @@ description = "L4: end-to-end on the real phone with this Mac as USB host (local
 run = "bash scripts/check-device.sh"
 
 [tasks."check:all"]
-description = "L0-L4: check, then the live catalog and the device checks in parallel"
+description = "L0-L4: check, then the live catalog in parallel with the device checks (drives, HID, then remote)"
 run = '''
 set -eu
 mise run check
@@ -35,6 +35,8 @@ mise run check:catalog > build/check-catalog.log 2>&1 &
 catalog=$!
 device_status=0
 bash scripts/check-device.sh --skip-build || device_status=$?
+[ "$device_status" -eq 0 ] && { bash scripts/check-device-hid.sh || device_status=$?; }
+[ "$device_status" -eq 0 ] && { bash scripts/check-device-remote.sh || device_status=$?; }
 catalog_status=0
 wait "$catalog" || catalog_status=$?
 [ "$catalog_status" -eq 0 ] && echo "check:catalog PASS" || { cat build/check-catalog.log; echo "check:catalog FAIL"; }
@@ -44,6 +46,10 @@ wait "$catalog" || catalog_status=$?
 [tasks."check:device:hid"]
 description = "L4 HID: enumerate keyboard + mouse on the Mac, send only harmless input, turn off (needs `mise run deploy`)"
 run = "sh scripts/check-device-hid.sh"
+
+[tasks."check:device:remote"]
+description = "L4 remote: the real bootleg CLI over the tailnet: pending, approve, RO mount, harmless HID, revoke (needs `mise run deploy` and an enrolled node)"
+run = "bash scripts/check-device-remote.sh"
 
 [tasks.deploy]
 description = "Install the debug app on the phone and pre-grant root + storage access"
@@ -70,6 +76,11 @@ export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/30.0.16248370}"
 GOBIN="$PWD/build/bin" go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 PATH="$PWD/build/bin:$PATH" gomobile bind -target android/arm64 -androidapi 30 -trimpath -ldflags "-s -w" -o build/bootlegremote.aar ./bootlegremote
 '''
+
+[tasks."remote:cli"]
+description = "Build the bootleg CLI into build/bin/bootleg"
+dir = "remote"
+run = "mkdir -p ../build/bin && go build -o ../build/bin/bootleg ./cmd/bootleg"
 
 [tasks."remote:test"]
 description = "Vet and unit-test the Go remote module"
