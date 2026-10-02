@@ -18,8 +18,3 @@ dependencyResolutionManagement {
 rootProject.name = "bootleg"
 include(":core", ":app")
 
-// Phase 3 feasibility spike; it needs the gomobile AAR from `mise run remote:aar`, so
-// `mise run check` still works without it.
-if (file("remote/build/bootlegremote.aar").exists()) {
-    include(":remotespike")
-}
