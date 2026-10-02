@@ -6,6 +6,7 @@ import dev.jacobhayes.bootleg.core.catalog.Distro
 import dev.jacobhayes.bootleg.core.catalog.Http
 import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.catalog.Scraper
+import dev.jacobhayes.bootleg.core.catalog.getText
 
 /**
  * TrueNAS Community Edition. There is no structured release feed: the download.truenas.com index

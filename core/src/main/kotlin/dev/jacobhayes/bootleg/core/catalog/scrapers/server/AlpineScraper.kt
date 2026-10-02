@@ -6,6 +6,7 @@ import dev.jacobhayes.bootleg.core.catalog.Distro
 import dev.jacobhayes.bootleg.core.catalog.Http
 import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.catalog.Scraper
+import dev.jacobhayes.bootleg.core.catalog.getText
 
 /** Alpine latest-stable ISOs from each arch's `latest-releases.yaml`, which carries the sha256 inline. */
 class AlpineScraper(

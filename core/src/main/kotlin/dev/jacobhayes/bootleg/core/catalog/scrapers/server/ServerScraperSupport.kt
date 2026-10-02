@@ -1,7 +1,5 @@
 package dev.jacobhayes.bootleg.core.catalog.scrapers.server
 
-import dev.jacobhayes.bootleg.core.catalog.CatalogLimits
-import dev.jacobhayes.bootleg.core.catalog.Http
 import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.catalog.Scraper
 import java.net.URI
@@ -15,72 +13,8 @@ internal object ServerScraperLimits {
 }
 
 private val sha256Hex = Regex("^[0-9a-fA-F]{64}$")
-private val gnuSumsLine = Regex("""^([0-9a-fA-F]{64}) [ *](\S.*)$""")
-private val bsdSumsLine = Regex("""^SHA256 \((.+)\) = ([0-9a-fA-F]{64})$""")
-
-/** Multi-algorithm checksum files (GParted, Clonezilla) group entries under `### SHA256SUMS:` style headers. */
-private val sumsSectionHeader = Regex("""^###\s*([A-Za-z0-9]+)\s*:?\s*$""")
 
 internal fun isSha256(text: String): Boolean = sha256Hex.matches(text)
-
-/** GET that fails loudly on a non-2xx status or an oversized body. */
-internal suspend fun Http.getText(url: String): String {
-    val response = get(url)
-    check(response.status in 200..299) { "GET $url: HTTP ${response.status}" }
-    check(response.body.length <= CatalogLimits.RESPONSE_BYTES_MAX) {
-        "GET $url: response larger than ${CatalogLimits.RESPONSE_BYTES_MAX} bytes"
-    }
-    return response.body
-}
-
-/** Like [getText] but maps 404 to null, for optional per-arch/per-version resources. */
-internal suspend fun Http.getTextOrNull(url: String): String? {
-    val response = get(url)
-    if (response.status == 404) return null
-    check(response.status in 200..299) { "GET $url: HTTP ${response.status}" }
-    check(response.body.length <= CatalogLimits.RESPONSE_BYTES_MAX) {
-        "GET $url: response larger than ${CatalogLimits.RESPONSE_BYTES_MAX} bytes"
-    }
-    return response.body
-}
-
-/**
- * Parses sha256 sums into file name -> lowercase hex.
- *
- * Accepts GNU (`hash  file`, `hash *file`) and BSD (`SHA256 (file) = hash`) lines. Comments, blank
- * lines, PGP armor and other algorithms' lines are skipped. In sectioned files only the SHA256SUMS
- * section is read, because BLAKE3 sums are also 64 hex chars. Throws if nothing parses or a file is
- * listed twice with different hashes.
- */
-internal fun parseSha256Sums(text: String): Map<String, String> {
-    val lines = text.lineSequence().take(ServerScraperLimits.SUMS_LINES_MAX + 1).toList()
-    check(lines.size <= ServerScraperLimits.SUMS_LINES_MAX) { "sums file has more than ${ServerScraperLimits.SUMS_LINES_MAX} lines" }
-    val sectioned = lines.any { sumsSectionHeader.matches(it.trim()) }
-    var inSha256Section = !sectioned
-    val sums = LinkedHashMap<String, String>()
-    for (rawLine in lines) {
-        val line = rawLine.trim()
-        val header = sumsSectionHeader.matchEntire(line)
-        if (header != null) {
-            inSha256Section = header.groupValues[1].equals("SHA256SUMS", ignoreCase = true)
-            continue
-        }
-        if (!inSha256Section || line.isEmpty() || line.startsWith("#")) continue
-        val gnu = gnuSumsLine.matchEntire(line)
-        val bsd = bsdSumsLine.matchEntire(line)
-        val (hash, file) =
-            when {
-                gnu != null -> gnu.groupValues[1] to gnu.groupValues[2]
-                bsd != null -> bsd.groupValues[2] to bsd.groupValues[1]
-                else -> continue
-            }
-        val fileName = file.trim()
-        val previous = sums.put(fileName, hash.lowercase())
-        check(previous == null || previous == hash.lowercase()) { "sums list $fileName twice with different hashes" }
-    }
-    check(sums.isNotEmpty()) { "no sha256 entries found in sums file" }
-    return sums
-}
 
 /** A `.sha256` file holding one hash, optionally followed by a file name. */
 internal fun parseSingleSha256(text: String): String {

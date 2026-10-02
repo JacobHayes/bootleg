@@ -6,9 +6,9 @@ import dev.jacobhayes.bootleg.core.catalog.Distro
 import dev.jacobhayes.bootleg.core.catalog.Http
 import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.catalog.Scraper
+import dev.jacobhayes.bootleg.core.catalog.ScraperSupport
+import dev.jacobhayes.bootleg.core.catalog.getText
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.checkedReleases
-import dev.jacobhayes.bootleg.core.catalog.scrapers.server.getText
-import dev.jacobhayes.bootleg.core.catalog.scrapers.server.parseSha256Sums
 
 /**
  * GParted Live and Clonezilla Live share one release process: a stable `CHECKSUMS.TXT` (MD5 through
@@ -55,7 +55,7 @@ internal fun parseLiveCdChecksums(
 ): List<LiveCdImage> {
     val imageName = Regex("""^${Regex.escape(filePrefix)}-(\d+(?:\.\d+)+-\d+)-(amd64|arm64)\.iso$""")
     val images =
-        parseSha256Sums(text).mapNotNull { (fileName, sha256) ->
+        ScraperSupport.parseSha256Sums(text).mapNotNull { (fileName, sha256) ->
             val match = imageName.matchEntire(fileName) ?: return@mapNotNull null
             val arch = if (match.groupValues[2] == "amd64") Arch.X86_64 else Arch.ARM64
             LiveCdImage(match.groupValues[1], arch, fileName, sha256)

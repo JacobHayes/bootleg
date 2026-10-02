@@ -3,7 +3,7 @@ package dev.jacobhayes.bootleg.core.catalog.scrapers
 import dev.jacobhayes.bootleg.core.catalog.Arch
 import dev.jacobhayes.bootleg.core.catalog.CatalogLimits
 import dev.jacobhayes.bootleg.core.catalog.JdkHttp
-import dev.jacobhayes.bootleg.core.catalog.scrapers.server.parseSha256Sums
+import dev.jacobhayes.bootleg.core.catalog.ScraperSupport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -79,7 +79,7 @@ class ServerAndRescueLiveTest {
     private suspend fun fetchSums(url: String): Map<String, String> {
         val response = http.get(url)
         check(response.status == 200) { "GET $url: HTTP ${response.status}" }
-        return parseSha256Sums(response.body)
+        return ScraperSupport.parseSha256Sums(response.body)
     }
 
     private suspend fun isReachable(url: String): Boolean {

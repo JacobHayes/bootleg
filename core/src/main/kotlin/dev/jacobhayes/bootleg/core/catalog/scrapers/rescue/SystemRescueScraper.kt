@@ -6,11 +6,11 @@ import dev.jacobhayes.bootleg.core.catalog.Distro
 import dev.jacobhayes.bootleg.core.catalog.Http
 import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.catalog.Scraper
+import dev.jacobhayes.bootleg.core.catalog.ScraperSupport
+import dev.jacobhayes.bootleg.core.catalog.getText
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.checkedReleases
-import dev.jacobhayes.bootleg.core.catalog.scrapers.server.getText
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.hrefs
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.numericVersionOrder
-import dev.jacobhayes.bootleg.core.catalog.scrapers.server.parseSha256Sums
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.resolveUrl
 
 /**
@@ -24,7 +24,7 @@ class SystemRescueScraper(
 
     override suspend fun releases(http: Http): List<Release> {
         val links = parseSystemRescueDownloadPage(http.getText(downloadPageUrl), downloadPageUrl) ?: return emptyList()
-        val sums = parseSha256Sums(http.getText(links.sumsUrl))
+        val sums = ScraperSupport.parseSha256Sums(http.getText(links.sumsUrl))
         val sha256 = checkNotNull(sums[links.fileName]) { "systemrescue: ${links.sumsUrl} does not list ${links.fileName}" }
         return checkedReleases(
             listOf(

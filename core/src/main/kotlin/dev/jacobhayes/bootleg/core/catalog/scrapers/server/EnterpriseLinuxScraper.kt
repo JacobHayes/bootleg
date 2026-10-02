@@ -6,6 +6,9 @@ import dev.jacobhayes.bootleg.core.catalog.Distro
 import dev.jacobhayes.bootleg.core.catalog.Http
 import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.catalog.Scraper
+import dev.jacobhayes.bootleg.core.catalog.ScraperSupport
+import dev.jacobhayes.bootleg.core.catalog.getText
+import dev.jacobhayes.bootleg.core.catalog.getTextOrNull
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -138,7 +141,7 @@ internal fun parseEnterpriseLinuxChecksum(
     major: Int,
     archName: String,
 ): List<EnterpriseLinuxImage> {
-    val sums = parseSha256Sums(text)
+    val sums = ScraperSupport.parseSha256Sums(text)
     val sizes =
         Regex("""^#\s*(\S+):\s*(\d+) bytes\s*$""", RegexOption.MULTILINE)
             .findAll(text)

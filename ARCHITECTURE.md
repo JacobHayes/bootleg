@@ -211,6 +211,11 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   usage pages. A Swift capture helper records events while F24 and Shift taps and cancelling
   mouse deltas are sent, and asserts that exactly those were seen. If macOS denies capture
   (Input Monitoring), the test falls back to enumeration only.
+- L3 tolerates upstream flakiness, not breakage: a scraper (and each image probe or sums fetch)
+  that fails on a timeout, connection reset, 5xx, 425 or 429 is retried once (both scraper attempts
+  share a 32s budget). At most one scraper per run may still fail that way; it is skipped with a
+  `WARN L3:` line naming it. Parse, format and validation errors, or a second transient scraper,
+  fail the run.
 - Budget (warm cache), totalling ~2m50s: L0 ~15s, L1+L2 ~35s, L3 ~45s run in parallel with L4,
   and L4 ~100s.
 - Accepted risks (v1): no TLS in offline hotspot mode (WPA2/3 link only), no checksum signature

@@ -6,6 +6,8 @@ import dev.jacobhayes.bootleg.core.catalog.Distro
 import dev.jacobhayes.bootleg.core.catalog.Http
 import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.catalog.Scraper
+import dev.jacobhayes.bootleg.core.catalog.ScraperSupport
+import dev.jacobhayes.bootleg.core.catalog.getText
 import java.time.LocalDate
 import java.time.ZoneOffset
 
@@ -55,7 +57,7 @@ internal data class ProxmoxImage(
 /** Every Proxmox VE installer ISO in SHA256SUMS; other products (backup server, mail gateway) are skipped. */
 internal fun parseProxmoxSums(text: String): List<ProxmoxImage> {
     val imageName = Regex("""^proxmox-ve_((\d+)\.\d+-\d+)(-arm64)?\.iso$""")
-    return parseSha256Sums(text).mapNotNull { (fileName, sha256) ->
+    return ScraperSupport.parseSha256Sums(text).mapNotNull { (fileName, sha256) ->
         val match = imageName.matchEntire(fileName) ?: return@mapNotNull null
         val arch = if (match.groupValues[3].isEmpty()) Arch.X86_64 else Arch.ARM64
         ProxmoxImage(match.groupValues[2].toInt(), match.groupValues[1], arch, fileName, sha256)

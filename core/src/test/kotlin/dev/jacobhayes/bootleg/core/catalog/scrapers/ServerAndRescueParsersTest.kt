@@ -20,19 +20,8 @@ import dev.jacobhayes.bootleg.core.catalog.scrapers.server.parseEnterpriseLinuxC
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.parseMajorVersions
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.parseProxmoxIsoDates
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.parseProxmoxSums
-import dev.jacobhayes.bootleg.core.catalog.scrapers.server.parseSha256Sums
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.parseSingleSha256
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.selectProxmoxImages
-import io.kotest.property.Arb
-import io.kotest.property.arbitrary.Codepoint
-import io.kotest.property.arbitrary.az
-import io.kotest.property.arbitrary.bind
-import io.kotest.property.arbitrary.choice
-import io.kotest.property.arbitrary.element
-import io.kotest.property.arbitrary.hex
-import io.kotest.property.arbitrary.list
-import io.kotest.property.arbitrary.string
-import io.kotest.property.checkAll
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -45,71 +34,6 @@ class ServerAndRescueParsersTest {
     private val hashA = "a".repeat(64)
     private val hashB = "b".repeat(64)
     private val hashC = "C".repeat(64)
-
-    @Test
-    fun `sums parser reads GNU text, GNU binary and BSD lines and skips noise`() {
-        val text =
-            """
-            -----BEGIN PGP SIGNED MESSAGE-----
-            Hash: SHA256
-
-            # one.iso: 123 bytes
-            $hashA  one.iso
-            $hashB *two.img
-            SHA256 (three.iso) = $hashC
-            d41d8cd98f00b204e9800998ecf8427e  md5-only.iso
-            -----BEGIN PGP SIGNATURE-----
-            iQIzBAEBCAAdFiEEvF7dyt9QLAd/FYKIKugeis7XJYsFAmZRm10ACgkQKugeis7X
-            """.trimIndent()
-        assertEquals(mapOf("one.iso" to hashA, "two.img" to hashB, "three.iso" to hashC.lowercase()), parseSha256Sums(text))
-    }
-
-    @Test
-    fun `sums parser reads only the SHA256SUMS section of sectioned files`() {
-        val text =
-            """
-            ### MD5SUMS:
-            d41d8cd98f00b204e9800998ecf8427e  live.iso
-
-            ### SHA256SUMS:
-            $hashA  live.iso
-
-            ### B3SUMS:
-            $hashB  live.iso
-            """.trimIndent()
-        assertEquals(mapOf("live.iso" to hashA), parseSha256Sums(text))
-    }
-
-    @Test
-    fun `sums parser rejects empty, garbage and conflicting input`() {
-        assertThrows<IllegalStateException> { parseSha256Sums("") }
-        assertThrows<IllegalStateException> { parseSha256Sums("<html>Not Found</html>") }
-        assertThrows<IllegalStateException> { parseSha256Sums("${"a".repeat(63)}  short.iso") }
-        assertThrows<IllegalStateException> { parseSha256Sums("$hashA  x.iso\n$hashB  x.iso") }
-        // A sectioned file without a SHA256 section has nothing usable.
-        assertThrows<IllegalStateException> { parseSha256Sums("### B3SUMS:\n$hashA  x.iso") }
-    }
-
-    @Test
-    fun `sums parser only ever fails with IllegalStateException and only yields lowercase sha256`() {
-        val hex = Arb.string(64, Codepoint.hex())
-        val line =
-            Arb.choice(
-                Arb.bind(hex, Arb.string(1..20, Codepoint.az())) { hash, name -> "$hash  $name.iso" },
-                Arb.bind(hex, Arb.string(1..20, Codepoint.az())) { hash, name -> "SHA256 ($name.img) = $hash" },
-                Arb.element("### SHA256SUMS:", "### B3SUMS:", "# comment", "", "-----BEGIN PGP SIGNATURE-----"),
-                Arb.string(0..120),
-            )
-        runBlocking {
-            checkAll(1_000, Arb.list(line, 0..30)) { lines ->
-                try {
-                    val sums = parseSha256Sums(lines.joinToString("\n"))
-                    assertTrue(sums.isNotEmpty() && sums.values.all { Regex("^[0-9a-f]{64}$").matches(it) })
-                } catch (_: IllegalStateException) {
-                }
-            }
-        }
-    }
 
     @Test
     fun `single sha256 accepts bare and named hashes, rejects others`() {

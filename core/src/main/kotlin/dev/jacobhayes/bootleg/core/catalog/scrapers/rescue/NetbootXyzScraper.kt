@@ -6,9 +6,9 @@ import dev.jacobhayes.bootleg.core.catalog.Distro
 import dev.jacobhayes.bootleg.core.catalog.Http
 import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.catalog.Scraper
+import dev.jacobhayes.bootleg.core.catalog.ScraperSupport
+import dev.jacobhayes.bootleg.core.catalog.getText
 import dev.jacobhayes.bootleg.core.catalog.scrapers.server.checkedReleases
-import dev.jacobhayes.bootleg.core.catalog.scrapers.server.getText
-import dev.jacobhayes.bootleg.core.catalog.scrapers.server.parseSha256Sums
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -27,7 +27,7 @@ class NetbootXyzScraper(
     override suspend fun releases(http: Http): List<Release> {
         val sumsUrl = "${ipxeRootUrl}netboot.xyz-sha256-checksums.txt"
         val text = http.getText(sumsUrl)
-        val sums = parseSha256Sums(text)
+        val sums = ScraperSupport.parseSha256Sums(text)
         val version = parseNetbootXyzBuildDate(text) ?: "latest"
         return checkedReleases(
             netbootXyzImages.mapNotNull { image ->
