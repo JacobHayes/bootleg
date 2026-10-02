@@ -394,12 +394,17 @@ required for direct LAN paths and incoming hotspot connections. Log upload is of
   - The CLI pins the tailnet host and refuses redirects and proxies.
 
 ### Go↔Kotlin bridge (gomobile)
+`remote/PROTOCOL.md` is the exact contract (bridge, connJson, messages, errors, close codes,
+frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` and
+`remote/protocol/protocol.go`.
+
 - **Go → Kotlin.** All of these only enqueue and return within 20ms, on Go goroutine threads.
-  Go never holds a lock across a callback.
-  - `Open(sessionId, connJson)`
-  - `Command(sessionId, json)`
-  - `Hid(sessionId, bytes) → queued | queue_full`
-  - `Closed(sessionId, reason)`, which is idempotent
+  Go never holds a lock across a callback. Session IDs are int64.
+  - `Open(sessionId, connJson)`, never dropped
+  - `Command(sessionId, json)`; overflowing the session's queue closes it (`rate_limited`)
+  - `Hid(sessionId, bytes) → queued | queue_full` (a dropped frame makes Kotlin release the
+    holder's keys; release-all frames always get through)
+  - `Closed(sessionId, reason)`, exactly once per session
 - **Authorization fails closed.** Until Kotlin calls `Authorized(sessionId)`, Go forwards only
   `hello`, or `/pair` on the hotspot.
 - **Queues:** per session, 64 inbound plus a priority lane for revoke, release and close.
@@ -407,10 +412,15 @@ required for direct LAN paths and incoming hotspot connections. Log upload is of
   - `Authorized(sessionId)`
   - `Send(sessionId, json)`: bounded to 32 outbound messages; a slow consumer is disconnected.
   - `Close(sessionId, reason)`
-  - `Revoke(nodeId|tokenHash)`
+  - `Revoke(kind, id)`, with kind `node` (stable node ID) or `token` (token SHA-256)
 
   State pushes are coalesced to at most 10/s.
 - **Late callbacks:** a callback that finishes late is fenced by the epoch, not by timing.
+- **Kotlin side** (`core/remote`): `RemoteController.handle(event) → effects` is the pure state
+  machine; `RemoteActor` queues events, runs one step at a time and dispatches effects to ports
+  (`TransportPort`, `DevicePort`, `HidPort`, `ApprovalStore`, `PairingStore`, `Notifier`). Jobs run
+  after the event in each step, so a close or revoke stops them before any further report. The
+  actor polls `HidPort.releaseOwed` (the HidSession barrier) every 10ms while input waits on it.
 
 ### Protocol v1
 - **Handshake:** `hello{v:1}` → `welcome{v:1, sessionId, auth, stateRev, lease{holder, epoch}}`.
@@ -421,7 +431,9 @@ required for direct LAN paths and incoming hotspot connections. Log upload is of
   - Images are named by server `imageId`, never by path.
 - **Requests and pushes:**
   - `state.get`
-  - `lease.take` (only when free), `lease.takeover{holderSession, epoch}`, `lease.release`
+  - `lease.take` (only when free), `lease.takeover{holderSession}` with the holder's epoch in
+    the envelope (the holder answers `lease.takeover_reply{allow}`; 30s without an answer
+    declines), `lease.release`
   - `slots.apply{slots:[{lun, imageId, mode}], ifRev}`, `slot.eject{lun, force}`,
     `slot.reinsert{lun}`
   - `hid.set{keyboard, mouse}`
@@ -429,7 +441,11 @@ required for direct LAN paths and incoming hotspot connections. Log upload is of
   - `paste.prepare{text}` → `{planId, unsupported, durationMs}`. Then `paste.run{planId}`, which
     is bound to the plan and the epoch, and `paste.cancel`. At most 4 plans per session, each
     living 2 minutes.
-  - Pushes: `state{rev, ...}` and `lease{holder, epoch}`.
+  - `pair{code, tokenHash}`: the hotspot `/pair` exchange. Go mints the token and forwards its
+    hash on a short-lived session; Kotlin answers `{ok}` once and stores the hash on success.
+  - `paste.run` and `bootkey.run` answer when the job ends.
+  - Pushes: `welcome`, `auth`, `state{rev, ..., lease}`, `lease{lease:{holder, epoch, local}}`,
+    `lease.takeover_request`, `lease.takeover_cancelled`.
 - **Binary frames:** `epoch(u16 BE) op ...`, with exact lengths.
   - `01 uu` key down. A duplicate down is idempotent. Beyond 6 non-modifier keys the report
     sends rollover.
