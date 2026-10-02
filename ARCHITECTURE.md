@@ -179,6 +179,16 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   are adapted from tailscale-android `libtailscale/net.go`. State lives in app-private
   `noBackup` storage, single instance. Enrollment is an in-app login URL. An auth key file is
   only an optional dev/test path; nothing is shipped.
+- Spike result (`remote/SPIKE.md`): this works on the device. The Go module is in `remote/`,
+  and `mise run remote:aar` builds it into a gomobile AAR. Required on Android 17:
+  - Kotlin supplies the interface list through `netmon.RegisterInterfaceGetter`.
+  - Set `TS_LOGS_DIR`/`TMPDIR`, or tsnet panics.
+  - Grant the runtime permission `ACCESS_LOCAL_NETWORK`, or LAN `sendto` fails with EPERM and
+    traffic only goes through DERP.
+
+  Log upload is off. The HTTP/WebSocket server lives in Go as a thin transport shell (WhoIs sits
+  next to the listener). Decisions stay in Kotlin `core/` and are reached through a narrow
+  callback interface.
 - Auth: `WhoIs` on tsnet peer addresses gives the stable node ID. A node is paired by in-app
   approval and can be revoked; approvals are re-checked per session. Tagged nodes are shown as
   tags.
