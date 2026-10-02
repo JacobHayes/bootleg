@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.media.MediaScannerConnection
+import android.os.Binder
 import android.os.IBinder
 import android.util.Log
 import com.topjohnwu.superuser.Shell
@@ -16,8 +17,12 @@ import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
+import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
+import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.hid.HidEndpoint
+import dev.jacobhayes.bootleg.hid.RootHidEndpoint
 import dev.jacobhayes.bootleg.root.BootlegJson
 import dev.jacobhayes.bootleg.root.BootlegRootService
 import dev.jacobhayes.bootleg.root.IBootlegRoot
@@ -54,6 +59,9 @@ class BootlegBackendImpl(
 
     private val bindMutex = Mutex()
 
+    /** Lives as long as this process; when it dies, root releases every HID key and button. */
+    private val hidClientToken = Binder()
+
     @Volatile private var connection: RootConnection? = null
 
     /** True when any slot is meant to be exported; the foreground service runs while this holds. */
@@ -76,6 +84,18 @@ class BootlegBackendImpl(
     override suspend fun reinsert(lun: Int): ApplyResult = gadgetCall { it.reinsert(lun) }
 
     override suspend fun bootlegOff(): ApplyResult = gadgetCall { it.bootlegOff() }
+
+    override suspend fun setHid(spec: HidSpec): ApplyResult {
+        // Apply against the freshest journal so the drives the root side holds are kept as they are.
+        runCatchingNonCancel { refreshGadget() }.onFailure { return ApplyResult.Failed(it.message ?: it.javaClass.simpleName) }
+        return apply(journalFlow.value.desired.copy(hid = spec))
+    }
+
+    override suspend fun openHid(kind: HidKind): HidEndpoint {
+        val root = root()
+        withContext(Dispatchers.IO) { root.hidOpen(kind.wireName, hidClientToken) }
+        return RootHidEndpoint(root, kind)
+    }
 
     suspend fun reconcile(): ApplyResult = gadgetCall { it.reconcile() }
 

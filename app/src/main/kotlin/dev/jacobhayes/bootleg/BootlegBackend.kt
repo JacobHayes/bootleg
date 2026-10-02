@@ -3,7 +3,10 @@ package dev.jacobhayes.bootleg
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
+import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
+import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.hid.HidEndpoint
 import kotlinx.coroutines.flow.StateFlow
 
 enum class BlankImageFormat { RAW, FAT32, EXFAT, EXT4 }
@@ -61,4 +64,10 @@ interface BootlegBackend {
     ): Result<ImageFile>
 
     suspend fun deleteImage(path: String): Result<Unit>
+
+    /** Exposes or removes the HID keyboard/mouse, keeping the current drives (re-enumerates USB). */
+    suspend fun setHid(spec: HidSpec): ApplyResult
+
+    /** Opens one of Bootleg's HID functions through the root relay; the caller closes it. */
+    suspend fun openHid(kind: HidKind): HidEndpoint
 }

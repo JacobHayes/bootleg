@@ -9,6 +9,8 @@ import dev.jacobhayes.bootleg.BlankImageFormat
 import dev.jacobhayes.bootleg.BootlegApp
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
+import dev.jacobhayes.bootleg.core.gadget.HidSpec
+import dev.jacobhayes.bootleg.core.hid.HidTestSequence
 import dev.jacobhayes.bootleg.root.BootlegJson
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.runBlocking
@@ -87,6 +89,30 @@ class CommandProvider : ContentProvider() {
                                     put("allocatedBytes", created.allocatedBytes)
                                 }.toString()
                             }
+                            "HID_ENABLE" ->
+                                result(
+                                    app.hid.setSpec(
+                                        HidSpec(arguments.getBoolean("keyboard", true), arguments.getBoolean("mouse", true)),
+                                    ),
+                                )
+                            "HID_OFF" -> result(app.hid.setSpec(HidSpec()))
+                            "HID_STATE" -> hidStateJson(app)
+                            // Only fixed harmless sequences (F24, a Shift tap, a cancelling mouse move): never arbitrary input.
+                            "HID_SEND" -> {
+                                val name = arguments.getString("sequence") ?: arg
+                                val sequence =
+                                    requireNotNull(name?.let(HidTestSequence::fromWireName)) {
+                                        "sequence must be one of ${HidTestSequence.entries.map { it.wireName }}"
+                                    }
+                                val sent = app.hid.sendTestSequence(sequence)
+                                buildJsonObject {
+                                    put("sequence", sent.sequence)
+                                    put("queued", sent.queued)
+                                    put("written", sent.written)
+                                    put("dropped", sent.dropped)
+                                    put("link", sent.link.toString())
+                                }.toString()
+                            }
                             else -> throw IllegalArgumentException("unknown method $method")
                         }
                     }
@@ -97,6 +123,28 @@ class CommandProvider : ContentProvider() {
                 errorJson(e.message ?: e.javaClass.simpleName, e)
             }
         return Bundle().apply { putString("json", json) }
+    }
+
+    private fun hidStateJson(app: BootlegApp): String {
+        val stats = app.hid.stats.value
+        return buildJsonObject {
+            put("keyboard", app.hid.spec.value.keyboard)
+            put("mouse", app.hid.spec.value.mouse)
+            put(
+                "link",
+                app.hid.link.value
+                    .toString(),
+            )
+            put("written", stats.reportsWritten)
+            put("dropped", stats.reportsDropped)
+            put("releaseAll", stats.releaseAllCount)
+            put("lastError", stats.lastError)
+            put(
+                "leds",
+                app.hid.leds.value
+                    ?.toString(),
+            )
+        }.toString()
     }
 
     private fun result(result: ApplyResult) = BootlegJson.encodeToString(result)

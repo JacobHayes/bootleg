@@ -5,11 +5,15 @@ import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
+import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.LunState
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
+import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.hid.HidEndpoint
 import dev.jacobhayes.bootleg.storage.StoragePaths
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -103,6 +107,11 @@ class FakeBootlegBackend(
         return Result.success(Unit)
     }
 
+    override suspend fun setHid(spec: HidSpec): ApplyResult = apply(journalFlow.value.desired.copy(hid = spec))
+
+    /** There are no HID devices here; opening never completes, so screens show a steady "connecting" state. */
+    override suspend fun openHid(kind: HidKind): HidEndpoint = awaitCancellation()
+
     /** Simulates macOS holding the volume mounted: a normal eject is refused (EBUSY). */
     var ejectPreventedByHost = false
 
@@ -123,8 +132,13 @@ class FakeBootlegBackend(
                         nofua = false,
                     )
             }
-        val functions = if (luns.isEmpty()) setOf("ffs.adb") else setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION)
-        return GadgetState(udc = FAKE_UDC, functions = functions, configLinks = emptyMap(), luns = luns)
+        val hidFunctions =
+            listOfNotNull(
+                GadgetNames.HID_KEYBOARD_FUNCTION.takeIf { journal.desired.hid.keyboard },
+                GadgetNames.HID_MOUSE_FUNCTION.takeIf { journal.desired.hid.mouse },
+            )
+        val functions = (if (luns.isEmpty()) setOf("ffs.adb") else setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION)) + hidFunctions
+        return GadgetState(udc = FAKE_UDC, functions = functions, configLinks = hidFunctions.associateWith { it }, luns = luns)
     }
 
     companion object {

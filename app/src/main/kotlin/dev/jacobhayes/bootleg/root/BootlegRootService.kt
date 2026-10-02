@@ -10,6 +10,7 @@ import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
 import dev.jacobhayes.bootleg.core.hid.HidDescriptors
+import dev.jacobhayes.bootleg.core.hid.HidKind
 
 /**
  * Root side of the app (libsu RootService, daemon mode: it outlives the app's process).
@@ -20,6 +21,10 @@ class BootlegRootService : RootService() {
 
     // Formatting can take a while; it must not block ejects.
     private val imageLock = Any()
+
+    // HID writes take at most the 50ms write deadline; they must never wait behind a gadget apply.
+    private val hidLock = Any()
+    private val hidRelay = HidRelay()
     private val journalStore = FileJournalStore()
     private val images = ImageStore()
     private lateinit var controller: DefaultGadgetController
@@ -104,7 +109,23 @@ class BootlegRootService : RootService() {
                     images.ensureStoreDirectory()
                     RootCommands.run(listOf("appops", "set", "--uid", packageName, "MANAGE_EXTERNAL_STORAGE", "allow")).exitCode == 0
                 }
+
+            override fun hidOpen(
+                kind: String,
+                client: IBinder,
+            ) = call(hidLock) { hidRelay.open(hidKind(kind), client) }
+
+            override fun hidWrite(
+                kind: String,
+                report: ByteArray,
+            ): Int = call(hidLock) { hidRelay.write(hidKind(kind), report).ordinal }
+
+            override fun hidReadOutput(kind: String): ByteArray = call(hidLock) { hidRelay.readOutput(hidKind(kind)) }
+
+            override fun hidClose(kind: String) = call(hidLock) { hidRelay.close(hidKind(kind)) }
         }
+
+    private fun hidKind(kind: String): HidKind = requireNotNull(HidKind.fromWireName(kind)) { "unknown HID kind: $kind" }
 
     /** Image paths become canonical kernel paths before they reach the controller. */
     private fun canonicalize(desired: Desired): Desired =

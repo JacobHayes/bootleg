@@ -182,7 +182,9 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   - `apply(desired)`, `eject(lun, force)`, `reinsert(lun)`, `reconcile()`, `bootlegOff()`
   - `createBlankImage(name, sizeBytes, format, preallocate)`, `deleteImage(path)`, `listImages()`
   - `grantSelfStorage()`
-  - later: `openHid(kind) â†’ ParcelFileDescriptor`, `setRemotePowerProfile(on)`
+  - `hidOpen(kind, clientToken)`, `hidWrite(kind, report) â†’ result`, `hidReadOutput(kind)`,
+    `hidClose(kind)` (`kind` is `keyboard` or `mouse`)
+  - later: `setRemotePowerProfile(on)`
 
   Image paths (`/sdcard/...` is mapped to `/data/media/0/...`) must be normalized (no `.`, `..` or
   empty components), inside an allowed root (`/data/media/0/`), and regular files; a path through
@@ -198,9 +200,21 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   other order), so no apply can export the file between the exported check and the unlink.
 - With no journal (first start), the root service adopts Bootleg's live exports (`apply` of the
   live state) instead of letting `reconcile` remove them.
-- The journal lives at `/data/adb/bootleg/journal.json` (dir 0700), written temp + fsync + rename.
-- HID: the root process opens `/dev/hidgN` and hands back the fd. The app writes reports
-  directly, with no shell per report. The fd is reopened on `ENXIO`/`ESHUTDOWN` (host off).
+- The journal lives at `/data/adb/bootleg/journal.json` (dir 0700), written temp + fsync + rename +
+  directory fsync (so the rename itself survives a power loss).
+- HID: root holds the `/dev/hidgN` fds and relays reports; the app sends each one over AIDL
+  (`hidWrite`, no shell per report). Handing the fd to the app doesn't work: the nodes carry the
+  generic `device` SELinux label, and binder checks a passed fd against the receiver
+  (`avc: denied { read write } ... untrusted_app ... device:chr_file`). Relabeling the node would
+  weaken policy, so Bootleg doesn't. The node is found by device number: root reads the function's
+  `dev` attribute (`major:minor`) and matches it against `st_rdev` of each `/dev/hidg*` (never by
+  index, since other apps' `hid.*` functions own hidg nodes too), opens it
+  `O_RDWR|O_NONBLOCK|O_NOFOLLOW` and re-checks the opened fd with `fstat`. Each `hidWrite` checks
+  the report length, then writes nonblocking, polling for at most the 50ms deadline, so a host that
+  stops polling never holds a binder thread longer. HID calls use their own lock, never the gadget
+  lock. Calls are synchronous from the session's single writer (well under 1ms each), so reports
+  arrive in order. `hidOpen` links to a client token; if the app process dies, root writes
+  release-all to both functions and closes them. The app reopens on `ENXIO`/`ESHUTDOWN` (host off).
 
 ## Storage & files
 
@@ -272,6 +286,21 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   deferred until `SET_PROTOCOL` handling is proven.
 - Nonblocking writes with a 50ms deadline, a bounded queue (256), and release-all on
   overflow, disconnect, or controller change.
+- `HidSession` (app) owns both relay endpoints and writes from one coroutine. A report the host doesn't take
+  within the deadline means the host stopped polling (asleep, rebooting): queued input is dropped,
+  never replayed late, and new input is refused until the owed release-all (all-zero keyboard and
+  mouse reports) gets through. After 2s of that, or on `ENXIO`/`ESHUTDOWN`, the endpoints are reopened
+  with backoff (250ms doubling to 5s, at most 40 attempts; the next input retries after that).
+  Release-all also happens on stop, on app background and on queue overflow, and resets the
+  on-screen modifier and button state. Keyboard LED output reports are polled while idle.
+- Input mapping is pure (`core/hid`): `TouchpadGestures` (drag moves with acceleration, tap = left,
+  two-finger tap = right, hold = drag with the left button; no wheel yet, so no scroll gesture),
+  `KeyboardInput` on `StickyModifiers` (held and locked modifiers go to the host at once; a
+  latched one only with the next key, so a latched Win never opens the Start menu alone).
+- Paste-as-typing sends one report every 8ms (~60 characters a second). Boot-key plans re-send a
+  held key every 200ms, so a host that resets USB while booting still sees it.
+- Debug builds expose only fixed harmless sequences to adb (`HID_SEND`: `f24`, `shift`, `mouse`
+  cancelling move); there is no arbitrary typing from adb.
 
 ## Remote (phase 3) â€” feasibility spike first
 
@@ -334,7 +363,8 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   dead-man fork, poll or getprop inside the window fails it. Controller tests audit every
   reconfiguration op at the moment it reaches the kernel model: stably bound with `Mutating`
   journaled, or inside a window with nothing linked.
-- L4 HID capture: the Mac's `hidutil`/`ioreg` must list both Bootleg devices with the expected usage pages. A Swift capture helper records events while F24 and Shift taps and cancelling
+- L4 HID capture (`mise run check:device:hid`, `scripts/check-device-hid.sh`): the Mac's
+  `hidutil` must list both Bootleg devices with the expected usage pages. A Swift capture helper records events while F24 and Shift taps and cancelling
   mouse deltas are sent, and asserts that exactly those were seen. If macOS denies capture
   (Input Monitoring), the test falls back to enumeration only.
 - L3 tolerates upstream flakiness, not breakage: a scraper (and each image probe or sums fetch)

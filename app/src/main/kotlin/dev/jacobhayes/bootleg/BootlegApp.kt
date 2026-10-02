@@ -11,6 +11,7 @@ import dev.jacobhayes.bootleg.download.DownloadNotifications
 import dev.jacobhayes.bootleg.download.DownloadScheduler
 import dev.jacobhayes.bootleg.download.DownloadStore
 import dev.jacobhayes.bootleg.download.Downloads
+import dev.jacobhayes.bootleg.hid.HidController
 import dev.jacobhayes.bootleg.service.BootlegBackendImpl
 import dev.jacobhayes.bootleg.storage.FileTasks
 import dev.jacobhayes.bootleg.storage.StoragePaths
@@ -36,6 +37,7 @@ class BootlegApp : Application() {
 
     val catalog by lazy { CatalogRepository(catalogScrapers(), catalogHttp, File(filesDir, "catalog-cache.json")) }
     val drives by lazy { DrivesController(backend, appScope) }
+    val hid by lazy { HidController(backend, appScope).also { registerActivityLifecycleCallbacks(it.backgroundWatcher) } }
     val fileTasks by lazy { FileTasks(contentResolver, appScope, storeDir) { backend.refreshImages() } }
 
     val downloads by lazy {
