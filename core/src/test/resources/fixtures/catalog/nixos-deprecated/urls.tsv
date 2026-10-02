@@ -1,0 +1,9 @@
+16e4091646ee3e6b	200	https://channels.nixos.org/nixos-25.11/latest-nixos-minimal-aarch64-linux.iso.sha256
+329bb2a830d12620	200	https://channels.nixos.org/nixos-25.11/latest-nixos-graphical-aarch64-linux.iso.sha256
+3897a5d3e30af936	200	https://channels.nixos.org/nixos-26.05/latest-nixos-minimal-aarch64-linux.iso.sha256
+42accf11d0b22df0	200	https://channels.nixos.org/nixos-26.05/latest-nixos-graphical-aarch64-linux.iso.sha256
+903efe9dca5fbe3b	200	https://channels.nixos.org/nixos-26.05/latest-nixos-minimal-x86_64-linux.iso.sha256
+b33e726d2ef5d3b2	200	https://channels.nixos.org/nixos-26.05/latest-nixos-graphical-x86_64-linux.iso.sha256
+d0863a1943927b6c	200	https://channels.nixos.org/nixos-25.11/latest-nixos-minimal-x86_64-linux.iso.sha256
+d7473942d447b4b8	200	https://prometheus.nixos.org/api/v1/query?query=channel_revision
+dd35abd05866f3ed	200	https://channels.nixos.org/nixos-25.11/latest-nixos-graphical-x86_64-linux.iso.sha256

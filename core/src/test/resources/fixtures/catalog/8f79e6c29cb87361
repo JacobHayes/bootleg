@@ -1,0 +1,18 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+ <head>
+  <title>Index of /debian-cd/current-live</title>
+  <link rel="stylesheet" href="/layout/autoindex.css" type="text/css">
+<meta name="viewport" content="width=device-width, initial-scale=1"> </head>
+ <body>
+  <h1 id="indextitle">Index of /debian-cd/current-live</h1>
+  <table id="indexlist">
+   <tr class="indexhead"><th class="indexcolicon"><img src="/icons2/blank.png" alt="[ICO]"></th><th class="indexcolname"><a href="?C=N;O=D">Name</a></th><th class="indexcollastmod"><a href="?C=M;O=A">Last modified</a></th><th class="indexcolsize"><a href="?C=S;O=A">Size</a></th></tr>
+   <tr class="indexbreakrow"><th colspan="4"><hr></th></tr>
+   <tr class="even"><td class="indexcolicon"><a href="/debian-cd/"><img src="/icons2/go-previous.png" alt="[PARENTDIR]"></a></td><td class="indexcolname"><a href="/debian-cd/">Parent Directory</a></td><td class="indexcollastmod">&nbsp;</td><td class="indexcolsize">  - </td></tr>
+   <tr class="odd"><td class="indexcolicon"><a href="amd64/"><img src="/icons2/folder.png" alt="[DIR]"></a></td><td class="indexcolname"><a href="amd64/">amd64/</a></td><td class="indexcollastmod">2026-09-12 18:20  </td><td class="indexcolsize">  - </td></tr>
+   <tr class="even"><td class="indexcolicon"><a href="source/"><img src="/icons2/folder.png" alt="[DIR]"></a></td><td class="indexcolname"><a href="source/">source/</a></td><td class="indexcollastmod">2026-09-12 18:20  </td><td class="indexcolsize">  - </td></tr>
+   <tr class="indexbreakrow"><th colspan="4"><hr></th></tr>
+</table>
+<address>Apache/2.4.68 (Unix) Server at cdimage.debian.org Port 443</address>
+</body></html>

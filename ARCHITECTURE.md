@@ -130,7 +130,15 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
 - `sumsSigned` is informational in v1: GPG signature verification is not done (documented). HEAD
   failures fall back to a ranged `GET bytes=0-0`.
 - Bounded parallel fetch (4), 20s timeout. Each scraper fails independently and its error shows in
-  the UI.
+  the UI. `Catalog` enforces the cap on in-flight requests across all scrapers (so scrapers may fan
+  out internally), gives each scraper a 60s deadline, drops duplicates, and rejects releases with a
+  non-https URL, an unsafe file name (`/`, `\`, `..`, leading `.`), a malformed sha256, or neither a
+  sha256 nor a sums URL.
+- Supported-release rules where upstream has no "supported" flag: Ubuntu uses distro-info-data
+  dates (flavor LTS = 3 years); Fedora keeps the two newest stable releases; Mint keeps the newest
+  point release of the two newest majors; Pop!_OS probes `YY.04` LTS versions from the last 4 years.
+  openSUSE images resolve through MirrorCache metalinks (`.meta4`), which pin the versioned file and
+  give its SHA-256 (Leap 16 publishes only SHA-512 files).
 - The last good result per distro is cached on device and shown as stale with its age. Nothing is
   bundled.
 - Downloads: user-initiated data transfer jobs (`JobInfo.setUserInitiated`). Wi-Fi only means a

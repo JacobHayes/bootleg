@@ -1,0 +1,969 @@
+{
+    "official": {
+        "plasma": {
+            "notes": "",
+            "date": "",
+            "image": "https://download.manjaro.org/kde/26.1.1/manjaro-kde-26.1.1-260825-linux71.iso",
+            "torrent": "https://download.manjaro.org/kde/26.1.1/manjaro-kde-26.1.1-260825-linux71.iso.torrent",
+            "checksum": "https://download.manjaro.org/kde/26.1.1/manjaro-kde-26.1.1-260825-linux71.iso.sha256",
+            "signature": "https://download.manjaro.org/kde/26.1.1/manjaro-kde-26.1.1-260825-linux71.iso.sig",
+            "minimal": {
+                "image": "https://download.manjaro.org/kde/26.1.1/manjaro-kde-26.1.1-minimal-260825-linux71.iso",
+                "torrent": "https://download.manjaro.org/kde/26.1.1/manjaro-kde-26.1.1-minimal-260825-linux71.iso.torrent",
+                "checksum": "https://download.manjaro.org/kde/26.1.1/manjaro-kde-26.1.1-minimal-260825-linux71.iso.sha256",
+                "signature": "https://download.manjaro.org/kde/26.1.1/manjaro-kde-26.1.1-minimal-260825-linux71.iso.sig"
+            }
+        },
+        "xfce": {
+            "notes": "",
+            "date": "",
+            "image": "https://download.manjaro.org/xfce/26.1.1/manjaro-xfce-26.1.1-260825-linux71.iso",
+            "torrent": "https://download.manjaro.org/xfce/26.1.1/manjaro-xfce-26.1.1-260825-linux71.iso.torrent",
+            "checksum": "https://download.manjaro.org/xfce/26.1.1/manjaro-xfce-26.1.1-260825-linux71.iso.sha256",
+            "signature": "https://download.manjaro.org/xfce/26.1.1/manjaro-xfce-26.1.1-260825-linux71.iso.sig",
+            "minimal": {
+                "image": "https://download.manjaro.org/xfce/26.1.1/manjaro-xfce-26.1.1-minimal-260825-linux71.iso",
+                "torrent": "https://download.manjaro.org/xfce/26.1.1/manjaro-xfce-26.1.1-minimal-260825-linux71.iso.torrent",
+                "checksum": "https://download.manjaro.org/xfce/26.1.1/manjaro-xfce-26.1.1-minimal-260825-linux71.iso.sha256",
+                "signature": "https://download.manjaro.org/xfce/26.1.1/manjaro-xfce-26.1.1-minimal-260825-linux71.iso.sig"
+            }
+        },
+        "gnome": {
+            "notes": "",
+            "date": "",
+            "image": "https://download.manjaro.org/gnome/26.1.1/manjaro-gnome-26.1.1-260825-linux71.iso",
+            "torrent": "https://download.manjaro.org/gnome/26.1.1/manjaro-gnome-26.1.1-260825-linux71.iso.torrent",
+            "checksum": "https://download.manjaro.org/gnome/26.1.1/manjaro-gnome-26.1.1-260825-linux71.iso.sha256",
+            "signature": "https://download.manjaro.org/gnome/26.1.1/manjaro-gnome-26.1.1-260825-linux71.iso.sig",
+            "minimal": {
+                "image": "https://download.manjaro.org/gnome/26.1.1/manjaro-gnome-26.1.1-minimal-260825-linux71.iso",
+                "torrent": "https://download.manjaro.org/gnome/26.1.1/manjaro-gnome-26.1.1-minimal-260825-linux71.iso.torrent",
+                "checksum": "https://download.manjaro.org/gnome/26.1.1/manjaro-gnome-26.1.1-minimal-260825-linux71.iso.sha256",
+                "signature": "https://download.manjaro.org/gnome/26.1.1/manjaro-gnome-26.1.1-minimal-260825-linux71.iso.sig"
+            }
+        }
+    },
+    "community": {
+        "cinnamon": {
+            "notes": "",
+            "date": "",
+            "image": "https://download.manjaro.org/cinnamon/25.0.3/manjaro-cinnamon-25.0.3-250609-linux612.iso",
+            "torrent": "https://download.manjaro.org/cinnamon/25.0.3/manjaro-cinnamon-25.0.3-250609-linux612.iso.torrent",
+            "checksum": "https://download.manjaro.org/cinnamon/25.0.3/manjaro-cinnamon-25.0.3-250609-linux612.iso.sha512",
+            "signature": "https://download.manjaro.org/cinnamon/25.0.3/manjaro-cinnamon-25.0.3-250609-linux612.iso.sig",
+            "minimal": {
+                "image": "https://download.manjaro.org/cinnamon/25.0.3/manjaro-cinnamon-25.0.3-minimal-250609-linux612.iso",
+                "torrent": "https://download.manjaro.org/cinnamon/25.0.3/manjaro-cinnamon-25.0.3-minimal-250609-linux612.iso.torrent",
+                "checksum": "https://download.manjaro.org/cinnamon/25.0.3/manjaro-cinnamon-25.0.3-minimal-250609-linux612.iso.sha512",
+                "signature": "https://download.manjaro.org/cinnamon/25.0.3/manjaro-cinnamon-25.0.3-minimal-250609-linux612.iso.sig"
+            }
+        },
+        "i3": {
+            "notes": "",
+            "date": "",
+            "image": "https://download.manjaro.org/i3/25.0.3/manjaro-i3-25.0.3-250609-linux612.iso",
+            "torrent": "https://download.manjaro.org/i3/25.0.3/manjaro-i3-25.0.3-250609-linux612.iso.torrent",
+            "checksum": "https://download.manjaro.org/i3/25.0.3/manjaro-i3-25.0.3-250609-linux612.iso.sha512",
+            "signature": "https://download.manjaro.org/i3/25.0.3/manjaro-i3-25.0.3-250609-linux612.iso.sig",
+            "minimal": {
+                "image": "https://download.manjaro.org/i3/25.0.3/manjaro-i3-25.0.3-minimal-250609-linux612.iso",
+                "torrent": "https://download.manjaro.org/i3/25.0.3/manjaro-i3-25.0.3-minimal-250609-linux612.iso.torrent",
+                "checksum": "https://download.manjaro.org/i3/25.0.3/manjaro-i3-25.0.3-minimal-250609-linux612.iso.sha512",
+                "signature": "https://download.manjaro.org/i3/25.0.3/manjaro-i3-25.0.3-minimal-250609-linux612.iso.sig"
+            }
+        },
+        "sway": {
+            "notes": "",
+            "date": "",
+            "custom": "https://manjaro-sway.download/"
+        }
+    },
+    "arm": {
+        "Generic": {
+            "gnome": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-gnome-generic-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-gnome-generic-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-gnome-generic-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-kde-plasma-generic-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-kde-plasma-generic-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-kde-plasma-generic-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-mate-generic-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-mate-generic-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-mate-generic-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-minimal-generic-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-minimal-generic-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-minimal-generic-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-sway-generic-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-sway-generic-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-sway-generic-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-xfce-generic-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-xfce-generic-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-images/releases/download/23.02/Manjaro-ARM-xfce-generic-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Generic EFI": {
+            "gnome": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot.",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-gnome-generic-efi-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-gnome-generic-efi-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-gnome-generic-efi-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-kde-plasma-generic-efi-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-kde-plasma-generic-efi-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-kde-plasma-generic-efi-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-mate-generic-efi-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-mate-generic-efi-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-mate-generic-efi-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-minimal-generic-efi-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-minimal-generic-efi-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-minimal-generic-efi-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-sway-generic-efi-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-sway-generic-efi-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-sway-generic-efi-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "Requires Board firmware on SPI, like Tow-Boot",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-xfce-generic-efi-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-xfce-generic-efi-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/generic-efi-images/releases/download/23.02/Manjaro-ARM-xfce-generic-efi-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Khadas Vim 2": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-gnome-vim2-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-gnome-vim2-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-gnome-vim2-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-kde-plasma-vim2-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-kde-plasma-vim2-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-kde-plasma-vim2-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-mate-vim2-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-mate-vim2-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-mate-vim2-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-minimal-vim2-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-minimal-vim2-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-minimal-vim2-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-sway-vim2-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-sway-vim2-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-sway-vim2-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-xfce-vim2-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-xfce-vim2-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim2-images/releases/download/23.02/Manjaro-ARM-xfce-vim2-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Khadas Vim 3": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-gnome-vim3-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-gnome-vim3-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-gnome-vim3-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-kde-plasma-vim3-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-kde-plasma-vim3-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-kde-plasma-vim3-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-mate-vim3-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-mate-vim3-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-mate-vim3-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-minimal-vim3-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-minimal-vim3-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-minimal-vim3-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-sway-vim3-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-sway-vim3-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-sway-vim3-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-xfce-vim3-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-xfce-vim3-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/vim3-images/releases/download/23.02/Manjaro-ARM-xfce-vim3-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Odroid C4": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-gnome-oc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-gnome-oc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-gnome-oc4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-kde-plasma-oc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-kde-plasma-oc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-kde-plasma-oc4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-mate-oc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-mate-oc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-mate-oc4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-minimal-oc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-minimal-oc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-minimal-oc4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-sway-oc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-sway-oc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-sway-oc4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-xfce-oc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-xfce-oc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/oc4-images/releases/download/23.02/Manjaro-ARM-xfce-oc4-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Odroid HC4": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-gnome-ohc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-gnome-ohc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-gnome-ohc4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-kde-plasma-ohc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-kde-plasma-ohc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-kde-plasma-ohc4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-mate-ohc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-mate-ohc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-mate-ohc4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-minimal-ohc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-minimal-ohc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-minimal-ohc4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-sway-ohc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-sway-ohc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-sway-ohc4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-xfce-ohc4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-xfce-ohc4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/ohc4-images/releases/download/23.02/Manjaro-ARM-xfce-ohc4-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Odroid M1": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-gnome-om1-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-gnome-om1-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-gnome-om1-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-kde-plasma-om1-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-kde-plasma-om1-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-kde-plasma-om1-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-mate-om1-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-mate-om1-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-mate-om1-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-minimal-om1-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-minimal-om1-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-minimal-om1-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-sway-om1-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-sway-om1-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-sway-om1-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-xfce-om1-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-xfce-om1-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/om1-images/releases/download/23.02/Manjaro-ARM-xfce-om1-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Orange Pi 3 LTS": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-gnome-opi3-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-gnome-opi3-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-gnome-opi3-lts-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-kde-plasma-opi3-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-kde-plasma-opi3-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-kde-plasma-opi3-lts-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-mate-opi3-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-mate-opi3-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-mate-opi3-lts-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-minimal-opi3-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-minimal-opi3-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-minimal-opi3-lts-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-sway-opi3-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-sway-opi3-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-sway-opi3-lts-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-xfce-opi3-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-xfce-opi3-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi3-lts-images/releases/download/23.02/Manjaro-ARM-xfce-opi3-lts-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Orange Pi 4 LTS": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-gnome-opi4-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-gnome-opi4-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-gnome-opi4-lts-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-kde-plasma-opi4-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-kde-plasma-opi4-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-kde-plasma-opi4-lts-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-mate-opi4-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-mate-opi4-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-mate-opi4-lts-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-minimal-opi4-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-minimal-opi4-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-minimal-opi4-lts-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-sway-opi4-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-sway-opi4-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-sway-opi4-lts-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-xfce-opi4-lts-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-xfce-opi4-lts-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi4-lts-images/releases/download/23.02/Manjaro-ARM-xfce-opi4-lts-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Orange Pi 800": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-gnome-opi-800-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-gnome-opi-800-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-gnome-opi-800-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-kde-plasma-opi-800-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-kde-plasma-opi-800-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-kde-plasma-opi-800-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-mate-opi-800-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-mate-opi-800-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-mate-opi-800-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-minimal-opi-800-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-minimal-opi-800-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-minimal-opi-800-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-sway-opi-800-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-sway-opi-800-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-sway-opi-800-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-xfce-opi-800-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-xfce-opi-800-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/opi-800-images/releases/download/23.02/Manjaro-ARM-xfce-opi-800-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Pinebook Pro": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-gnome-pbpro-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-gnome-pbpro-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-gnome-pbpro-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-kde-plasma-pbpro-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-kde-plasma-pbpro-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-kde-plasma-pbpro-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-mate-pbpro-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-mate-pbpro-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-mate-pbpro-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-minimal-pbpro-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-minimal-pbpro-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-minimal-pbpro-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-sway-pbpro-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-sway-pbpro-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-sway-pbpro-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-xfce-pbpro-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-xfce-pbpro-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/pbpro-images/releases/download/23.02/Manjaro-ARM-xfce-pbpro-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Pinephone": {
+            "phosh": {
+                "notes": "Phosh images are Beta 32",
+                "date": "",
+                "image": "https://github.com/manjaro-pinephone/phosh/releases/download/beta32/Manjaro-ARM-phosh-pinephone-beta32.img.xz",
+                "torrent": "",
+                "checksum": "https://github.com/manjaro-pinephone/phosh/releases/download/beta32/Manjaro-ARM-phosh-pinephone-beta32.img.xz.sha256",
+                "signature": ""
+            },
+            "plasma-mobile": {
+                "notes": "Plasma Mobile images are Beta 14",
+                "date": "",
+                "image": "https://github.com/manjaro-pinephone/plasma-mobile/releases/download/beta14/Manjaro-ARM-plasma-mobile-pinephone-beta14.img.xz",
+                "torrent": "",
+                "checksum": "https://github.com/manjaro-pinephone/plasma-mobile/releases/download/beta14/Manjaro-ARM-plasma-mobile-pinephone-beta14.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Pinephone Pro": {
+            "phosh": {
+                "notes": "Phosh images are Beta 32",
+                "date": "",
+                "image": "https://github.com/manjaro-pinephone/phosh/releases/download/beta32/Manjaro-ARM-phosh-pinephonepro-beta32.img.xz",
+                "torrent": "",
+                "checksum": "https://github.com/manjaro-pinephone/phosh/releases/download/beta32/Manjaro-ARM-phosh-pinephonepro-beta32.img.xz.sha256",
+                "signature": ""
+            },
+            "plasma-mobile": {
+                "notes": "Plasma Mobile images are Beta 14",
+                "date": "",
+                "image": "https://github.com/manjaro-pinephone/plasma-mobile/releases/download/beta14/Manjaro-ARM-plasma-mobile-pinephonepro-beta14.img.xz",
+                "torrent": "",
+                "checksum": "https://github.com/manjaro-pinephone/plasma-mobile/releases/download/beta14/Manjaro-ARM-plasma-mobile-pinephonepro-beta14.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Quartz64 Model A": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-gnome-quartz64-a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-gnome-quartz64-a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-gnome-quartz64-a-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-kde-plasma-quartz64-a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-kde-plasma-quartz64-a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-kde-plasma-quartz64-a-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-mate-quartz64-a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-mate-quartz64-a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-mate-quartz64-a-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-minimal-quartz64-a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-minimal-quartz64-a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-minimal-quartz64-a-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-sway-quartz64-a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-sway-quartz64-a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-sway-quartz64-a-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-xfce-quartz64-a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-xfce-quartz64-a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-a-images/releases/download/23.02/Manjaro-ARM-xfce-quartz64-a-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Quartz64 Model B": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-gnome-quartz64-b-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-gnome-quartz64-b-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-gnome-quartz64-b-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-kde-plasma-quartz64-b-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-kde-plasma-quartz64-b-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-kde-plasma-quartz64-b-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-mate-quartz64-b-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-mate-quartz64-b-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-mate-quartz64-b-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-minimal-quartz64-b-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-minimal-quartz64-b-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-minimal-quartz64-b-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-sway-quartz64-b-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-sway-quartz64-b-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-sway-quartz64-b-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-xfce-quartz64-b-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-xfce-quartz64-b-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/quartz64-b-images/releases/download/23.02/Manjaro-ARM-xfce-quartz64-b-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Radxa Zero": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-gnome-radxa-zero-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-gnome-radxa-zero-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-gnome-radxa-zero-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-kde-plasma-radxa-zero-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-kde-plasma-radxa-zero-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-kde-plasma-radxa-zero-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-mate-radxa-zero-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-mate-radxa-zero-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-mate-radxa-zero-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-minimal-radxa-zero-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-minimal-radxa-zero-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-minimal-radxa-zero-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-sway-radxa-zero-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-sway-radxa-zero-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-sway-radxa-zero-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-xfce-radxa-zero-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-xfce-radxa-zero-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/radxa-zero-images/releases/download/23.02/Manjaro-ARM-xfce-radxa-zero-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Raspberry Pi 4B/400/3B+/3B/Zero 2": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-gnome-rpi4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-gnome-rpi4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-gnome-rpi4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-kde-plasma-rpi4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-kde-plasma-rpi4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-kde-plasma-rpi4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-mate-rpi4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-mate-rpi4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-mate-rpi4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-minimal-rpi4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-minimal-rpi4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-minimal-rpi4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-sway-rpi4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-sway-rpi4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-sway-rpi4-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-xfce-rpi4-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-xfce-rpi4-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rpi4-images/releases/download/23.02/Manjaro-ARM-xfce-rpi4-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Rock 3A": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-gnome-rock3a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-gnome-rock3a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-gnome-rock3a-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-kde-plasma-rock3a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-kde-plasma-rock3a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-kde-plasma-rock3a-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-mate-rock3a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-mate-rock3a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-mate-rock3a-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-minimal-rock3a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-minimal-rock3a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-minimal-rock3a-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-sway-rock3a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-sway-rock3a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-sway-rock3a-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-xfce-rock3a-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-xfce-rock3a-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/rock3a-images/releases/download/23.02/Manjaro-ARM-xfce-rock3a-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        },
+        "Ugoos AM6 Plus": {
+            "gnome": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-gnome-am6-plus-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-gnome-am6-plus-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-gnome-am6-plus-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "plasma": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-kde-plasma-am6-plus-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-kde-plasma-am6-plus-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-kde-plasma-am6-plus-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "mate": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-mate-am6-plus-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-mate-am6-plus-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-mate-am6-plus-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "minimal": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-minimal-am6-plus-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-minimal-am6-plus-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-minimal-am6-plus-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "sway": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-sway-am6-plus-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-sway-am6-plus-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-sway-am6-plus-23.02.img.xz.sha1",
+                "signature": ""
+            },
+            "xfce": {
+                "notes": "",
+                "date": "",
+                "image": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-xfce-am6-plus-23.02.img.xz",
+                "torrent": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-xfce-am6-plus-23.02.img.xz.torrent",
+                "checksum": "https://github.com/manjaro-arm/am6-plus-images/releases/download/23.02/Manjaro-ARM-xfce-am6-plus-23.02.img.xz.sha1",
+                "signature": ""
+            }
+        }
+    }
+}

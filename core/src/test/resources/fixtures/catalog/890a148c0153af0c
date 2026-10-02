@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<metalink xmlns="urn:ietf:params:xml:ns:metalink">
+  <generator>MirrorCache</generator>
+  <origin dynamic="true">https://download.opensuse.org/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</origin>
+  <published>2026-10-02T07:44:47Z</published>
+  <publisher>
+    <name>openSUSE</name>
+    <url>download.opensuse.org</url>
+  </publisher>
+  <file name="openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso">
+    <size>273678336</size>
+    <!-- <mtime>1718883759</mtime> -->
+    <hash type="md5">f8511aabd434d05286e370196c8b78b8</hash>
+    <hash type="sha-1">3392aee0fe6c561bd02cdb510eb53bb7e97eb62c</hash>
+    <hash type="sha-256">0984b36d0f420487f2766733ff8f9d779ade81d432b08e40e852a675313750bb</hash>
+    <hash type="sha-512">1ed19a69aeb72dd41e74644a240888ffa4fe3439e35278823f1fb5240a9af2e4202801c9d02a64c7606ea9292ee799448204813bcac98de5ddcd3e80346ececf</hash>
+    <pieces length="4194304" type="sha-1">
+      <hash>34c1f60c00df8c25a565a78d53b97b0af2b68652</hash>
+      <hash>9e0c06314b07af1e88d7156c5c62eb1f8e4866dc</hash>
+      <hash>19e6d954804a4c733e3814014a9cd2f1da54d8f3</hash>
+      <hash>09eaee03e62ca2b65a6881f75dcc591af10a2576</hash>
+      <hash>1b044a37170c18aa00f67a322edf171e481b61f3</hash>
+      <hash>b94d4c1b768fe9bcf97ef6988ae4558189dfc32f</hash>
+      <hash>c70b64884e0d306a5a7e8b3b1c4b890da5f0284a</hash>
+      <hash>f1ea4ee4c3ac64543bdbfade0d3ea0e1a8b421d7</hash>
+      <hash>fda51718a9dc7cb793a7ee8d60b59f25eb33056b</hash>
+      <hash>eb3a12fc3b829f33b3bf807df4b84f811f8ba392</hash>
+      <hash>56edefca21f8f44d14748bd53971e6792ab4a677</hash>
+      <hash>d681b9e24bc463c72ac0ae8efebd16b3e262b1f7</hash>
+      <hash>085a3a5716224f55b56b47d89a3addd9af72f8a8</hash>
+      <hash>3ebdb5381d141aca6f43e05acfb59951ac9c7e85</hash>
+      <hash>d2b4014ef4cd22bd45ff880ab88cd8e906248397</hash>
+      <hash>2e7299fa84be7ca755b44965f00b6331242be8d5</hash>
+      <hash>da872c750d4a8f14652915ad2e76eef96a29533d</hash>
+      <hash>0c24f0d43d1824b25bd413fd9e58979d0339d289</hash>
+      <hash>866ffc594bcad13cffa56e58efddec5ea7dba418</hash>
+      <hash>6f8a6d03993b8e51678b2ee52ecd6d59d7c5959b</hash>
+      <hash>4d07f04aab8e9f61634d2b107f37a72ceb14e9f8</hash>
+      <hash>c9efa024e36492f05b0a324010b86b7eeebec11b</hash>
+      <hash>a05121181bc419bb5ecb310b84d0d85c1f6074f0</hash>
+      <hash>28b182a7984361f618166745b10eba0de09e806e</hash>
+      <hash>ac2db2b821005ea88fc6bb35236d5d9874886822</hash>
+      <hash>9537c4b47453b875b1d5b71de5d9f51f85739d26</hash>
+      <hash>21c8efb15807b60cf766a32b0be7516d71e631ae</hash>
+      <hash>d6426bb63f79b5023eb3cd1d13b59db08d79be19</hash>
+      <hash>990b31d7d4ad931e753d3ef5390e7a22918d39ea</hash>
+      <hash>2d097b3e4202d509f4798aaa0e849d6fff8b540e</hash>
+      <hash>b93c3394db67a247b5837b3bbc5f448705601701</hash>
+      <hash>22806492f7b56238f4fa3c0d921de01e3b990902</hash>
+      <hash>e9f3ecad8730df6e1f30f1fdcdb33b364c0e2c20</hash>
+      <hash>242948278250728b958761066fd7ff5a264bd637</hash>
+      <hash>e86ae066136dfbdef549695c6a10772e423e3a13</hash>
+      <hash>d21f2e7136c8329cc19832f0291b5d9f9d9b8f44</hash>
+      <hash>df604dc47518410de334e8ff050f97f80eb1191b</hash>
+      <hash>d4d9670b60d288cd18da01560af9ad7b1196caf5</hash>
+      <hash>ec41a6360c502a3126303c080e50bb47f7864320</hash>
+      <hash>b10d23a5d13f0c2fa7fd9946bfc7fb1da57223e0</hash>
+      <hash>92322c8f5ab1b6eeb17793aa194753f07642fc7c</hash>
+      <hash>5ca6c4776cb975e3a207059f3a9cd3e1529b030a</hash>
+      <hash>ddb8530a22819dc13953941ca9501ccc56411858</hash>
+      <hash>59b7b01b73ef994f4272b0f72fc262af7b33b6fd</hash>
+      <hash>a8391db741fc401098e2a0acf622af8509e31f78</hash>
+      <hash>49714c4c36a4261f666aefa74ed16340d02c44ad</hash>
+      <hash>2d1e2f2f74995fa801fbae0fa5a91b708d02e9d1</hash>
+      <hash>8ec2e5d4f9afc6dff32f9888991e89e3a91f4551</hash>
+      <hash>f64f8fe1a9823fc6c5f3890fec89145ac0804df1</hash>
+      <hash>6ffc1c87d8cf8f6b1145e71bcff0f8c6a8e42b4d</hash>
+      <hash>57ba957f931ebacc8f102bed0fa7a49166d6c2ea</hash>
+      <hash>e9e036e1cb13eadaa82e1df2383aed8a4cc2726e</hash>
+      <hash>1f09e58afb8bd8dadce1bd33e8f42c36c3e15fe6</hash>
+      <hash>26999d33786759a8dcee02ff4204dd811a36021d</hash>
+      <hash>881652d5f6d357d5bc2d1483255cd1e8fde64130</hash>
+      <hash>501455d851ef9c01bbbe8a12a8edf84e618e1b6d</hash>
+      <hash>97915b48c3e31f7371b3d8a283338579e41cd11b</hash>
+      <hash>4377e54d96dce8ae1d2dc9c0f67bbeaf0dc7fa87</hash>
+      <hash>05b26ebcb6d06d3896bb59a5d42f3340d8b1b407</hash>
+      <hash>f31c4f8a98f06a4f10fd20e975503a24795b239c</hash>
+      <hash>a7329ab8c75b8818cf2bf821170a44cdeb6c9e33</hash>
+      <hash>60cadd7bbc7bf0ebd2697dc44ad5bf5c54dabf51</hash>
+      <hash>9efeac4fe0f32400fb0c487c3e423986797067ad</hash>
+      <hash>9088a6f2ae32689448413aba87c5da9a0caf73f2</hash>
+      <hash>d24e9e816eafd2b2c85b9dc589c70013da3bcd9d</hash>
+      <hash>3b71f43ff30f4b15b5cd85dd9e95ebc7e84eb5a3</hash>
+    </pieces>
+    <!-- Mirrors which handle this country (US):  -->
+    <url location="US" priority="1">https://mirror.rackspace.com/openSUSE/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</url>
+    <url location="US" priority="2">https://slc-mirror.opensuse.org/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</url>
+    <url location="US" priority="3">https://mirrors.rit.edu/opensuse/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</url>
+    <url location="US" priority="4">https://mirror.clarkson.edu/opensuse/opensuse/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</url>
+    <url location="US" priority="5">https://mirror.math.princeton.edu/pub/opensuse-full/opensuse/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</url>
+    <!-- Mirrors in the same continent (NA):  -->
+    <url location="CA" priority="6">https://mirror.csclub.uwaterloo.ca/opensuse/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</url>
+    <!-- Mirrors in other parts of the world:  -->
+    <url location="ZA" priority="7">https://mirror.africloud.com/opensuse/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</url>
+    <url location="NG" priority="8">https://mirror.tech.africa/opensuse/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</url>
+    <url location="PT" priority="9">https://mirror.randhost.com/opensuse/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</url>
+    <url location="GB" priority="10">https://mirror.rackspace.co.uk/openSUSE/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso</url>
+    <!-- File origin location:  -->
+    <!-- https://downloadcontent2.opensuse.org/distribution/leap/15.6/iso/openSUSE-Leap-15.6-NET-x86_64-Build710.3-Media.iso -->
+  </file>
+</metalink>

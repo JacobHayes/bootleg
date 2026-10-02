@@ -1,0 +1,80 @@
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {
+          "__name__": "channel_revision",
+          "channel": "nixos-26.05",
+          "status": "stable",
+          "variant": "primary"
+        },
+        "value": [
+          1790927091.161,
+          "1"
+        ]
+      },
+      {
+        "metric": {
+          "__name__": "channel_revision",
+          "channel": "nixos-26.05-small",
+          "status": "stable",
+          "variant": "small"
+        },
+        "value": [
+          1790927091.161,
+          "1"
+        ]
+      },
+      {
+        "metric": {
+          "__name__": "channel_revision",
+          "channel": "nixos-25.11",
+          "status": "deprecated",
+          "variant": "primary"
+        },
+        "value": [
+          1790927091.161,
+          "1"
+        ]
+      },
+      {
+        "metric": {
+          "__name__": "channel_revision",
+          "channel": "nixos-25.11-small",
+          "status": "deprecated",
+          "variant": "small"
+        },
+        "value": [
+          1790927091.161,
+          "1"
+        ]
+      },
+      {
+        "metric": {
+          "__name__": "channel_revision",
+          "channel": "nixos-25.05",
+          "status": "unmaintained",
+          "variant": "primary"
+        },
+        "value": [
+          1790927091.161,
+          "1"
+        ]
+      },
+      {
+        "metric": {
+          "__name__": "channel_revision",
+          "channel": "nixos-unstable",
+          "status": "rolling",
+          "variant": "primary"
+        },
+        "value": [
+          1790927091.161,
+          "1"
+        ]
+      }
+    ]
+  }
+}

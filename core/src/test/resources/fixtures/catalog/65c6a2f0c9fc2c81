@@ -1,0 +1,222 @@
+{
+  "Leap": [
+    {
+      "name": "openSUSE Leap",
+      "version": "16.1",
+      "state": "RC",
+      "upgrade-weight": 11
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "16.0",
+      "state": "Stable",
+      "upgrade-weight": 10
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "15.6",
+      "state": "Stable",
+      "upgrade-weight": 9
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "15.5",
+      "state": "EOL",
+      "upgrade-weight": 8
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "15.4",
+      "state": "EOL",
+      "upgrade-weight": 7
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "15.3",
+      "state": "EOL",
+      "upgrade-weight": 6
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "15.2",
+      "state": "EOL",
+      "upgrade-weight": 5
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "15.1",
+      "state": "EOL",
+      "upgrade-weight": 4
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "15.0",
+      "state": "EOL",
+      "upgrade-weight": 3
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "42.3",
+      "state": "EOL",
+      "upgrade-weight": 2
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "42.2",
+      "state": "EOL",
+      "upgrade-weight": 1
+    },
+    {
+      "name": "openSUSE Leap",
+      "version": "42.1",
+      "state": "EOL",
+      "upgrade-weight": 0
+    }
+  ],
+  "LeapMicro": [
+    {
+      "name": "openSUSE Leap Micro",
+      "version": "6.2",
+      "state": "Stable",
+      "upgrade-weight": 6
+    },
+    {
+      "name": "openSUSE Leap Micro",
+      "version": "6.1",
+      "state": "Stable",
+      "upgrade-weight": 6
+    },
+    {
+      "name": "openSUSE Leap Micro",
+      "version": "6.0",
+      "state": "EOL",
+      "upgrade-weight": 5
+    },
+    {
+      "name": "openSUSE Leap Micro",
+      "version": "5.5",
+      "state": "EOL",
+      "upgrade-weight": 4
+    },
+    {
+      "name": "openSUSE Leap Micro",
+      "version": "5.4",
+      "state": "EOL",
+      "upgrade-weight": 3
+    },
+    {
+      "name": "openSUSE Leap Micro",
+      "version": "5.3",
+      "state": "EOL",
+      "upgrade-weight": 2
+    },
+    {
+      "name": "openSUSE Leap Micro",
+      "version": "5.2",
+      "state": "EOL",
+      "upgrade-weight": 1
+    }
+  ],
+  "Tumbleweed": [
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260930",
+      "upgrade-weight": 20260930
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260929",
+      "upgrade-weight": 20260929
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260924",
+      "upgrade-weight": 20260924
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260923",
+      "upgrade-weight": 20260923
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260922",
+      "upgrade-weight": 20260922
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260921",
+      "upgrade-weight": 20260921
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260919",
+      "upgrade-weight": 20260919
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260918",
+      "upgrade-weight": 20260918
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260917",
+      "upgrade-weight": 20260917
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260916",
+      "upgrade-weight": 20260916
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260915",
+      "upgrade-weight": 20260915
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260914",
+      "upgrade-weight": 20260914
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260912",
+      "upgrade-weight": 20260912
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260911",
+      "upgrade-weight": 20260911
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260910",
+      "upgrade-weight": 20260910
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260909",
+      "upgrade-weight": 20260909
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260908",
+      "upgrade-weight": 20260908
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260907",
+      "upgrade-weight": 20260907
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260904",
+      "upgrade-weight": 20260904
+    },
+    {
+      "name": "openSUSE Tumbleweed",
+      "version": "20260902",
+      "upgrade-weight": 20260902
+    }
+  ]
+}
