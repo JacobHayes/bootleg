@@ -302,38 +302,196 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
 - Debug builds expose only fixed harmless sequences to adb (`HID_SEND`: `f24`, `shift`, `mouse`
   cancelling move); there is no arbitrary typing from adb.
 
-## Remote (phase 3) — feasibility spike first
+## Remote (phase 3)
 
-- Go `tsnet` with pinned versions. Android interface enumeration and network-change handling
-  are adapted from tailscale-android `libtailscale/net.go`. State lives in app-private
-  `noBackup` storage, single instance. Enrollment is an in-app login URL. An auth key file is
-  only an optional dev/test path; nothing is shipped.
-- Spike result (`remote/SPIKE.md`): this works on the device. The Go module is in `remote/`,
-  and `mise run remote:aar` builds it into a gomobile AAR. Required on Android 17:
-  - Kotlin supplies the interface list through `netmon.RegisterInterfaceGetter`.
-  - Set `TS_LOGS_DIR`/`TMPDIR`, or tsnet panics.
-  - Grant the runtime permission `ACCESS_LOCAL_NETWORK`, or LAN `sendto` fails with EPERM and
-    traffic only goes through DERP.
+tsnet runs in the app, with no VPN slot. Kotlin supplies the interface list via
+`netmon.RegisterInterfaceGetter`. Set `TS_LOGS_DIR`/`TMPDIR`. `ACCESS_LOCAL_NETWORK` is
+required for direct LAN paths and incoming hotspot connections. Log upload is off.
 
-  Log upload is off. The HTTP/WebSocket server lives in Go as a thin transport shell (WhoIs sits
-  next to the listener). Decisions stay in Kotlin `core/` and are reached through a narrow
-  callback interface.
-- Auth: `WhoIs` on tsnet peer addresses gives the stable node ID. A node is paired by in-app
-  approval and can be revoked; approvals are re-checked per session. Tagged nodes are shown as
-  tags.
-- Offline mode: `LocalOnlyHotspot` (WPA2/3, random passphrase shown as a QR code). The server
-  binds only to the hotspot interface address and closes when the reservation ends. Pairing: a
-  short-lived 6-digit code shown on the phone is exchanged for a revocable random token. The
-  WPA2/3 link encrypts traffic, so there's no TLS in v1 (accepted risk, documented).
-- Server hardening:
-  - strict Origin/Host checks;
-  - session cookie (HttpOnly, SameSite=Strict);
-  - frame and message size limits;
-  - one controller lease at a time;
-  - mounting RW remotely needs a per-device permission;
-  - all keys and buttons are released on disconnect, timeout or takeover.
-- Protocol: WebSocket JSON for control, compact binary frames for HID (usage codes, mouse
-  deltas).
+### Ownership
+- **Kotlin `core/remote`** has all authority, in `RemoteController`: pure, deterministic,
+  JVM-tested, and driven by an injected clock. A single actor serializes it.
+  - It owns authorization, pairing, sessions, the lease, mutation gating, input ownership and
+    paste/boot-key jobs.
+  - Blocking work (gadget/root calls, HID writes) runs on a separate bounded executor with
+    deadlines (10s root op). It never runs on the actor or the main thread.
+- **Go** (`remote/`) only does transport:
+  - sockets and the tsnet node;
+  - `WhoIs`, with identity bound to the accepted connection and listener, never to request
+    data;
+  - exact Origin/Host checks, size/rate/connection limits, and frame-length validation;
+  - WebSocket ping/pong.
+
+  Go holds no lease or authorization state.
+- **Lease epoch.** Every lease change bumps a 16-bit epoch.
+  - Every mutation request and every binary HID frame carries the epoch the client believes it
+    holds.
+  - It is checked when Kotlin admits the request, then again in the same actor step that
+    dispatches the effect.
+  - A disk operation that has already started finishes atomically (the gadget controller is
+    serialized). Its result goes to whoever is connected.
+
+### Lease, takeover, local priority
+- The lease is required for **every** mutation: disks, HID enable, HID input, paste, boot keys.
+  Missing it gives `lease_required`.
+- **Takeover:** `lease.takeover{holderSession, epoch}` prompts the holder.
+  - The lease moves on the holder's consent, or when the holder session is dead.
+  - Kotlin re-checks the holder and epoch at transfer.
+  - Nothing ever transfers automatically on a timer.
+- **Local priority:** local capture (Control tab in the foreground) preempts any remote lease.
+  While it's active, remote takeover is refused.
+- **RW permission:** remote RW mounts need the per-device "allow writable disks" flag, stored on
+  the approval record and settable only in the app.
+
+### Liveness and release
+- **Heartbeat:** Go pings every 5s. A session with no pong for 15s is dead, and Go calls
+  `Closed(sessionId, "dead")`.
+- **End of session** (dead, revoke, takeover, close or lease loss), in this order:
+  1. Bump the epoch.
+  2. Cancel producers.
+  3. Drop that session's queued input.
+  4. Release-all on the priority lane.
+  5. New input is refused until the HidSession owed-release barrier clears.
+
+  Release retries back off for up to 60s, then the session reports `release_pending` until the
+  HID node reopens or HID is turned off. The host can't get a release while its USB is down
+  (documented limit).
+- **Idle:** after 30s with no input, held keys are released and the lease is kept. After 10
+  minutes idle, the lease is released.
+
+### Auth
+- **Tailnet:**
+  - Unknown node IDs are `pending`: they get no state and no control. At most 4 can be pending,
+    with oldest-first eviction.
+  - Approval happens only in the unlocked app. A notification opens the app and can't approve
+    anything itself.
+  - Approvals live in `noBackupFilesDir`, expire after 180 days, and can be revoked. A revoke
+    closes live sessions within one actor step.
+  - Node and user names are untrusted display text.
+- **Hotspot:** pairing is enabled explicitly in the app.
+  - **Codes:** 6 digits, single use, 2-minute lifetime, invalidated when pairing or the hotspot
+    stops.
+  - **Lockout:** at most 10 attempts per hour globally, persisted across restarts, and reset
+    only from the phone.
+  - **Tokens:** 256-bit, stored as SHA-256 in `noBackupFilesDir`, 90-day expiry, revocable.
+    Browsers get a host-only HttpOnly SameSite=Strict cookie. The CLI keeps a 0600 file. Tokens
+    never appear in logs or URLs.
+  - **Ingress:** the listener binds the hotspot address. Each connection's local address must
+    equal it and its remote address must be in the hotspot subnet, or it's rejected. The
+    reservation ending closes the listener and its sessions.
+  - **Accepted risk (no TLS):** a malicious hotspot participant could sniff a token over plain
+    HTTP.
+- **Both transports:**
+  - `/pair` and `/ws` require an exact scheme/host/port Origin match. `Origin: null` is rejected.
+  - A missing Origin is allowed only for non-browser clients that authenticate by WhoIs or
+    bearer token, and cookies are ignored on that path. The one exception is the CLI's first
+    `/pair`, which goes through the enabled, code-authenticated, globally limited bootstrap.
+  - No CORS. CSP `default-src 'self'; frame-ancestors 'none'` and `X-Frame-Options: DENY`.
+- **Plain HTTP on the tailnet:** WireGuard encrypts the path. The page is HTTP and the socket is
+  `ws://`, so there's no mixed content.
+  - There are no secure-context APIs, so paste goes through a textarea and pointer lock has a
+    drag fallback.
+  - The CLI pins the tailnet host and refuses redirects and proxies.
+
+### Go↔Kotlin bridge (gomobile)
+- **Go → Kotlin.** All of these only enqueue and return within 20ms, on Go goroutine threads.
+  Go never holds a lock across a callback.
+  - `Open(sessionId, connJson)`
+  - `Command(sessionId, json)`
+  - `Hid(sessionId, bytes) → queued | queue_full`
+  - `Closed(sessionId, reason)`, which is idempotent
+- **Authorization fails closed.** Until Kotlin calls `Authorized(sessionId)`, Go forwards only
+  `hello`, or `/pair` on the hotspot.
+- **Queues:** per session, 64 inbound plus a priority lane for revoke, release and close.
+- **Kotlin → Go:**
+  - `Authorized(sessionId)`
+  - `Send(sessionId, json)`: bounded to 32 outbound messages; a slow consumer is disconnected.
+  - `Close(sessionId, reason)`
+  - `Revoke(nodeId|tokenHash)`
+
+  State pushes are coalesced to at most 10/s.
+- **Late callbacks:** a callback that finishes late is fenced by the epoch, not by timing.
+
+### Protocol v1
+- **Handshake:** `hello{v:1}` → `welcome{v:1, sessionId, auth, stateRev, lease{holder, epoch}}`.
+  A version mismatch closes with 4400.
+- **Requests:** `{id, t, epoch?, ...}` → `{id, ok, error?{code, msg}}`.
+  - IDs are deduplicated per session over the last 64; a duplicate gets the cached reply.
+  - `ifRev` is checked and applied atomically in the actor step.
+  - Images are named by server `imageId`, never by path.
+- **Requests and pushes:**
+  - `state.get`
+  - `lease.take` (only when free), `lease.takeover{holderSession, epoch}`, `lease.release`
+  - `slots.apply{slots:[{lun, imageId, mode}], ifRev}`, `slot.eject{lun, force}`,
+    `slot.reinsert{lun}`
+  - `hid.set{keyboard, mouse}`
+  - `bootkey.run{vendor, action}`, `bootkey.cancel`
+  - `paste.prepare{text}` → `{planId, unsupported, durationMs}`. Then `paste.run{planId}`, which
+    is bound to the plan and the epoch, and `paste.cancel`. At most 4 plans per session, each
+    living 2 minutes.
+  - Pushes: `state{rev, ...}` and `lease{holder, epoch}`.
+- **Binary frames:** `epoch(u16 BE) op ...`, with exact lengths.
+  - `01 uu` key down. A duplicate down is idempotent. Beyond 6 non-modifier keys the report
+    sends rollover.
+  - `02 uu` key up.
+  - `03 dx dy` mouse move (int8).
+  - `04 bb` mouse buttons (low 3 bits).
+  - `05` release-all. It's coalesced and exempt from rate limits, for the lease holder only.
+  - Limits: 200 frames/s, paste ≤ 64 KiB and ≤ 5 min, boot keys within BootKeyMasher limits.
+- **Connections:** at most 8, with at most 4 pending.
+- **Reconnect:** a reconnect gets a fresh session and snapshot. Nothing is replayed.
+
+### Android
+- **RemoteService:** `connectedDevice` FGS with `FOREGROUND_SERVICE_CONNECTED_DEVICE`;
+  `CHANGE_WIFI_STATE` (hotspot) is the prerequisite.
+  - It starts only from a visible user action. Remote is off by default and not started on boot
+    in v1.
+  - Approvals also work in-app when notifications are denied.
+- **Permissions:** `ACCESS_LOCAL_NETWORK` is requested when Remote is turned on, with an
+  explanation. `NEARBY_WIFI_DEVICES` is required for the hotspot.
+- **Keep-awake:** counts authenticated live sessions only.
+  - Prior settings are persisted, and restored by the app on its next process start whether or
+    not Remote is turned back on.
+  - The FGS isn't assumed to exempt the app from Doze. Unplugged idle and reconnect behaviour
+    is tested manually.
+
+### CLI (`remote/cmd/bootleg`)
+- **Connection:** uses the Mac's own Tailscale. Offline, it takes `--host` plus a 0600 token file.
+- **Commands:** `status`, `images`, `mount`, `eject`, `hid on|off`, `type <text>|-`,
+  `key <chord> [--repeat --interval]`, `bootkey`, `lease take|takeover|release`, `pair <code>`.
+- **`kbd`:** decoded text and key taps only, since terminals don't report key-up. It restores
+  the terminal and sends release-all on signals and errors.
+- **Exit codes and deadlines:** 0 ok, 2 usage, 3 auth or pending, 4 lease, 5 device, 6 timeout.
+  Every command has a deadline.
+
+### Verification
+- **L1/L2 (Kotlin):** `RemoteController` property and fault tests with a fake clock and a fake
+  HidSession:
+  - revoke during paste, takeover during boot-key mashing;
+  - stale epoch frames after re-acquire;
+  - late callbacks, half-open connections, malformed frames, slow readers;
+  - restart mid-session;
+  - pairing expiry, single use and lockout persistence;
+  - duplicate request IDs.
+- **L1/L2 (Go):** `go test` for the Origin/Host matrix, the hotspot ingress check, frame codec
+  and lengths, rate limits, and the bridge against a fake Kotlin, including slow consumers.
+- **Every check:** `mise run check` runs `go test` and a cached AAR/Kotlin compile check (the
+  inputs-tracked Gradle task rebuilds only when `remote/` changes).
+- **L4 `check:device:remote`** (under 30s warm, takes the device lock):
+  1. CLI auth over the tailnet.
+  2. Mount the RO FAT fixture and host-eject it.
+  3. Harmless HID.
+  4. Revoke → the next command fails with auth and the session closes.
+  5. Re-approve through a debug, DUMP-protected provider hook.
+  6. Cleanup.
+- **Known gaps:**
+  - Host-captured releases need a Mac capture helper. That needs the user to grant Input
+    Monitoring once; until then releases are proved by phone-side `HID_STATE` plus
+    enumeration.
+  - A never-approved identity through the real transport needs a second tailnet identity (an
+    ephemeral key from the user). Until then it's covered at L2.
+  - Hotspot hardware checks are manual; the hotspot policy is tested at L2.
+- **Scope:** catalog downloads from the remote are deferred.
 
 ## Hard limits
 
