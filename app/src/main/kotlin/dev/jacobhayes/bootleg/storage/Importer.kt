@@ -4,7 +4,8 @@ import android.content.ContentResolver
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
-import dev.jacobhayes.bootleg.download.Checksums
+import dev.jacobhayes.bootleg.core.catalog.ScraperSupport
+import dev.jacobhayes.bootleg.core.image.Sha256Streamer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -124,10 +125,10 @@ class FileTasks(
         sizeBytes: Long,
         expectedSha256: String,
     ) {
-        require(Checksums.isSha256(expectedSha256)) { "not a sha256: $expectedSha256" }
+        require(ScraperSupport.isSha256(expectedSha256)) { "not a sha256: $expectedSha256" }
         val name = fusePath.substringAfterLast('/')
         start(fusePath, "Verifying $name", sizeBytes) { report ->
-            val actual = Checksums.sha256(File(fusePath)) { report(it) }
+            val actual = File(fusePath).inputStream().use { input -> Sha256Streamer.digest(input) { report(it) }.hex }
             if (actual != expectedSha256) throw IllegalStateException("$name doesn't match its checksum")
             "$name matches its checksum"
         }

@@ -2,7 +2,12 @@ package dev.jacobhayes.bootleg.download
 
 import android.system.ErrnoException
 import android.system.OsConstants
+import dev.jacobhayes.bootleg.core.catalog.Arch
 import dev.jacobhayes.bootleg.core.catalog.Http
+import dev.jacobhayes.bootleg.core.catalog.Release
+import dev.jacobhayes.bootleg.core.catalog.ScraperSupport
+import dev.jacobhayes.bootleg.core.catalog.resolveSha256
+import dev.jacobhayes.bootleg.core.image.Sha256Streamer
 import dev.jacobhayes.bootleg.storage.StoragePaths
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -18,11 +23,15 @@ import okhttp3.Response
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.nio.file.FileAlreadyExistsException
 import java.util.concurrent.TimeUnit
+import java.util.zip.ZipException
 
 /**
  * Transfers one download: resolve the expected hash, fetch with Range/If-Range resume into
  * `<name>.partial`, hash the whole file, atomically rename, and write a `<name>.sha256` sidecar.
+ * A zipped release downloads the archive into `<name>.partial`, verifies it, then extracts the one
+ * image entry (see [ArchiveExtractor]) and deletes the archive.
  */
 class DownloadEngine(
     private val store: DownloadStore,
@@ -78,6 +87,10 @@ class DownloadEngine(
                     throw cancelled
                 } catch (stop: StopException) {
                     fail(fileName, stop.reason, stop.retryable)
+                } catch (exists: FileAlreadyExistsException) {
+                    // An import (or another download) of the same name finished first; never replace it.
+                    partialFile(fileName).delete()
+                    fail(fileName, "$fileName is already in the library", retryable = false)
                 } catch (error: IOException) {
                     if (isOutOfSpace(error)) {
                         fail(fileName, "Out of storage space", retryable = false)
@@ -168,6 +181,7 @@ class DownloadEngine(
                         status = response.code,
                         contentRange = response.header("Content-Range"),
                         contentLengthBytes = response.body.contentLength().takeIf { it >= 0 },
+                        expectedTotalBytes = record.totalBytes,
                     )
                 when (action) {
                     is ResumePlanner.Action.Append -> {
@@ -243,16 +257,27 @@ class DownloadEngine(
     private suspend fun resolveExpectedHash(fileName: String) {
         val record = store[fileName] ?: return
         if (record.expectedSha256 != null || record.sumsUrl == null) return
+        // The sums file names what the URL serves (the archive for a zipped release), so look it up under that name.
+        val source =
+            Release(
+                distroId = "download",
+                version = "download",
+                arch = Arch.X86_64,
+                url = record.url,
+                sumsUrl = record.sumsUrl,
+                fileName = if (record.archiveEntry != null) remoteName(record.url) else record.fileName,
+            )
+        // Fail closed: a release that names a sums file is only ever stored verified against it.
         val hash =
             try {
-                val response = sumsHttp.get(record.sumsUrl)
-                if (response.status != 200) null else Checksums.find(response.body, listOf(remoteName(record.url), record.fileName))
+                resolveSha256(source, sumsHttp)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                null
+                throw StopException("Couldn't get the checksum: ${error.message ?: error::class.simpleName}", retryable = true)
             }
-        if (hash != null) store.update(fileName) { it.copy(expectedSha256 = hash) }
+        checkNotNull(hash) { "sums lookup returned nothing for $fileName" }
+        store.update(fileName) { it.copy(expectedSha256 = hash) }
     }
 
     /** Returns true when the download is finished (verified or unverifiable), false on mismatch. */
@@ -265,24 +290,76 @@ class DownloadEngine(
         store.update(fileName) { it.copy(status = DownloadStatus.VERIFYING, downloadedBytes = partial.length()) }?.let(onProgress)
         val job = currentCoroutineContext().job
         val actual =
-            Checksums.sha256(partial) {
-                if (!job.isActive || store[fileName]?.status != DownloadStatus.VERIFYING) {
-                    throw CancellationException("verify stopped")
-                }
-            }
-        val expected = store[fileName]?.expectedSha256
+            partial
+                .inputStream()
+                .use { input ->
+                    Sha256Streamer.digest(input) {
+                        if (!job.isActive || store[fileName]?.status != DownloadStatus.VERIFYING) {
+                            throw CancellationException("verify stopped")
+                        }
+                    }
+                }.hex
+        val record = checkNotNull(store[fileName]) { "record vanished: $fileName" }
+        val expected = record.expectedSha256
         if (expected != null && expected != actual) {
             check(partial.delete()) { "cannot delete $partial" }
             store.update(fileName) { it.copy(verify = VerifyState.MISMATCH, downloadedBytes = 0) }
             return false
         }
         val target = finalFile(fileName)
-        check(partial.renameTo(target)) { "cannot rename $partial to $target" }
-        if (expected != null) writeSidecar(fileName, expected)
-        val verify = if (expected != null) VerifyState.VERIFIED else VerifyState.UNAVAILABLE
+        val imageSha256 =
+            if (record.archiveEntry != null) {
+                extractArchive(record, partial, target, archiveVerified = expected != null)
+            } else {
+                StoragePaths.moveIntoPlace(partial, target)
+                expected
+            }
+        if (imageSha256 != null) writeSidecar(fileName, imageSha256)
+        val verify = if (imageSha256 != null) VerifyState.VERIFIED else VerifyState.UNAVAILABLE
         store.update(fileName) { it.copy(status = DownloadStatus.COMPLETED, verify = verify, error = null) }?.let(onProgress)
         onImageAdded()
         return true
+    }
+
+    /**
+     * Extracts the release's image from the verified [archive] into [target] and deletes the archive.
+     * Returns the image hash when it is trustworthy (the archive or the image itself was verified).
+     */
+    private suspend fun extractArchive(
+        record: DownloadRecord,
+        archive: File,
+        target: File,
+        archiveVerified: Boolean,
+    ): String? {
+        val entry = checkNotNull(record.archiveEntry)
+        val temp = File(storeDir, StoragePaths.extractStagingName(record.fileName))
+        check(!temp.exists() || temp.delete()) { "cannot delete $temp" }
+        val job = currentCoroutineContext().job
+        var moved = false
+        try {
+            val extracted =
+                try {
+                    ArchiveExtractor.extract(archive, entry, temp) {
+                        if (!job.isActive || store[record.fileName]?.status != DownloadStatus.VERIFYING) {
+                            throw CancellationException("extract stopped")
+                        }
+                    }
+                } catch (corrupt: ZipException) {
+                    archive.delete()
+                    throw StopException("Archive is corrupt: ${corrupt.message}", retryable = false)
+                }
+            if (record.imageSha256 != null && record.imageSha256 != extracted.sha256) {
+                archive.delete()
+                store.update(record.fileName) { it.copy(verify = VerifyState.MISMATCH, downloadedBytes = 0) }
+                throw StopException("Checksum mismatch in the extracted image", retryable = false)
+            }
+            StoragePaths.moveIntoPlace(temp, target)
+            moved = true
+            check(archive.delete()) { "cannot delete $archive" }
+            return extracted.sha256.takeIf { archiveVerified || record.imageSha256 != null }
+        } finally {
+            if (!moved) temp.delete()
+        }
     }
 
     private fun writeSidecar(
@@ -291,7 +368,9 @@ class DownloadEngine(
     ) {
         val sidecar = sidecarFile(fileName)
         val temp = File(storeDir, ".${sidecar.name}.tmp")
-        temp.writeText(Checksums.sidecarLine(sha256, fileName))
+        require(ScraperSupport.isSha256(sha256)) { "not a lowercase sha256: $sha256" }
+        // GNU format, so `sha256sum -c` works on the sidecar.
+        temp.writeText("$sha256  $fileName\n")
         check(temp.renameTo(sidecar)) { "cannot write $sidecar" }
     }
 

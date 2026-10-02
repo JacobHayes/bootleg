@@ -37,8 +37,14 @@ data class DownloadRecord(
     val fileName: String,
     val title: String,
     val url: String,
+    /** Hash of what [url] serves (for a zipped release, the archive). */
     val expectedSha256: String? = null,
+    /** Sums file listing what [url] serves. */
     val sumsUrl: String? = null,
+    /** For a zipped release: the entry to extract and store as [fileName]. */
+    val archiveEntry: String? = null,
+    /** For a zipped release: the extracted image's hash, if upstream publishes it. */
+    val imageSha256: String? = null,
     val totalBytes: Long? = null,
     val downloadedBytes: Long = 0,
     val status: DownloadStatus = DownloadStatus.QUEUED,
@@ -77,8 +83,10 @@ data class DownloadRecord(
                 fileName = release.fileName,
                 title = "$distroName ${release.version}$variant",
                 url = release.url,
-                expectedSha256 = release.sha256?.lowercase(),
+                expectedSha256 = (if (release.archiveEntry != null) release.archiveSha256 else release.sha256)?.lowercase(),
                 sumsUrl = release.sumsUrl,
+                archiveEntry = release.archiveEntry,
+                imageSha256 = release.sha256?.takeIf { release.archiveEntry != null }?.lowercase(),
                 totalBytes = release.sizeBytes,
                 createdAtMs = nowMs,
             )

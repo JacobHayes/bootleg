@@ -9,37 +9,13 @@ import dev.jacobhayes.bootleg.core.catalog.Scraper
 import java.io.IOException
 
 /**
- * Debug-only stand-ins so the catalog and download UI are exercisable before the real scrapers
- * land. netboot.xyz is small (a few MB) and real, so it also exercises the download engine.
+ * Debug-only extras. The real scrapers already cover netboot.xyz; these exercise UI states the real
+ * catalog rarely shows. Off by default so debug builds show the real catalog; flip
+ * [DEBUG_FAKE_SCRAPERS_ENABLED] to see fake releases and a failing scraper.
  */
-fun debugScrapers(): List<Scraper> = listOf(NetbootScraper, StaticScraper, FailingScraper)
+fun debugScrapers(): List<Scraper> = if (DEBUG_FAKE_SCRAPERS_ENABLED) listOf(StaticScraper, FailingScraper) else emptyList()
 
-private object NetbootScraper : Scraper {
-    private val distro = Distro("debug-netboot", "netboot.xyz (debug)", Category.RESCUE, "https://netboot.xyz")
-    override val distros = listOf(distro)
-
-    override suspend fun releases(http: Http): List<Release> =
-        listOf(
-            Release(
-                distroId = distro.id,
-                version = "latest",
-                arch = Arch.X86_64,
-                variant = "ISO",
-                url = "https://boot.netboot.xyz/ipxe/netboot.xyz.iso",
-                sumsUrl = "https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt",
-                fileName = "netboot.xyz.iso",
-            ),
-            Release(
-                distroId = distro.id,
-                version = "latest",
-                arch = Arch.ARM64,
-                variant = "ISO",
-                url = "https://boot.netboot.xyz/ipxe/netboot.xyz-arm64.iso",
-                sumsUrl = "https://boot.netboot.xyz/ipxe/netboot.xyz-sha256-checksums.txt",
-                fileName = "netboot.xyz-arm64.iso",
-            ),
-        )
-}
+private const val DEBUG_FAKE_SCRAPERS_ENABLED = false
 
 private object StaticScraper : Scraper {
     private val desktop = Distro("debug-desktop", "Sample Desktop (debug)", Category.DESKTOP, "https://example.org")
