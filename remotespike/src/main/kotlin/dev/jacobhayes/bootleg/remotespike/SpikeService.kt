@@ -63,6 +63,27 @@ class SpikeService : Service() {
                 }
 
                 override fun interfaces(): String = interfacesJson()
+
+                // The spike authorizes nobody: sessions stay pending and get no control.
+                override fun open(
+                    sessionID: Long,
+                    connJSON: String,
+                ) = Unit
+
+                override fun command(
+                    sessionID: Long,
+                    messageJSON: String,
+                ) = Unit
+
+                override fun hid(
+                    sessionID: Long,
+                    frame: ByteArray,
+                ): Int = HID_QUEUE_FULL
+
+                override fun closed(
+                    sessionID: Long,
+                    reason: String,
+                ) = Unit
             }
         try {
             Bootlegremote.setVerboseLogging(verbose)
@@ -121,6 +142,7 @@ class SpikeService : Service() {
         private const val TAG = "BootlegRemoteSpike"
         private const val CHANNEL_ID = "remote-spike"
         private const val NOTIFICATION_ID = 1
+        private const val HID_QUEUE_FULL = 1
 
         @Volatile
         var lastStatusJson: String = "{}"

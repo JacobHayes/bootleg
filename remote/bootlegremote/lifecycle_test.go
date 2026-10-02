@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,11 +16,19 @@ type fakeBackend struct {
 	closeGate  chan struct{} // Close blocks until this is closed, if set
 	closeCalls atomic.Int32
 	closed     chan struct{}
+	address    atomic.Pointer[string]
 }
 
 func newFakeBackend() *fakeBackend { return &fakeBackend{closed: make(chan struct{})} }
 
-func (b *fakeBackend) Listen(string) (net.Listener, error) { return net.Listen("tcp", "127.0.0.1:0") }
+func (b *fakeBackend) Listen(string) (net.Listener, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err == nil {
+		address := listener.Addr().String()
+		b.address.Store(&address)
+	}
+	return listener, err
+}
 
 func (b *fakeBackend) Status(context.Context) (status, error) {
 	return status{BackendState: "Running", TailscaleIPs: []string{"100.64.0.1"}, DNSName: "bootleg-test.example.ts.net."}, nil
@@ -29,8 +38,11 @@ func (b *fakeBackend) WatchBus(ctx context.Context) (busWatcher, error) {
 	return blockingWatcher{ctx: ctx}, nil
 }
 
-func (b *fakeBackend) WhoIs(context.Context, string) (peerIdentity, error) {
-	return peerIdentity{}, errors.New("no whois in fake")
+func (b *fakeBackend) WhoIs(_ context.Context, remoteAddress string) (peerIdentity, error) {
+	if !strings.HasPrefix(remoteAddress, "127.0.0.1:") {
+		return peerIdentity{}, errors.New("unknown peer")
+	}
+	return peerIdentity{NodeID: "nFAKE", Name: "laptop", User: "user@example.com"}, nil
 }
 
 func (b *fakeBackend) InjectNetworkEvent() {}
@@ -57,6 +69,8 @@ func (w blockingWatcher) Close() error { return nil }
 type recordingCallbacks struct {
 	mutex    sync.Mutex
 	statuses []string
+	opens    map[int64]string
+	closed   map[int64]string
 }
 
 func (c *recordingCallbacks) OnStatus(statusJSON string) {
@@ -66,6 +80,34 @@ func (c *recordingCallbacks) OnStatus(statusJSON string) {
 }
 
 func (c *recordingCallbacks) Interfaces() string { return "[]" }
+
+func (c *recordingCallbacks) Open(sessionID int64, connJSON string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	if c.opens == nil {
+		c.opens = map[int64]string{}
+	}
+	c.opens[sessionID] = connJSON
+}
+
+func (c *recordingCallbacks) Command(int64, string) {}
+
+func (c *recordingCallbacks) Hid(int64, []byte) int32 { return 0 }
+
+func (c *recordingCallbacks) Closed(sessionID int64, reason string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	if c.closed == nil {
+		c.closed = map[int64]string{}
+	}
+	c.closed[sessionID] = reason
+}
+
+func (c *recordingCallbacks) read(reader func(*recordingCallbacks)) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	reader(c)
+}
 
 // useFakeBackends makes Start hand out the given backends in order.
 func useFakeBackends(t *testing.T, backends ...*fakeBackend) {

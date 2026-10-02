@@ -72,3 +72,8 @@ PATH="$PWD/build/bin:$PATH" gomobile bind -target android/arm64 -androidapi 30 -
 description = "Vet and unit-test the Go remote module"
 dir = "remote"
 run = "go vet ./... && go test ./..."
+
+[tasks."remote:keycodes"]
+description = "Regenerate remote/protocol/keycodes.json from core's BrowserKeyCodes (review the diff)"
+dir = "remote"
+run = "go test ./protocol -run TestKeyCodesMatchCoreBrowserKeyCodes -count=1 -update"

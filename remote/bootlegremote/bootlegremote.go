@@ -1,53 +1,67 @@
-// Package bootlegremote runs an embedded Tailscale node (tsnet, userspace
-// networking, no VPN slot) inside the Bootleg Android app and serves HTTP on
-// its tailnet address. The exported surface is gomobile-friendly: only
-// strings, errors and the Callbacks interface cross the language boundary.
+// Package bootlegremote is Bootleg's remote-control transport for Android,
+// bound with gomobile: an embedded Tailscale node (tsnet, userspace
+// networking, no VPN slot) serving the web UI and WebSocket on its tailnet
+// address, and optionally the same server on the offline hotspot. Only
+// strings, numbers, byte slices, errors and the Callbacks interface cross the
+// language boundary. All authorization decisions are Kotlin's.
 package bootlegremote
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"tailscale.com/envknob"
 	"tailscale.com/logtail"
 	"tailscale.com/net/netmon"
+
+	"github.com/JacobHayes/bootleg/remote/transport"
 )
 
 const (
-	listenAddress           = ":80"
-	whoIsTimeoutMs          = 5_000
-	httpReadHeaderTimeout   = 10 * time.Second
-	httpIdleTimeout         = 60 * time.Second
-	httpShutdownTimeoutMs   = 3_000
-	httpHeaderBytesMax      = 16 << 10
+	tailnetListenAddress    = ":80"
 	hostnameLengthMax       = 63
 	stateDirectoryLengthMax = 4096
 )
 
-// Callbacks is implemented on the Kotlin side.
+// Callbacks is implemented on the Kotlin side. Every method is called on a Go
+// thread and must only enqueue work and return (within 20ms); Go never holds
+// a lock across these calls.
 type Callbacks interface {
 	// OnStatus receives the same JSON as Status whenever it changes.
 	OnStatus(statusJSON string)
 	// Interfaces returns the device's network interfaces as JSON
 	// (see interfaceJSON); Go cannot enumerate them itself on Android.
 	Interfaces() string
+
+	// Open announces a session. connJSON is {transport, remoteAddr,
+	// identity:{kind, nodeId, user, tags, name | tokenHash}, browser,
+	// userAgent}; the identity is bound to the accepted connection.
+	Open(sessionID int64, connJSON string)
+	// Command delivers one JSON message. Before Authorized only the first
+	// hello (or, for a hotspot pairing session, one pair command) arrives.
+	Command(sessionID int64, messageJSON string)
+	// Hid delivers one validated binary HID frame; return 0 when queued and
+	// 1 when the queue is full.
+	Hid(sessionID int64, frame []byte) int32
+	// Closed ends a session; it is called exactly once per Open, after the
+	// session's last Command/Hid.
+	Closed(sessionID int64, reason string)
 }
 
 type node struct {
-	backend    backend
-	httpServer *http.Server
-	callbacks  *callbacksHolder
-	cancel     context.CancelFunc
-	done       sync.WaitGroup
+	backend      backend
+	listener     *transport.Listener
+	callbacks    *callbacksHolder
+	allowedHosts atomic.Pointer[[]string]
+	cancel       context.CancelFunc
+	done         sync.WaitGroup
 }
 
 type callbacksHolder struct{ callbacks Callbacks }
@@ -89,6 +103,13 @@ func initGlobals() {
 	})
 }
 
+// releaseCallbacks drops the holder a listener installed when it stops,
+// unless a newer registration already replaced it. If the other listener is
+// still up, its holder (survivor) takes over.
+func releaseCallbacks(mine, survivor *callbacksHolder) {
+	currentCallbacks.CompareAndSwap(mine, survivor)
+}
+
 // Start brings the node up and starts serving. It returns once the backend is
 // started; it does not wait for the node to reach Running (an interactive
 // login may be needed, reported as loginURL in the status). authKey may be
@@ -118,7 +139,7 @@ func Start(stateDir, hostname, authKey string, cb Callbacks) error {
 	currentCallbacks.Store(holder)
 	started, err := startNode(stateDir, hostname, authKey, holder)
 	if err != nil {
-		currentCallbacks.CompareAndSwap(holder, nil)
+		releaseCallbacks(holder, hotspotCallbacks())
 		return setError(err)
 	}
 	stateMutex.Lock()
@@ -136,36 +157,59 @@ func startNode(stateDir, hostname, authKey string, holder *callbacksHolder) (*no
 	if err != nil {
 		return nil, err
 	}
-	listener, err := running.Listen(listenAddress)
+	listener, err := running.Listen(tailnetListenAddress)
 	if err != nil {
 		running.Close()
-		return nil, fmt.Errorf("tsnet listen %s: %w", listenAddress, err)
+		return nil, fmt.Errorf("tsnet listen %s: %w", tailnetListenAddress, err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	started := &node{
-		backend:   running,
-		callbacks: holder,
-		cancel:    cancel,
-		httpServer: &http.Server{
-			Handler:           newHandler(running),
-			ReadHeaderTimeout: httpReadHeaderTimeout,
-			IdleTimeout:       httpIdleTimeout,
-			MaxHeaderBytes:    httpHeaderBytesMax,
+	started := &node{backend: running, callbacks: holder, cancel: cancel}
+	started.setAllowedHosts(hostname, status{})
+	started.listener = transportServer().Serve(listener, transport.Endpoint{
+		Transport:    transport.TransportTailnet,
+		AllowedHosts: func() []string { return *started.allowedHosts.Load() },
+		Identify: func(ctx context.Context, remoteAddress string) (transport.Identity, error) {
+			return identify(ctx, running, remoteAddress)
 		},
-	}
-	started.done.Add(2)
+	})
+	started.done.Add(1)
 	go func() {
 		defer started.done.Done()
-		if err := started.httpServer.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("bootlegremote: http serve: %v", err)
-		}
-	}()
-	go func() {
-		defer started.done.Done()
-		watchStatus(ctx, running, func(snapshot status) { holder.callbacks.OnStatus(encodeStatus(snapshot)) }, sleepContext)
+		watchStatus(ctx, running, func(snapshot status) {
+			started.setAllowedHosts(hostname, snapshot)
+			holder.callbacks.OnStatus(encodeStatus(snapshot))
+		}, sleepContext)
 	}()
 	return started, nil
+}
+
+func identify(ctx context.Context, running backend, remoteAddress string) (transport.Identity, error) {
+	peer, err := running.WhoIs(ctx, remoteAddress)
+	if err != nil {
+		return transport.Identity{}, err
+	}
+	return transport.Identity{Kind: transport.IdentityNode, NodeID: peer.NodeID, Name: peer.Name, User: peer.User, Tags: peer.Tags}, nil
+}
+
+// setAllowedHosts lists every name a tailnet client may put in Host: the
+// short MagicDNS name, the FQDN and the node's tailnet IPs.
+func (n *node) setAllowedHosts(hostname string, snapshot status) {
+	hosts := []string{hostname}
+	if snapshot.DNSName != "" {
+		fqdn := strings.TrimSuffix(snapshot.DNSName, ".")
+		hosts = append(hosts, fqdn)
+		if short, _, found := strings.Cut(fqdn, "."); found && short != hostname {
+			hosts = append(hosts, short)
+		}
+	}
+	for _, ip := range snapshot.TailscaleIPs {
+		if strings.Contains(ip, ":") {
+			ip = "[" + ip + "]"
+		}
+		hosts = append(hosts, ip)
+	}
+	n.allowedHosts.Store(&hosts)
 }
 
 // prepareEnvironment points TS_LOGS_DIR and TMPDIR into the state directory:
@@ -191,8 +235,9 @@ func SetVerboseLogging(enabled bool) {
 	verboseLogging.Store(enabled)
 }
 
-// Stop shuts the node down and returns once it has fully closed. The node
-// stays registered (state is kept). Status reports Stopping meanwhile.
+// Stop ends every tailnet session (each gets Closed with listener_stopped),
+// shuts the node down and returns once it has fully closed. The node stays
+// registered (state is kept). Status reports Stopping meanwhile.
 func Stop() {
 	lifecycleMutex.Lock()
 	defer lifecycleMutex.Unlock()
@@ -210,17 +255,12 @@ func Stop() {
 	current = nil
 	stopping = false
 	stateMutex.Unlock()
-	// A newer holder (installed by a later registration) must survive.
-	currentCallbacks.CompareAndSwap(stopped.callbacks, nil)
+	releaseCallbacks(stopped.callbacks, hotspotCallbacks())
 }
 
 func stopNode(stopped *node) {
 	stopped.cancel()
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), httpShutdownTimeoutMs*time.Millisecond)
-	defer cancel()
-	if err := stopped.httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Printf("bootlegremote: http shutdown: %v", err)
-	}
+	stopped.listener.Stop()
 	if err := stopped.backend.Close(); err != nil {
 		log.Printf("bootlegremote: tsnet close: %v", err)
 	}
@@ -232,6 +272,17 @@ func runningNode() (*node, bool) {
 	stateMutex.Lock()
 	defer stateMutex.Unlock()
 	return current, current != nil && !stopping
+}
+
+// nodeCallbacks is the tailnet node's holder, also while it is stopping (its
+// sessions still get Closed then).
+func nodeCallbacks() *callbacksHolder {
+	stateMutex.Lock()
+	defer stateMutex.Unlock()
+	if current == nil {
+		return nil
+	}
+	return current.callbacks
 }
 
 // NetworkChanged forwards Android's default-network changes (from
@@ -277,26 +328,4 @@ func currentError() string {
 	errorMutex.Lock()
 	defer errorMutex.Unlock()
 	return lastError
-}
-
-func newHandler(running backend) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", func(writer http.ResponseWriter, _ *http.Request) {
-		writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprintln(writer, "bootleg ok")
-	})
-	mux.HandleFunc("GET /whoami", func(writer http.ResponseWriter, request *http.Request) {
-		ctx, cancel := context.WithTimeout(request.Context(), whoIsTimeoutMs*time.Millisecond)
-		defer cancel()
-		who, err := running.WhoIs(ctx, request.RemoteAddr)
-		if err != nil {
-			http.Error(writer, "whois failed: "+err.Error(), http.StatusForbidden)
-			return
-		}
-		writer.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(writer).Encode(who); err != nil {
-			log.Printf("bootlegremote: whoami encode: %v", err)
-		}
-	})
-	return mux
 }
