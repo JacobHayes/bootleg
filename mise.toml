@@ -26,3 +26,18 @@ run = "./gradlew --console=plain -q ktlintFormat"
 [tasks."fixtures:refresh"]
 description = "Re-record catalog fixtures from the live sites (review the diff before committing)"
 run = "./gradlew --console=plain -q :core:test --rerun -Precord"
+
+[tasks."remote:aar"]
+description = "Build the embedded Tailscale node (remote/) into remote/build/bootlegremote.aar with gomobile"
+dir = "remote"
+run = '''
+set -eu
+export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/30.0.16248370}"
+GOBIN="$PWD/build/bin" go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
+PATH="$PWD/build/bin:$PATH" gomobile bind -target android/arm64 -androidapi 30 -trimpath -ldflags "-s -w" -o build/bootlegremote.aar ./bootlegremote
+'''
+
+[tasks."remote:test"]
+description = "Vet and unit-test the Go remote module"
+dir = "remote"
+run = "go vet ./... && go test ./..."
