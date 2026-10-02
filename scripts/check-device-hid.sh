@@ -19,7 +19,7 @@
 # Usage: scripts/check-device-hid.sh   (env: BOOTLEG_WIFI_SERIAL, BOOTLEG_USB_SERIAL)
 set -eu
 
-WIRELESS=${BOOTLEG_WIFI_SERIAL:-192.168.1.50:5555}
+WIRELESS=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
 USB=${BOOTLEG_USB_SERIAL:-}
 LOCK=/private/tmp/claude-501/bootleg-device.lock
 LOCK_WAIT_S_MAX=120

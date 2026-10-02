@@ -15,7 +15,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-192.168.1.50:5555}
+WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
 USB_SERIAL=${BOOTLEG_USB_SERIAL:-}
 LOCK_DIR=/private/tmp/claude-501/bootleg-device.lock
 PROVIDER=content://dev.jacobhayes.bootleg.debug

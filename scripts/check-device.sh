@@ -15,7 +15,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 USB_SERIAL=${BOOTLEG_USB_SERIAL:-}
-WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-192.168.1.50:5555}
+WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
 LOCK_DIR=/private/tmp/claude-501/bootleg-device.lock
 FIXTURE_DIR=build/device-fixtures
 PHONE_DIR=/sdcard/bootleg-l4        # where adb pushes (FUSE view)
