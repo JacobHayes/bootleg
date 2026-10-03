@@ -1,7 +1,8 @@
 # shellcheck shell=bash disable=SC2034 # sourced by scripts/e2e-ui.sh, which uses the variables
 # HID tests (Control tab): Keyboard & mouse on -> the Mac enumerates a keyboard and a mouse; F24
 # from the F13–F24 page; the Shift chip latches for one key (Shift+F24); the boot-key sheet renders
-# its presets (no key is run); off -> both gone.
+# its presets (no key is run); off -> both gone; Settings "Compatible mouse (no wheel)" (flipped
+# with HID off) exposes the 3-byte boot mouse function and the Control hint drops scrolling.
 #
 # Harmless input only: nothing but the enable switch, the Shift chip, the F13–F24 toggle, F24 and
 # the boot-key sheet (opened, scrolled by its description text, closed with Back) is touched. Never
@@ -11,6 +12,7 @@ define_test hid.enable-disable "Keyboard & mouse on: Mac enumerates keyboard + m
 define_test hid.f24 "F24 from the F13–F24 page reaches the host (reports written)"
 define_test hid.shift-latch "Shift chip latches for one key: Shift+F24 sent, then released"
 define_test hid.boot-key-sheet "boot-key sheet renders firmware presets and durations; one Back closes it"
+define_test hid.compatible-mouse "Compatible mouse (no wheel): persisted, HID on links hid.bootleg_mouse (not the wheel mouse), hint drops scrolling; restored"
 
 HID_ENUMERATE_WAIT_S=15
 
@@ -95,6 +97,45 @@ test_hid_shift_latch() {
         check "Shift chip back to off" wait_until 5 not_text "Shift·"
     fi
     check "no reports dropped" test "$(call HID_STATE | jq '.dropped')" == 0
+}
+
+HID_COMPATIBLE_MOUSE="Compatible mouse (no wheel)"
+
+compatible_pref_is() { [[ $(adb shell run-as "$PACKAGE" cat shared_prefs/bootleg.xml 2>/dev/null | tr -d '\r' | grep -o 'name="compatible_mouse" value="[a-z]*"' | sed 's/.*value="\(.*\)"/\1/') == "$1" ]]; }
+linked_mouse_is() { [[ $(root 'ls /config/usb_gadget/g1/configs/b.1' | grep -E '^hid\.bootleg_mouse' || true) == "$1" ]]; }
+
+# set_compatible_mouse true|false: flips the Settings switch (HID must be off, so nothing is rebuilt).
+set_compatible_mouse() {
+    tab Settings
+    has_text "$HID_COMPATIBLE_MOUSE" || ui scroll-to "$HID_COMPATIBLE_MOUSE" 3 || return 1
+    if [[ $(if ui_checked "$HID_COMPATIBLE_MOUSE"; then echo true; else echo false; fi) != "$1" ]]; then ui toggle "$HID_COMPATIBLE_MOUSE"; fi
+    wait_until 5 compatible_pref_is "$1"
+}
+
+test_hid_compatible_mouse() {
+    local before
+    hid_test_start
+    before=$(call HID_STATE | jq -r '.compatibleMouse')
+    # HID off first (cleanups run newest first): the setting must never rebuild a live mouse here.
+    on_cleanup "call HID_OFF >/dev/null; call MOUSE_LAYOUT --extra compatible:b:$before >/dev/null"
+    step "compatible mouse on (HID off)"
+    check "Compatible mouse persisted as on" set_compatible_mouse true
+    shot settings-compatible
+    tab Control
+    hid_enable
+    check "the boot mouse function is linked, not the wheel mouse" wait_until 10 linked_mouse_is hid.bootleg_mouse
+    check "touchpad hint says there is no scrolling" has_text "~Compatible mouse: no scrolling"
+    shot control-compatible
+    step "HID off, compatible mouse off, HID on"
+    ui toggle "Keyboard & mouse" || true
+    check "switch off" wait_until 15 hid_disabled
+    check "Mac drops keyboard + mouse" wait_until "$HID_ENUMERATE_WAIT_S" host_has_no_hid
+    check "Compatible mouse persisted as off" set_compatible_mouse false
+    tab Control
+    hid_enable
+    check "the wheel mouse function is linked" wait_until 10 linked_mouse_is hid.bootleg_mouse_wheel
+    check "touchpad hint offers two-finger scrolling" has_text "~Two-finger drag to scroll"
+    shot control-wheel
 }
 
 boot_sheet_closed() { not_text "Boot menu"; }

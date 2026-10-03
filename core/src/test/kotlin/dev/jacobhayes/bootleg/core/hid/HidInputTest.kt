@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.math.abs
 
 class HidInputTest {
     private val ctrl = Modifier.LEFT_CONTROL
@@ -98,6 +99,7 @@ class HidInputTest {
         for (sequence in HidTestSequence.entries) {
             var dx = 0
             var dy = 0
+            var wheel = 0
             for ((kind, bytes) in sequence.reports) {
                 when (kind) {
                     HidKind.KEYBOARD -> {
@@ -109,12 +111,16 @@ class HidInputTest {
                     HidKind.MOUSE -> {
                         val report = MouseReport.decode(bytes)
                         assertEquals(0, report.buttonBits, "$sequence clicks")
+                        assertEquals(0, report.pan, "$sequence pans")
+                        assertTrue(abs(report.wheel) <= 1, "$sequence scrolls more than one detent")
                         dx += report.deltaX
                         dy += report.deltaY
+                        wheel += report.wheel
                     }
                 }
             }
             assertEquals(0 to 0, dx to dy, "$sequence mouse moves must cancel out")
+            assertEquals(0, wheel, "$sequence scrolling must cancel out")
             val last = sequence.reports.last()
             assertTrue(last.second.all { it == 0.toByte() } || last.first == HidKind.MOUSE, "$sequence must end released")
         }

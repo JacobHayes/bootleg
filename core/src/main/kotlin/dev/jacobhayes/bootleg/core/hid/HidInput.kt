@@ -128,7 +128,9 @@ class MouseInput {
 
 /**
  * The only input the debug provider may send (L4 tests): the Mac is the host and must never get
- * a real keystroke. F24, a lone Shift tap and a cancelling mouse move do nothing there.
+ * a real keystroke. F24, a lone Shift tap and a cancelling mouse move do nothing there; the
+ * cancelling scroll (one detent up, one down) is sent only once the check has parked the Mac's
+ * pointer over an inert spot.
  */
 enum class HidTestSequence(
     val wireName: String,
@@ -136,6 +138,7 @@ enum class HidTestSequence(
     F24("f24"),
     SHIFT("shift"),
     MOUSE("mouse"),
+    SCROLL("scroll"),
     ;
 
     val reports: List<Pair<HidKind, ByteArray>>
@@ -155,6 +158,11 @@ enum class HidTestSequence(
                     listOf(
                         HidKind.MOUSE to MouseReport(0, TEST_MOVE_COUNTS, TEST_MOVE_COUNTS).encode(),
                         HidKind.MOUSE to MouseReport(0, -TEST_MOVE_COUNTS, -TEST_MOVE_COUNTS).encode(),
+                    )
+                SCROLL ->
+                    listOf(
+                        HidKind.MOUSE to MouseReport.scroll(0, wheel = 1, pan = 0).encode(),
+                        HidKind.MOUSE to MouseReport.scroll(0, wheel = -1, pan = 0).encode(),
                     )
             }
 

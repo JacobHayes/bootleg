@@ -10,6 +10,7 @@ import dev.jacobhayes.bootleg.BootlegApp
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.hid.HidTestSequence
 import dev.jacobhayes.bootleg.core.remote.LeaseHolder
 import dev.jacobhayes.bootleg.core.remote.Principal
@@ -124,14 +125,25 @@ class CommandProvider : ContentProvider() {
                                     ),
                                 )
                             "HID_OFF" -> result(app.hid.setSpec(HidSpec()))
+                            // The Settings switch "Compatible mouse (no wheel)", through the same path.
+                            "MOUSE_LAYOUT" -> {
+                                val compatible = arguments.getBoolean("compatible", false)
+                                app.prefs.setMouseLayout(if (compatible) MouseLayout.BOOT else MouseLayout.WHEEL)
+                                app.hid.applyMouseLayout()?.let(::result) ?: buildJsonObject { put("unchanged", true) }.toString()
+                            }
                             "HID_STATE" -> hidStateJson(app)
-                            // Only fixed harmless sequences (F24, a Shift tap, a cancelling mouse move): never arbitrary input.
+                            // Only fixed harmless sequences (F24, a Shift tap, a cancelling mouse move, a cancelling
+                            // scroll): never arbitrary input.
                             "HID_SEND" -> {
                                 val name = arguments.getString("sequence") ?: arg
                                 val sequence =
                                     requireNotNull(name?.let(HidTestSequence::fromWireName)) {
                                         "sequence must be one of ${HidTestSequence.entries.map { it.wireName }}"
                                     }
+                                // The phone can't see the Mac's pointer: the caller must have parked it (AGENTS.md).
+                                require(sequence != HidTestSequence.SCROLL || arguments.getBoolean("pointerParked", false)) {
+                                    "scroll needs --extra pointerParked:b:true, sent only while the Mac's pointer is parked on an inert spot"
+                                }
                                 val sent = app.hid.sendTestSequence(sequence)
                                 buildJsonObject {
                                     put("sequence", sent.sequence)
@@ -197,6 +209,8 @@ class CommandProvider : ContentProvider() {
         return buildJsonObject {
             put("keyboard", app.hid.spec.value.keyboard)
             put("mouse", app.hid.spec.value.mouse)
+            put("mouseLayout", app.hid.spec.value.mouseLayout.name)
+            put("compatibleMouse", app.prefs.mouseLayout.value == MouseLayout.BOOT)
             put(
                 "link",
                 app.hid.link.value

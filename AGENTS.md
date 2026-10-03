@@ -30,7 +30,7 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
 | `mise run check` | L0–L2 | ktlint, compile with warnings as errors, unit + property + deterministic gadget simulation, UI screenshot goldens (offline) |
 | `mise run check:catalog` | L3 | live distro metadata/checksum/URL smoke test (network) |
 | `mise run check:device` | L4 | real phone end to end, `scripts/check-device.sh` (local only, not CI; takes the device lock) |
-| `mise run check:device:hid` | L4 | HID only: Mac enumerates keyboard + mouse, harmless input, off again (<30s) |
+| `mise run check:device:hid` | L4 | HID only: Mac enumerates keyboard + mouse (wheel and compatible layouts), harmless input incl. a parked scroll, off again (<45s) |
 | `mise run check:device:remote` | L4 | Remote: the real `bootleg` CLI over the tailnet (pending, approve, RO mount, harmless HID, revoke) |
 | `mise run check:device:web` | L4 | Remote web UI in Chrome (playwright-core, local install; manual, not in `check:all`): pending → approve, RO mount + eject, F24, release on tab switch, paste prepare/cancel, takeover, revoke; screenshots in `build/web-check/shots` |
 | `mise run check:device:ui [-- TEST...]` | L4 | The app's own UI on the phone (`scripts/e2e-ui.sh`; manual, not in `check:all`): small independent tests selectable by name, area or glob (`--list`); per-test results appended to `build/e2e-ui/results.tsv`, screenshots in `build/e2e-shots/<test>` |
@@ -85,7 +85,12 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
   Magisk turns each value into a string from `sqlite3_column_text`, and a NULL crashes `magiskd`.
   Every `su` then fails until the phone reboots, and the reboot needs a manual unlock.
 - The Mac is the USB host in tests. Never send real keystrokes to it. Only harmless input is
-  allowed: F20–F24, Shift taps, and mouse moves that cancel out.
+  allowed: F20–F24, Shift taps, mouse moves that cancel out, and one scroll detent up then one
+  down, only while the pointer is parked over an inert spot (the middle of the menu bar, never
+  near the status items, some of which react to scrolling). Record the pointer's absolute
+  position first and warp it back afterwards (relative moves clamp at screen edges). If parking
+  or the capture fails, don't send the scroll; fail the check instead (without Input Monitoring
+  there is no capture, so the scroll is skipped).
 
 ## Gotchas
 

@@ -446,7 +446,8 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
 - Paste-as-typing sends one report every 8ms (~60 characters a second). Boot-key plans re-send a
   held key every 200ms, so a host that resets USB while booting still sees it.
 - Debug builds expose only fixed harmless sequences to adb (`HID_SEND`: `f24`, `shift`, `mouse`
-  cancelling move); there is no arbitrary typing from adb.
+  cancelling move, `scroll` one detent up and back); there is no arbitrary typing from adb.
+  `MOUSE_LAYOUT` flips the Settings switch through the same path as the UI.
 
 ## Remote (phase 3)
 
@@ -797,7 +798,14 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   `hidutil` must list both Bootleg devices with the expected usage pages. A Swift capture helper
   (`scripts/hidcapture.swift`, IOHIDManager on the gadget's vendor/product) records input values
   while F24 and Shift taps and cancelling mouse deltas are sent, and the check asserts that exactly
-  those were seen. Without Input Monitoring for the terminal the helper prints SKIP (it only calls
+  those were seen. With the wheel layout the helper (`--describe`, enumeration only) must show a
+  5-byte mouse report whose descriptor has Wheel and AC Pan; the check then parks the Mac's pointer
+  in the middle of the menu bar (`--park-pointer`: absolute position recorded, warp, read back;
+  the pointer is warped back at the end or on SIGTERM), sends one detent up and one down, and
+  asserts exactly those wheel values arrived. The scroll is sent only once parked and capturing: a
+  parking or capture error fails the check, and without Input Monitoring the scroll is skipped.
+  It then flips "Compatible mouse" with HID on (one re-enumeration) and expects a 3-byte mouse
+  without Wheel, and flips it back. Without Input Monitoring for the terminal the helper prints SKIP (it only calls
   `IOHIDCheckAccess`, never anything that prompts) and the check falls back to enumeration plus
   written-report counts. A device another app has seized (Karabiner-Elements seizes keyboards)
   can't be opened; that device's capture is skipped the same way. An EXIT/INT/TERM trap turns HID

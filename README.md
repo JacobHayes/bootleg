@@ -61,8 +61,9 @@ mise run deploy    # install the debug build on the connected phone and grant ro
 | `mise run check:device:remote` | End-to-end remote check over Tailscale (L4). |
 | `mise run check:all` | Everything. |
 
-The device checks only expose formatted test images. They only send harmless input: F24, Shift
-and mouse moves that cancel out.
+The device checks only expose formatted test images. They only send harmless input: F24, Shift,
+mouse moves that cancel out, and one scroll detent up and back with the pointer parked on the
+menu bar (and put back afterwards).
 
 ## Safety
 
