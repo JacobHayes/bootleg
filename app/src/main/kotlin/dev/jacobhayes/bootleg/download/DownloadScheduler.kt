@@ -39,6 +39,8 @@ class DownloadScheduler(
 
     fun cancel(record: DownloadRecord) = scheduler.cancel(jobId(record))
 
+    fun isScheduled(record: DownloadRecord): Boolean = scheduler.getPendingJob(jobId(record)) != null
+
     companion object {
         private const val JOB_ID_BASE = 10_000
 

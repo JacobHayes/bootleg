@@ -76,5 +76,12 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- Root's privileged broadcast that lets a remote-started download schedule its job in the
+             background. DUMP keeps other apps out (root and adb shell hold it). -->
+        <receiver
+            android:name=".download.ScheduleDownloadReceiver"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
     </application>
 </manifest>

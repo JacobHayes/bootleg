@@ -59,6 +59,8 @@ data class DownloadRecord(
      * Job and notification ids derive from it, so two downloads never share one.
      */
     val idSlot: Int = UNASSIGNED_ID_SLOT,
+    /** Set on every admission (start or resume), so a late failure of one attempt never touches the next. */
+    val attemptId: String = "",
 ) {
     val isActive: Boolean
         get() = status == DownloadStatus.QUEUED || status == DownloadStatus.RUNNING || status == DownloadStatus.VERIFYING

@@ -6,6 +6,7 @@ import android.os.StatFs
 import dev.jacobhayes.bootleg.catalog.CatalogRepository
 import dev.jacobhayes.bootleg.catalog.OkHttpHttp
 import dev.jacobhayes.bootleg.catalog.catalogScrapers
+import dev.jacobhayes.bootleg.download.BackgroundJobScheduling
 import dev.jacobhayes.bootleg.download.DownloadEngine
 import dev.jacobhayes.bootleg.download.DownloadNotifications
 import dev.jacobhayes.bootleg.download.DownloadScheduler
@@ -13,6 +14,7 @@ import dev.jacobhayes.bootleg.download.DownloadStore
 import dev.jacobhayes.bootleg.download.Downloads
 import dev.jacobhayes.bootleg.hid.HidController
 import dev.jacobhayes.bootleg.remote.KeepAwake
+import dev.jacobhayes.bootleg.remote.RemoteDownloads
 import dev.jacobhayes.bootleg.remote.RemoteManager
 import dev.jacobhayes.bootleg.service.BootlegBackendImpl
 import dev.jacobhayes.bootleg.storage.FileTasks
@@ -53,7 +55,11 @@ class BootlegApp : Application() {
             registerActivityLifecycleCallbacks(it.backgroundWatcher)
         }
     }
-    val remote by lazy { RemoteManager(this, systemBackend, hid, prefs, appScope) }
+    val remote by lazy {
+        RemoteManager(this, systemBackend, hid, prefs, appScope) {
+            RemoteDownloads(catalog, downloads, storeDir, freeBytes = { dir -> StatFs(dir.path).availableBytes }, appScope)
+        }
+    }
     val fileTasks by lazy { FileTasks(contentResolver, appScope, storeDir) { backend.refreshImages() } }
 
     val downloads by lazy {
@@ -68,7 +74,15 @@ class BootlegApp : Application() {
                 freeBytes = { dir -> StatFs(dir.path).availableBytes },
                 onImageAdded = { backend.refreshImages() },
             )
-        Downloads(store, engine, notifications, DownloadScheduler(this), wifiOnly = { prefs.wifiOnlyDownloads.value }).also { downloads ->
+        Downloads(
+            store,
+            engine,
+            notifications,
+            DownloadScheduler(this),
+            wifiOnly = { prefs.wifiOnlyDownloads.value },
+            backgroundScheduling =
+                BackgroundJobScheduling({ fileName, token -> systemBackend.sendScheduleDownloadBroadcast(fileName, token) }),
+        ).also { downloads ->
             // The library changed (a delete, a refresh): completed records of images that are gone go too.
             // drop(1) skips the empty placeholder before the first listing.
             appScope.launch {

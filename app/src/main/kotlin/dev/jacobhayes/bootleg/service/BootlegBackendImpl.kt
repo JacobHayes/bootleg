@@ -203,6 +203,12 @@ class BootlegBackendImpl(
         wakeScreen: Boolean,
     ) = call { it.setKeepAwake(stayOnWhilePluggedIn, lowLatency, wakeScreen) }
 
+    /** See `BackgroundJobScheduling`. */
+    suspend fun sendScheduleDownloadBroadcast(
+        fileName: String,
+        token: String,
+    ) = call { it.sendScheduleDownloadBroadcast(fileName, token) }
+
     suspend fun refreshGadget() {
         val (state, journal) =
             call {

@@ -41,4 +41,9 @@ interface IBootlegRoot {
     String setUsbTethering(boolean on);
     // Whether Android reports a USB interface tethered.
     boolean usbTethered();
+    // Sends the app's ScheduleDownloadReceiver a broadcast that may start activities from the
+    // background (am broadcast --allow-background-activity-starts), so it can schedule the
+    // download's user-initiated job while the app is in the background. Returns once delivered.
+    // token: the app's one-time token for this attempt (32 lower-case hex digits).
+    void sendScheduleDownloadBroadcast(String fileName, String token);
 }

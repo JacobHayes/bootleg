@@ -12,6 +12,7 @@ import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
 import dev.jacobhayes.bootleg.core.hid.HidDescriptors
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.tether.UsbTetherController
+import dev.jacobhayes.bootleg.download.BackgroundJobScheduling
 
 /**
  * Root side of the app (libsu RootService, daemon mode: it outlives the app's process).
@@ -29,6 +30,9 @@ class BootlegRootService : RootService() {
 
     // Reading the tethering state is a cached value; it must not wait behind a gadget change.
     private val tetherReadLock = Any()
+
+    /** Serializes the privileged schedule broadcasts; never held with another lock. */
+    private val scheduleBroadcastLock = Any()
     private val hidRelay = HidRelay()
     private val hidHolders = HidNodeHolders()
 
@@ -201,6 +205,15 @@ class BootlegRootService : RootService() {
             override fun setUsbTethering(on: Boolean): String = call { BootlegJson.encodeToString(gadgetChange { tether.set(on) }) }
 
             override fun usbTethered(): Boolean = call(tetherReadLock) { tether.usbTethered() }
+
+            override fun sendScheduleDownloadBroadcast(
+                fileName: String,
+                token: String,
+            ) {
+                call(scheduleBroadcastLock) {
+                    RootCommands.runChecked(BackgroundJobScheduling.broadcastArgv(packageName, fileName, token))
+                }
+            }
         }
 
     /** Runs a controller call that may close the relay; HID opens are allowed again once it has returned. */
