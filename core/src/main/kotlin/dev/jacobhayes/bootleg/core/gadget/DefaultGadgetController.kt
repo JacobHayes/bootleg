@@ -123,6 +123,18 @@ class DefaultGadgetController(
         return converge(journal, state, foreignBefore = state, allowEmergencyOff = true)
     }
 
+    /**
+     * The journal with host ejects recorded, without reconciling anything. A host eject only empties
+     * the LUN's `file` (no USB re-enumeration, so no USB_STATE broadcast), so the app polls this while
+     * something is exported to show "Host ejected" and update the notification. Reads only, apart
+     * from saving the journal when a host eject was found; no HAL wait, so it is cheap.
+     */
+    fun observe(): Journal {
+        val loaded = journalStore.load()
+        val journal = absorbHostEjects(loaded, reader.read())
+        return if (journal != loaded) save(journal) else loaded
+    }
+
     override fun bootlegOff(): ApplyResult {
         reconcileAttemptCount = 0
         val state = reader.read()

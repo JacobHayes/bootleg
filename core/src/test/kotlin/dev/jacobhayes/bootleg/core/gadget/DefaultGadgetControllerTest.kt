@@ -187,6 +187,39 @@ class DefaultGadgetControllerTest {
     }
 
     @Test
+    fun `observe records a host eject without touching the gadget`() {
+        val rig = GadgetRig()
+        val controller = rig.controller()
+        controller.apply(twoDisks)
+        assertEquals(SlotIntent.EXPORTED, controller.observe().slotIntents[0])
+
+        rig.fs.hostEject(0)
+        val stateBefore = rig.state()
+        val observed = controller.observe()
+        assertEquals(SlotIntent.HOST_EJECTED, observed.slotIntents[0])
+        assertEquals(SlotIntent.EXPORTED, observed.slotIntents[1])
+        assertEquals(observed, rig.journal())
+        assertEquals(stateBefore, rig.state())
+
+        // Never brings the media back; a later reconcile keeps it ejected too.
+        assertEquals(observed, controller.observe())
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.reconcile())
+        assertEquals(SlotIntent.HOST_EJECTED, rig.journal().slotIntents[0])
+        assertEquals("", rig.state().luns[0]?.file)
+        rig.assertHealthy()
+    }
+
+    @Test
+    fun `observe ignores an empty LUN while our own transition is in flight`() {
+        val rig = GadgetRig()
+        val controller = rig.controller()
+        controller.apply(twoDisks)
+        rig.journalStore.save(rig.journal().copy(phase = TransitionPhase.MUTATING))
+        rig.fs.hostEject(0)
+        assertEquals(SlotIntent.EXPORTED, controller.observe().slotIntents[0])
+    }
+
+    @Test
     fun `host eject survives a HAL unbind or a removed link before reconcile`() {
         val interruptions =
             mapOf<String, (GadgetRig) -> Unit>(

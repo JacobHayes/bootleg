@@ -110,7 +110,13 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   every LUN Bootleg configures carries a marker in `inquiry_string` (vendor `Bootleg`, product
   `Virtual Drive`, revision = a 4-character nonce kept in the journal), written in place, also on a
   linked LUN; a new LUN starts with the kernel's empty value. Only LUNs that still carry the marker
-  count as host-ejected. A forced eject also clears the host's prevent-removal flag.
+  count as host-ejected. A forced eject also clears the host's prevent-removal flag. A host eject
+  sends no broadcast (nothing re-enumerates), so while anything is exported the service polls
+  `readJournal` every 3s, which records host ejects (reads only, no HAL wait) for the Drives
+  screen, notification and tile. The app also reads the journal whenever it comes to the
+  foreground, so a draft never starts from an empty journal while exports are live.
+- **Eject all** from the notification or tile toasts when the host refused (macOS keeps
+  prevent-removal set until it ejects the disk itself, even after an unmount) or the eject failed.
 - **Executor** (root, in-process file IO, no shell per op): before each prepare/cleanup op it
   re-reads the owned state (functions, links, LUNs; no USB properties) and aborts and replans (at
   most 3 times) if it changed. Inside a switch it re-reads only the UDC and our own links, and

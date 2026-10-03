@@ -16,6 +16,7 @@ import dev.jacobhayes.bootleg.BootlegApp
 import dev.jacobhayes.bootleg.MainActivity
 import dev.jacobhayes.bootleg.R
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -61,7 +62,7 @@ class BootlegService : Service() {
         // Reconcile runs on USB_STATE (sticky, so also right after registering), not on every start:
         // the backend pokes this service after each gadget call.
         when (intent?.action) {
-            ACTION_EJECT_ALL -> scope.launch { backend.ejectAll() }
+            ACTION_EJECT_ALL -> scope.launch { ejectAllWithFeedback(this@BootlegService, backend) }
             ACTION_FORGET ->
                 scope.launch {
                     // After a reboot without opt-in restore: drop the journal before any reconcile can re-export it.
@@ -83,6 +84,7 @@ class BootlegService : Service() {
                     if (reconciledOnce && !backend.hasExports) stopSelf()
                 }
             }
+            scope.launch { pollHostEjects() }
         }
         return START_STICKY
     }
@@ -97,6 +99,24 @@ class BootlegService : Service() {
         if (usbStateRegistered) unregisterReceiver(usbStateReceiver)
         scope.cancel()
         super.onDestroy()
+    }
+
+    /**
+     * A host eject empties the LUN without re-enumerating, so no USB_STATE arrives: poll the root
+     * side (cheap configfs reads) while something is exported so the UI and notification show it.
+     */
+    private suspend fun pollHostEjects() {
+        while (true) {
+            delay(HOST_EJECT_POLL_INTERVAL_MS)
+            if (!backend.hasExports) continue
+            try {
+                backend.refreshGadget()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "polling for host ejects failed", e)
+            }
+        }
     }
 
     /** Debounced: USB_STATE arrives in bursts while the HAL re-enumerates. */
@@ -145,7 +165,7 @@ class BootlegService : Service() {
                         lunState.ro -> "RO"
                         else -> "RW"
                     }
-                "$lun · ${lunState.file.substringAfterLast('/')} ($mode)"
+                "Slot ${lun + 1} · ${lunState.file.substringAfterLast('/')} ($mode)"
             }
         val open =
             PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
@@ -178,6 +198,7 @@ class BootlegService : Service() {
         private const val CHANNEL_ID = "exports"
         private const val NOTIFICATION_ID = 1
         private const val RECONCILE_DEBOUNCE_MS = 1_000L
+        private const val HOST_EJECT_POLL_INTERVAL_MS = 3_000L
         private const val ACTION_USB_STATE = "android.hardware.usb.action.USB_STATE"
         private const val ACTION_EJECT_ALL = "dev.jacobhayes.bootleg.action.EJECT_ALL"
 

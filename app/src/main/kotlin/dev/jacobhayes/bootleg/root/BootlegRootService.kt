@@ -57,7 +57,8 @@ class BootlegRootService : RootService() {
         object : IBootlegRoot.Stub() {
             override fun readGadget(): String = call { BootlegJson.encodeToString(controller.read()) }
 
-            override fun readJournal(): String = call { BootlegJson.encodeToString(journalStore.load()) }
+            // Records host ejects on the way: the host emptying a LUN sends no broadcast, so readers poll this.
+            override fun readJournal(): String = call { BootlegJson.encodeToString(controller.observe()) }
 
             override fun apply(desiredJson: String): String =
                 call {
