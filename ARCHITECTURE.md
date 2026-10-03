@@ -939,6 +939,20 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   written-report counts. A device another app has seized (Karabiner-Elements seizes keyboards)
   can't be opened; that device's capture is skipped the same way. An EXIT/INT/TERM trap turns HID
   off again once the check has enabled it.
+- L4 tethering (`mise run check:device:tether`, `scripts/check-device-tether.sh`, ~50s, takes the
+  device lock, wireless adb, every adb call bounded; not in `check:all`): HID on with its session
+  open (F24 sent), `TETHER_ON` (the Drives switch's path) must return `Changed` with no transition
+  marker left, an `ncm.*` link next to `ffs.adb` and both HID links, no `/dev/hidg*` fd shown as
+  deleted, and F24 must still reach the host (this and the same checks after `TETHER_OFF` are the
+  device side of the HID fd rule for tethering); the Mac must
+  get a new interface with an IPv4 address and fetch `generate_204` through it with
+  `curl --interface`. A read-only FAT fixture is then exposed (HID kept in the desired state) and
+  mounted while the curl still works, `TETHER_OFF` must be `Refused` naming LUN 0, the Mac ejects
+  the volume and `TETHER_OFF` must then succeed and the interface go away. An EXIT/INT/TERM/HUP
+  trap first waits (≤ 70s) until no tethering change is in flight (root's marker gone), then
+  ejects, turns the drives and tethering off and puts HID back as it found it; if a change is
+  still in flight it changes nothing and fails. It changes nothing on the
+  Mac beyond what macOS does for any tethering phone (see device facts).
 - L3 tolerates upstream flakiness, not breakage: a scraper (and each image probe or sums fetch)
   that fails on a timeout, connection reset, 5xx, 425 or 429 is retried once (both scraper attempts
   share a 32s budget). At most one scraper per run may still fail that way; it is skipped with a
