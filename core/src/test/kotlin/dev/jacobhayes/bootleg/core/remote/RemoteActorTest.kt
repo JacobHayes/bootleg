@@ -8,6 +8,7 @@ import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.KeyUsage
+import dev.jacobhayes.bootleg.core.tether.TetherResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -117,6 +118,11 @@ class RemoteActorTest {
 
         override suspend fun setHid(spec: HidSpec): ApplyResult =
             run("setHid $spec") { ApplyResult.Applied(GadgetState("udc", emptySet(), emptyMap(), emptyMap()), reenumerated = true) }
+
+        override suspend fun setUsbTethering(on: Boolean): TetherResult {
+            calls += "setUsbTethering $on"
+            return TetherResult.Unchanged(on)
+        }
     }
 
     private class FakeHid(

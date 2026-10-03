@@ -100,6 +100,7 @@ class RemoteController(
         val opId: Long,
         val sessionId: Long,
         val requestId: JsonPrimitive,
+        val timeoutMs: Long,
     )
 
     private class Barrier(
@@ -445,6 +446,10 @@ class RemoteController(
                 admit(session, epoch) ?: admitDevice(body.ifRev)
                     // The mouse layout is a phone setting; remote only turns the functions on and off.
                     ?: startDeviceCall(session, id, DeviceOp.SetHid(device.hid.copy(keyboard = body.keyboard, mouse = body.mouse)))
+            // Whether a disk is exposed is decided by root from the live LUNs: the snapshot can lag a host eject.
+            is TetherSetRequest ->
+                admit(session, epoch) ?: admitDevice(body.ifRev)
+                    ?: startDeviceCall(session, id, DeviceOp.SetUsbTethering(body.on))
             is BootKeyRunRequest -> admit(session, epoch) ?: onBootKeyRun(session, id, body)
             is BootKeyCancelRequest -> admit(session, epoch) ?: onJobCancel(JobKind.BOOTKEY)
             is PastePrepareRequest -> admit(session, epoch) ?: onPastePrepare(session, body.text)
@@ -855,7 +860,13 @@ class RemoteController(
     ): Outcome {
         check(deviceCall == null)
         val opId = nextOpId++
-        deviceCall = DeviceCall(opId, session.id, requestId)
+        deviceCall =
+            DeviceCall(
+                opId,
+                session.id,
+                requestId,
+                timeoutMs = if (op is DeviceOp.SetUsbTethering) RemoteLimits.TETHER_OP_TIMEOUT_MS else RemoteLimits.DEVICE_OP_TIMEOUT_MS,
+            )
         emit(RemoteEffect.Device(opId, op))
         return Outcome.Deferred
     }
@@ -877,8 +888,14 @@ class RemoteController(
                     )
                 is DeviceOutcome.Failed -> err(ErrorCode.DEVICE, outcome.reason.take(ERROR_MESSAGE_LENGTH_MAX))
                 is DeviceOutcome.NeedsAttention -> err(ErrorCode.DEVICE_ATTENTION, outcome.reason.take(ERROR_MESSAGE_LENGTH_MAX))
-                is DeviceOutcome.TimedOut -> err(ErrorCode.TIMEOUT, "the device did not answer in ${RemoteLimits.DEVICE_OP_TIMEOUT_MS} ms")
+                is DeviceOutcome.TimedOut -> err(ErrorCode.TIMEOUT, "the device did not answer in ${call.timeoutMs} ms")
                 is DeviceOutcome.Busy -> err(ErrorCode.BUSY, "an earlier device operation is still running")
+                is DeviceOutcome.Tethering ->
+                    ok(
+                        TetherSetResult.serializer(),
+                        TetherSetResult(TetherView(outcome.active), outcome.warning?.take(ERROR_MESSAGE_LENGTH_MAX)),
+                    )
+                is DeviceOutcome.DisksExposed -> err(ErrorCode.DISKS_EXPOSED, outcome.reason.take(ERROR_MESSAGE_LENGTH_MAX))
             }
         completeDeferred(session, call.requestId, reply)
     }
@@ -1296,7 +1313,7 @@ class RemoteController(
                 session.stateDirty = false
                 session.lastStatePushMs = nowMs
                 val view = stateView()
-                send(session, StatePush(view.rev, view.slots, view.images, view.hid, view.lease))
+                send(session, StatePush(view.rev, view.slots, view.images, view.hid, view.lease, view.tether))
             }
         }
     }
@@ -1339,6 +1356,7 @@ class RemoteController(
                     device.hidLink.wireName.takeIf { device.hid.keyboard || device.hid.mouse },
                 ),
             lease = leaseViewFor(),
+            tether = device.usbTethering?.let(::TetherView),
         )
     }
 

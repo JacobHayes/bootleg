@@ -4,6 +4,7 @@ import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.tether.TetherResult
 import kotlinx.coroutines.flow.Flow
 import java.security.SecureRandom
 
@@ -76,6 +77,9 @@ interface DevicePort {
     suspend fun reinsert(lun: Int): ApplyResult
 
     suspend fun setHid(spec: HidSpec): ApplyResult
+
+    /** Android's USB tethering on or off; may take up to [RemoteLimits.TETHER_OP_TIMEOUT_MS]. */
+    suspend fun setUsbTethering(on: Boolean): TetherResult
 
     /** The current device state and every change to it. */
     val snapshots: Flow<DeviceSnapshot>

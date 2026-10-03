@@ -82,6 +82,9 @@ object RemoteLimits {
     // Device (gadget) operations.
     const val DEVICE_OP_TIMEOUT_MS = 10_000L
 
+    /** `tether.set`: Android's change, the HAL's re-plug and a gadget reconcile (≈ 60 s worst case plus margin, with HID closed until a left marker is waited out). */
+    const val TETHER_OP_TIMEOUT_MS = 75_000L
+
     const val IMAGE_COUNT_MAX = 512
 
     /** The actor wakes at least this often so lazy expirations (plans, approvals) are processed. */

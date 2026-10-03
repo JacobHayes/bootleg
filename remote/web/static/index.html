@@ -64,6 +64,17 @@
   </section>
 
   <section class="card">
+    <h2>USB tethering</h2>
+    <div class="row wrap">
+      <span id="tether-state">Unknown</span>
+      <button id="tether-on" type="button" class="needs-lease">Turn on</button>
+      <button id="tether-off" type="button" class="needs-lease">Turn off</button>
+    </div>
+    <p class="muted">Shares the phone's internet with the computer over USB. Switching re-plugs USB, so
+      eject every disk first. Turning it off may cut this page if it reaches the phone over that USB link.</p>
+  </section>
+
+  <section class="card">
     <h2>Keyboard &amp; mouse</h2>
     <div class="row wrap">
       <label><input id="hid-keyboard" type="checkbox"> Keyboard</label>

@@ -115,6 +115,7 @@ class ProtocolTest {
                 "slot.eject",
                 "slot.reinsert",
                 "hid.set",
+                "tether.set",
                 "bootkey.run",
                 "bootkey.cancel",
                 "paste.prepare",

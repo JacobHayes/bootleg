@@ -12,6 +12,7 @@ import dev.jacobhayes.bootleg.core.remote.DeviceSnapshot
 import dev.jacobhayes.bootleg.core.remote.HidLinkStatus
 import dev.jacobhayes.bootleg.core.remote.RemoteImage
 import dev.jacobhayes.bootleg.core.remote.RemoteSlot
+import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.hid.HidController
 import dev.jacobhayes.bootleg.hid.HidLinkState
 import kotlinx.coroutines.flow.Flow
@@ -38,9 +39,11 @@ class RemoteDevice(
 
     override suspend fun setHid(spec: HidSpec): ApplyResult = hid.setSpec(spec)
 
+    override suspend fun setUsbTethering(on: Boolean): TetherResult = backend.setUsbTethering(on)
+
     override val snapshots: Flow<DeviceSnapshot> =
-        combine(backend.journal, backend.images, hid.link) { journal, images, link ->
-            snapshotOf(journal, images).copy(hidLink = statusOf(link))
+        combine(backend.journal, backend.images, hid.link, backend.usbTethering) { journal, images, link, tethering ->
+            snapshotOf(journal, images).copy(hidLink = statusOf(link), usbTethering = tethering)
         }.distinctUntilChanged()
 
     companion object {

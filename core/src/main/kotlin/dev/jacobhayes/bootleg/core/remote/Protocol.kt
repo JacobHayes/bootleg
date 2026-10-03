@@ -103,6 +103,9 @@ enum class ErrorCode {
     @SerialName("device_attention")
     DEVICE_ATTENTION,
 
+    @SerialName("disks_exposed")
+    DISKS_EXPOSED,
+
     @SerialName("timeout")
     TIMEOUT,
     ;
@@ -281,6 +284,14 @@ data class HidSetRequest(
     val ifRev: Long? = null,
 ) : RequestBody
 
+/** Android's USB tethering on or off; re-plugs USB, so the phone refuses it while a disk is exposed. */
+@Serializable
+@SerialName("tether.set")
+data class TetherSetRequest(
+    val on: Boolean,
+    val ifRev: Long? = null,
+) : RequestBody
+
 /** Answered when the boot keys finish (or are cancelled). */
 @Serializable
 @SerialName("bootkey.run")
@@ -365,6 +376,12 @@ data class HidView(
 
 const val HID_STATUS_RELEASE_PENDING = "release_pending"
 
+/** The phone's USB tethering, as Android reports it. */
+@Serializable
+data class TetherView(
+    val on: Boolean,
+)
+
 @Serializable
 data class StateView(
     val rev: Long,
@@ -372,6 +389,8 @@ data class StateView(
     val images: List<ImageView>,
     val hid: HidView,
     val lease: LeaseView,
+    /** Absent until Android has reported it. */
+    val tether: TetherView? = null,
 )
 
 @Serializable
@@ -384,6 +403,13 @@ data class StateResult(
 data class LeaseResult(
     val epoch: Int,
     val lease: LeaseView,
+)
+
+@Serializable
+data class TetherSetResult(
+    val tether: TetherView,
+    /** Tethering changed, but the gadget then needs attention on the phone. */
+    val warning: String? = null,
 )
 
 @Serializable
@@ -450,6 +476,7 @@ data class StatePush(
     val images: List<ImageView>,
     val hid: HidView,
     val lease: LeaseView,
+    val tether: TetherView? = null,
 ) : Push
 
 @Serializable

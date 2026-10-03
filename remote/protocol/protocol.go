@@ -54,6 +54,7 @@ const (
 	TypeSlotEject          = "slot.eject"
 	TypeSlotReinsert       = "slot.reinsert"
 	TypeHidSet             = "hid.set"
+	TypeTetherSet          = "tether.set"
 	TypeBootkeyRun         = "bootkey.run"
 	TypeBootkeyCancel      = "bootkey.cancel"
 	TypePastePrepare       = "paste.prepare"
@@ -97,6 +98,7 @@ const (
 	ErrorRevConflict   = "rev_conflict"
 	ErrorNotFound      = "not_found"
 	ErrorDevice        = "device"
+	ErrorDisksExposed  = "disks_exposed"
 	ErrorTimeout       = "timeout"
 )
 
@@ -309,13 +311,27 @@ type HidState struct {
 	Link string `json:"link,omitempty"`
 }
 
+// TetherState is state.tether: the phone's USB tethering as Android reports it.
+type TetherState struct {
+	On bool `json:"on"`
+}
+
+// TetherResult is the tether.set result. Warning is set when tethering
+// changed but the phone's drives then need attention.
+type TetherResult struct {
+	Tether  TetherState `json:"tether"`
+	Warning string      `json:"warning,omitempty"`
+}
+
 // State is the state push and the state.get result (under "state").
 type State struct {
 	Rev    int64    `json:"rev"`
 	Slots  []Slot   `json:"slots"`
 	Images []Image  `json:"images"`
 	Hid    HidState `json:"hid"`
-	Lease  Lease    `json:"lease"`
+	// Tether is nil until the phone knows whether it is tethering.
+	Tether *TetherState `json:"tether,omitempty"`
+	Lease  Lease        `json:"lease"`
 }
 
 // PastePlan is the paste.prepare result. Unsupported lists the characters

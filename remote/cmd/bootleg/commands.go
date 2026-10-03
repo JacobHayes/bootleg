@@ -20,6 +20,9 @@ const (
 	// trips the limit and ends the session.
 	framesPerSecondCLI = 150
 	leaseConfirmWait   = 2 * time.Second
+	// tetherTimeout leaves the phone its 75 s bound for tether.set after a
+	// connection and lease that take up to defaultTimeout.
+	tetherTimeout = 75*time.Second + defaultTimeout
 	// lunCountMax is the most disks the gadget exposes (LUNs 0–7).
 	lunCountMax = 8
 )
@@ -31,6 +34,8 @@ func dispatch(ctx context.Context, call *invocation) error {
 		switch call.command {
 		case "bootkey":
 			timeout = bootkeyTimeout
+		case "tether":
+			timeout = tetherTimeout
 		case "key":
 			timeout = defaultTimeout + time.Duration(call.repeat)*call.interval
 		case "type":
@@ -74,6 +79,11 @@ func dispatch(ctx context.Context, call *invocation) error {
 			return withLease(ctx, call, c, func() error { return slotCommand(ctx, call, c) })
 		case "hid":
 			return withLease(ctx, call, c, func() error { return hidCommand(ctx, call, c) })
+		case "tether":
+			if call.args[0] == "status" {
+				return tetherStatusCommand(ctx, call, c)
+			}
+			return withLease(ctx, call, c, func() error { return tetherCommand(ctx, call, c) })
 		case "type":
 			return withLease(ctx, call, c, func() error { return typeCommand(ctx, call, c) })
 		case "key":
@@ -194,6 +204,7 @@ func statusCommand(ctx context.Context, call *invocation, c *client) error {
 		mouse += " (no wheel)"
 	}
 	fmt.Fprintf(call.stdout, "HID: keyboard %s, mouse %s%s\n", onOff(state.Hid.Keyboard), mouse, suffix(hidStatus(state.Hid)))
+	fmt.Fprintf(call.stdout, "USB tethering: %s\n", tetherText(state.Tether))
 	if len(state.Slots) == 0 {
 		fmt.Fprintln(call.stdout, "Disks: none")
 	}
@@ -378,6 +389,48 @@ func hidCommand(ctx context.Context, call *invocation, c *client) error {
 	}
 	_, err = c.mutate(ctx, protocol.TypeHidSet, map[string]any{"keyboard": keyboard, "mouse": mouse})
 	return err
+}
+
+func tetherText(tether *protocol.TetherState) string {
+	if tether == nil {
+		return "unknown"
+	}
+	return onOff(tether.On)
+}
+
+func tetherStatusCommand(ctx context.Context, call *invocation, c *client) error {
+	state, _, err := c.fetchState(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(call.stdout, "USB tethering: %s\n", tetherText(state.Tether))
+	return nil
+}
+
+// tetherCommand turns the phone's USB tethering on or off. The phone refuses
+// (disks_exposed) while a disk is exposed: either way USB re-plugs.
+func tetherCommand(ctx context.Context, call *invocation, c *client) error {
+	on := call.args[0] == "on"
+	if !on {
+		fmt.Fprintln(call.stderr, "Turning USB tethering off; this connection drops if it reaches the phone over that USB link.")
+	}
+	response, err := c.mutate(ctx, protocol.TypeTetherSet, map[string]any{"on": on})
+	if err != nil {
+		var failure *protocolError
+		if errors.As(err, &failure) && failure.body.Code == protocol.ErrorDisksExposed {
+			fmt.Fprintln(call.stderr, "Eject every disk first (bootleg eject <lun>): switching USB tethering re-plugs USB.")
+		}
+		return err
+	}
+	var result protocol.TetherResult
+	if err := json.Unmarshal(response.Raw, &result); err != nil {
+		return fmt.Errorf("malformed tether.set reply: %w", err)
+	}
+	fmt.Fprintf(call.stdout, "USB tethering: %s\n", onOff(result.Tether.On))
+	if result.Warning != "" {
+		fmt.Fprintf(call.stderr, "Warning: %s\n", result.Warning)
+	}
+	return nil
 }
 
 // typeText is the text for `type`: the argument, or stdin for "-". Stdin is

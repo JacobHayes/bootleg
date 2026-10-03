@@ -5,6 +5,8 @@
 
 const PROTOCOL_VERSION = 1;
 const REQUEST_TIMEOUT_MS = 15000;
+// The phone allows tether.set 75 s (Android, the USB re-plug and a drive check).
+const TETHER_REQUEST_TIMEOUT_MS = 80000;
 const RECONNECT_DELAY_MIN_MS = 1000;
 const RECONNECT_DELAY_MAX_MS = 15000;
 // Under the server's 200 frames/s so a burst never ends the session.
@@ -285,7 +287,7 @@ function request(type, fields = {}, mutation = true) {
     const timer = setTimeout(() => {
       app.pending.delete(id);
       reject(new Error("timed out"));
-    }, REQUEST_TIMEOUT_MS);
+    }, type === "tether.set" ? TETHER_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS);
     app.pending.set(id, { resolve, reject, timer });
     app.socket.send(encoded);
   });
@@ -302,6 +304,11 @@ async function act(label, type, fields) {
     log(`${label}: ${error.message}`);
     return null;
   }
+}
+
+async function setTether(on) {
+  const reply = await act(`USB tethering ${on ? "on" : "off"}`, "tether.set", { on });
+  if (reply && reply.warning) log(`USB tethering: ${reply.warning}`);
 }
 
 function refreshState() {
@@ -437,6 +444,17 @@ function renderState() {
   lunSelect.replaceChildren(...luns);
   const values = luns.filter((element) => !element.disabled).map((element) => element.value);
   lunSelect.value = values.includes(selectedLun) ? selectedLun : (existing.length < LUN_COUNT_MAX ? "new" : "");
+
+  // Absent until the phone knows. Switching re-plugs USB, so the phone refuses it while a disk has media.
+  const tether = state.tether;
+  $("tether-state").textContent = tether ? (tether.on ? "On" : "Off") : "Unknown";
+  const disksExposed = (state.slots || []).some((slot) => slot.status === "exported");
+  $("tether-on").hidden = !!(tether && tether.on);
+  $("tether-off").hidden = !(tether && tether.on);
+  for (const id of ["tether-on", "tether-off"]) {
+    $(id).disabled = !holdsLease() || disksExposed;
+    $(id).title = disksExposed ? "Eject every disk first: switching re-plugs USB" : "";
+  }
 
   const hid = state.hid || {};
   if (document.activeElement !== $("hid-keyboard")) $("hid-keyboard").checked = !!hid.keyboard;
@@ -830,6 +848,11 @@ function bindControls() {
   });
   $("expose-image").addEventListener("change", applyDefaultMode);
 
+  $("tether-on").addEventListener("click", () => setTether(true));
+  $("tether-off").addEventListener("click", () => {
+    const warning = "Turn USB tethering off? If this page reaches the phone over that USB link, it disconnects.";
+    if (window.confirm(warning)) setTether(false);
+  });
   $("hid-apply").addEventListener("click", () =>
     act("Keyboard & mouse", "hid.set", { keyboard: $("hid-keyboard").checked, mouse: $("hid-mouse").checked }));
 

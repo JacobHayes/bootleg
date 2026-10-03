@@ -139,6 +139,7 @@ when the request is admitted and again in the same actor step that dispatches it
 | `slot.eject` | `lun`, `force`? (false), `ifRev`? | M | `slotFailures` (deferred) |
 | `slot.reinsert` | `lun`, `ifRev`? | M | `slotFailures` (deferred) |
 | `hid.set` | `keyboard`, `mouse`, `ifRev`? | M | `slotFailures` (deferred); the mouse layout stays the phone's setting |
+| `tether.set` | `on`, `ifRev`? | M | `tether: Tether`, `warning`? (deferred) |
 | `bootkey.run` | `vendor`, `action`, `keyIndex`? (0), `durationMs`? (20000) | M | `durationMs` (when the keys finish) |
 | `bootkey.cancel` | — | M | `cancelled` |
 | `paste.prepare` | `text` | M | `planId`, `unsupported`, `unsupportedCount`, `durationMs` |
@@ -171,6 +172,16 @@ Details:
   slots failed and the rest were applied; errors `device`, `device_attention` (needs the user on
   the phone), `timeout` (10 s). A started operation finishes atomically even if the session ends;
   its reply then goes nowhere, and every session sees the result in `state`.
+- **`tether.set`** turns the phone's USB tethering on or off. Either way USB re-plugs, so the
+  phone refuses it with `disks_exposed` while any LUN holds media (it checks the live gadget, so a
+  slot the host already ejected doesn't count); HID may stay on and loses the host for about a
+  second, as with `hid.set`. Asking for the current state answers at once without a re-plug (also
+  with disks exposed). Android failures (carrier entitlement, unsupported, nothing came up within
+  5 s) are `device`. The reply carries the state Android reports afterwards, and `warning` (a
+  string) when tethering changed but the gadget then needs attention on the phone (slot failures
+  are named in it). It can take up to 75 s (`timeout` after that; it still finishes). Turning it
+  off may cut the remote; clients always warn first, since they can't tell whether they reach the
+  phone over that USB link.
 - **`bootkey.run`**: `vendor` is a lower-case `BootVendor` (`generic`, `dell`, `lenovo`, `hp`,
   `asus`, `acer`, `msi`, `gigabyte`, `intel_nuc`, `apple_mac`, `microsoft_surface`; else
   `bad_request`); `action` is `menu` or `setup`; `keyIndex` picks among the preset's keys, most
@@ -219,8 +230,9 @@ Details:
 | `pairing_locked` | Too many pairing attempts; reset on the phone. |
 | `bad_code` | Wrong pairing code. |
 | `device` | The gadget operation failed. |
+| `disks_exposed` | `tether.set` while a disk is exposed. |
 | `device_attention` | The gadget needs the user's attention on the phone. |
-| `timeout` | The device didn't answer within 10 s. |
+| `timeout` | The device didn't answer within 10 s (75 s for `tether.set`). |
 
 Go itself also answers `not_authorized` (request before authorization), `bad_request`,
 `rate_limited` and `unavailable`.
@@ -230,12 +242,13 @@ Go itself also answers `not_authorized` (request before authorization), `bad_req
 ```
 Lease = {holder?: int, holderName?: string, epoch: int, local: bool}
         // holder: the holding session's id; absent when free or local
-State = {rev: int, slots: [Slot], images: [Image], hid: Hid, lease: Lease}
+State = {rev: int, slots: [Slot], images: [Image], hid: Hid, tether?: Tether, lease: Lease}
 Slot  = {lun: int, imageId: string, name: string, mode: "cdrom"|"disk_ro"|"disk_rw",
          status: "exported"|"host_ejected"|"user_ejected"|"failed"}
 Image = {imageId: string, name: string, sizeBytes: int, defaultMode: "cdrom"|"disk_ro"|"disk_rw"}
 Hid   = {keyboard: bool, mouse: bool, wheel: bool, status?: "release_pending",
          link?: "stopped"|"connecting"|"open"|"reconnecting"|"failed"|"restart_required"}
+Tether = {on: bool}   // the phone's USB tethering, as Android reports it; absent until known
 ```
 
 `imageId` is opaque (16 hex characters), stable for a path; a slot exposing a file outside the
@@ -255,7 +268,7 @@ phone brings the keyboard and mouse back.
 |---|---|---|
 | `welcome` | see §2.1 | Answer to `hello`. |
 | `auth` | `auth`, `allowRw` | Approval granted or RW flag changed in the app. |
-| `state` | `State` fields inline (`rev`, `slots`, `images`, `hid`, `lease`) | State changed; ≤ 10/s per session (coalesced, latest wins). |
+| `state` | `State` fields inline (`rev`, `slots`, `images`, `hid`, `tether`, `lease`) | State changed; ≤ 10/s per session (coalesced, latest wins). |
 | `lease` | `lease: Lease` | Lease changed, or you sent input with a stale epoch; ≤ 10/s per session. |
 | `lease.takeover_request` | `requester` (int), `requesterName`, `epoch`, `timeoutMs` | To the holder: someone asks for the lease. |
 | `lease.takeover_cancelled` | `requester` | To the holder: the request was withdrawn or timed out. |
@@ -335,5 +348,5 @@ the 11th locks pairing until it's reset on the phone. Attempts while pairing is 
 | Binary frames | ≤ 200/s per session (`05` exempt) |
 | Paste | ≤ 64 KiB, ≤ 5 min, 8 ms per report, ≤ 4 plans per session, 2 min each |
 | Boot keys | ≤ 30 s, ≥ 100 ms between taps |
-| Device operation | 10 s, one at a time |
+| Device operation | 10 s (`tether.set` 75 s), one at a time |
 | Heartbeat | ping every 5 s, dead after 15 s without pong |

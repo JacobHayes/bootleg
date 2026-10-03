@@ -5,6 +5,7 @@ import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
+import dev.jacobhayes.bootleg.core.tether.TetherResult
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -207,6 +208,8 @@ data class DeviceSnapshot(
     val hid: HidSpec = HidSpec(),
     val images: List<RemoteImage> = emptyList(),
     val hidLink: HidLinkStatus = HidLinkStatus.STOPPED,
+    /** Android's USB tethering; null until Android has reported it. */
+    val usbTethering: Boolean? = null,
 )
 
 /**
@@ -248,6 +251,10 @@ sealed interface DeviceOp {
     data class SetHid(
         val spec: HidSpec,
     ) : DeviceOp
+
+    data class SetUsbTethering(
+        val on: Boolean,
+    ) : DeviceOp
 }
 
 sealed interface DeviceOutcome {
@@ -270,6 +277,17 @@ sealed interface DeviceOutcome {
     /** Not started: an earlier operation (one that timed out) is still running on the device lane. */
     data object Busy : DeviceOutcome
 
+    /** USB tethering is now [active]; [warning] when it changed but the gadget then needs attention. */
+    data class Tethering(
+        val active: Boolean,
+        val warning: String?,
+    ) : DeviceOutcome
+
+    /** USB tethering refused: a disk is exposed and the re-plug would pull it from the host. */
+    data class DisksExposed(
+        val reason: String,
+    ) : DeviceOutcome
+
     companion object {
         fun of(result: ApplyResult): DeviceOutcome =
             when (result) {
@@ -277,6 +295,27 @@ sealed interface DeviceOutcome {
                 is ApplyResult.Partial -> Partial(result.slotFailures)
                 is ApplyResult.Failed -> Failed(result.reason)
                 is ApplyResult.NeedsAttention -> NeedsAttention(result.reason)
+            }
+
+        fun of(result: TetherResult): DeviceOutcome =
+            when (result) {
+                is TetherResult.Changed -> {
+                    val warnings =
+                        listOfNotNull(
+                            "the USB switch didn't settle in time".takeUnless { result.switchSettled },
+                            when (val reconcile = result.reconcile) {
+                                is ApplyResult.Applied -> null
+                                is ApplyResult.Partial ->
+                                    "some slots failed: " + reconcile.slotFailures.entries.joinToString { "${it.key}: ${it.value}" }
+                                is ApplyResult.Failed -> "drives failed: ${reconcile.reason}"
+                                is ApplyResult.NeedsAttention -> "drives need attention: ${reconcile.reason}"
+                            },
+                        )
+                    Tethering(result.active, warnings.joinToString("; ").ifEmpty { null })
+                }
+                is TetherResult.Unchanged -> Tethering(result.active, warning = null)
+                is TetherResult.Refused -> DisksExposed(result.reason)
+                is TetherResult.Failed -> Failed(result.reason)
             }
     }
 }

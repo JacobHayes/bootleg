@@ -725,7 +725,7 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
     `slot.reinsert{lun}`
   - `hid.set{keyboard, mouse}`
   - `tether.set{on}`: refused with `disks_exposed` by root, from the live LUNs under the gadget
-    lock; 60s deadline. Clients always warn that turning it off may cut the remote (they can't
+    lock; 75s deadline. Clients always warn that turning it off may cut the remote (they can't
     tell whether it reaches the phone over that USB link).
   - `bootkey.run{vendor, action}`, `bootkey.cancel`
   - `paste.prepare{text}` → `{planId, unsupported, durationMs}`. Then `paste.run{planId}`, which
@@ -907,7 +907,7 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
 | hidg holder scan | ≤ 4096 processes, ≤ 262144 fds, 2s (incomplete counts as held) |
 | Quarantined hidg fds | ≤ 1 per function (the first blocks HID opens and hid rebinds until reboot) |
 | WebSocket message | ≤ 64 KiB |
-| Tethering | start answer 2s (2 attempts, transient errors only), interface 5s, HAL switch 5s, marker 10s; whole call ≈ 60s worst case, remote `tether.set` deadline 60s |
+| Tethering | start answer 2s (2 attempts, transient errors only), interface 5s, HAL switch 5s, marker 10s; whole call ≈ 60s worst case, remote `tether.set` deadline 75s |
 
 ## Verification notes
 

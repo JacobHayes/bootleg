@@ -37,7 +37,8 @@ type fakePhone struct {
 	takeoverAnnounceMs int64
 	takeoverTimeout    time.Duration
 	// holdJobs keeps paste.run and bootkey.run unanswered (until cancelled).
-	holdJobs bool
+	holdJobs      bool
+	tetherWarning string
 }
 
 type pendingTakeover struct {
@@ -219,6 +220,18 @@ func (p *fakePhone) Command(id int64, raw string) {
 		p.state.Hid.Mouse, _ = message["mouse"].(bool)
 		p.state.Hid.Wheel = p.state.Hid.Mouse && p.wheel
 		reply(nil)
+	case protocol.TypeTetherSet:
+		// Like the phone: any slot with media refuses it, since switching re-plugs USB.
+		for _, slot := range p.state.Slots {
+			if slot.Status == "" || slot.Status == "exported" {
+				fail(protocol.ErrorDisksExposed)
+				return
+			}
+		}
+		on, _ := message["on"].(bool)
+		p.state.Tether = &protocol.TetherState{On: on}
+		p.state.Rev++
+		reply(map[string]any{"tether": p.state.Tether, "warning": p.tetherWarning})
 	case protocol.TypePastePrepare:
 		text, _ := message["text"].(string)
 		p.pasted = append(p.pasted, text)

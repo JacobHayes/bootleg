@@ -346,26 +346,35 @@ class RemoteActor(
             scope.async(deviceDispatcher) {
                 runCatching {
                     when (op) {
-                        is DeviceOp.Apply -> device.apply(op.desired)
-                        is DeviceOp.Eject -> device.eject(op.lun, op.force)
-                        is DeviceOp.Reinsert -> device.reinsert(op.lun)
-                        is DeviceOp.SetHid -> device.setHid(op.spec)
+                        is DeviceOp.Apply -> DeviceOutcome.of(device.apply(op.desired))
+                        is DeviceOp.Eject -> DeviceOutcome.of(device.eject(op.lun, op.force))
+                        is DeviceOp.Reinsert -> DeviceOutcome.of(device.reinsert(op.lun))
+                        is DeviceOp.SetHid -> DeviceOutcome.of(device.setHid(op.spec))
+                        is DeviceOp.SetUsbTethering -> DeviceOutcome.of(device.setUsbTethering(op.on))
                     }
                 }
             }
         // Fires only once the body has returned (or never started), so the lane covers the real call.
         work.invokeOnCompletion { deviceLane.release() }
         scope.launch {
-            val result = withTimeoutOrNull(deviceTimeoutMs) { work.await() }
+            val result = withTimeoutOrNull(timeoutMsFor(op)) { work.await() }
             val outcome =
                 when {
                     result == null -> DeviceOutcome.TimedOut
                     result.isFailure -> DeviceOutcome.Failed(result.exceptionOrNull()?.message ?: "device operation failed")
-                    else -> DeviceOutcome.of(result.getOrThrow())
+                    else -> result.getOrThrow()
                 }
             enqueueResult(RemoteEvent.DeviceResult(opId, outcome))
         }
     }
+
+    /** Tethering waits on Android and the HAL as well as the gadget, so it gets the longer deadline (scaled like [deviceTimeoutMs]). */
+    private fun timeoutMsFor(op: DeviceOp): Long =
+        if (op is DeviceOp.SetUsbTethering) {
+            deviceTimeoutMs * RemoteLimits.TETHER_OP_TIMEOUT_MS / RemoteLimits.DEVICE_OP_TIMEOUT_MS
+        } else {
+            deviceTimeoutMs
+        }
 
     /** Device results bypass the soft priority bound: the controller waits on every one. */
     private fun enqueueResult(result: RemoteEvent.DeviceResult) {

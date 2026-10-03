@@ -24,7 +24,8 @@ whatever computer it's plugged into. You can also drive it from another computer
   (Android's own USB tethering), alongside the keyboard and mouse.
 - **Remote control.**
   - The phone runs an embedded Tailscale node with no VPN slot. Any approved device on your
-    tailnet can use the web UI or the `bootleg` CLI to mount images, type, and send boot keys.
+    tailnet can use the web UI or the `bootleg` CLI to mount images, type, send boot keys and
+    turn USB tethering on or off.
   - Offline, it can serve the same UI over a local hotspot instead, with a pairing code.
 
 Bootleg needs root (Magisk) and a kernel with configfs USB gadget support (`mass_storage`,

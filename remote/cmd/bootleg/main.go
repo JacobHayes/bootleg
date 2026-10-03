@@ -49,6 +49,9 @@ Commands:
   reinsert <lun>                 re-insert an ejected disk
   hid on|off [--keyboard] [--mouse]
                                  turn the USB keyboard/mouse on or off
+  tether on|off|status           share the phone's internet over USB (re-plugs
+                                 USB, so eject every disk first; off may cut
+                                 this connection if it runs over that USB link)
   type <text> | type -           type text (from stdin with -), up to 64 KiB
   key <chord> [--repeat N] [--interval 100ms]
                                  tap a chord such as ctrl+alt+delete, cmd+space, f12
@@ -206,7 +209,7 @@ func parseArgs(args []string) (*invocation, error) {
 
 var commandArgCounts = map[string][2]int{ // min, max positional args
 	"status": {0, 0}, "images": {0, 0}, "mount": {1, 1}, "eject": {1, 1}, "reinsert": {1, 1},
-	"hid": {1, 1}, "type": {1, 1}, "key": {1, 1}, "scroll": {1, 1}, "bootkey": {1, 2}, "lease": {1, 1}, "pair": {1, 1}, "kbd": {0, 0},
+	"hid": {1, 1}, "tether": {1, 1}, "type": {1, 1}, "key": {1, 1}, "scroll": {1, 1}, "bootkey": {1, 2}, "lease": {1, 1}, "pair": {1, 1}, "kbd": {0, 0},
 }
 
 func validate(parsed *invocation) error {
@@ -238,6 +241,10 @@ func validate(parsed *invocation) error {
 	case "hid":
 		if parsed.args[0] != "on" && parsed.args[0] != "off" {
 			return errors.New("hid takes on or off")
+		}
+	case "tether":
+		if parsed.args[0] != "on" && parsed.args[0] != "off" && parsed.args[0] != "status" {
+			return errors.New("tether takes on, off or status")
 		}
 	case "lease":
 		if parsed.args[0] != "take" && parsed.args[0] != "takeover" && parsed.args[0] != "release" {

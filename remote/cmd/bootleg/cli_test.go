@@ -55,6 +55,8 @@ func TestParseArgs(t *testing.T) {
 		{"status", "extra"},
 		{"mount"},
 		{"hid", "maybe"},
+		{"tether"},
+		{"tether", "maybe"},
 		{"lease", "steal"},
 		{"key", "ctrl+nope"},
 		{"key", "a", "--repeat", "0"},
@@ -349,6 +351,39 @@ func TestCLIScroll(t *testing.T) {
 	phone.phone.read(func(p *fakePhone) { p.wheel, p.state.Hid.Wheel = false, false })
 	if code, _, stderr := phone.run(t, "", "scroll", "1"); code != exitDevice || !strings.Contains(stderr, "no scroll wheel") {
 		t.Fatalf("scroll without a wheel: %d %s", code, stderr)
+	}
+}
+
+func TestCLITether(t *testing.T) {
+	phone := startPhone(t, transport.TransportHotspot)
+	code, stdout, _ := phone.run(t, "", "tether", "status")
+	if code != exitOK || !strings.Contains(stdout, "USB tethering: unknown") {
+		t.Fatalf("tether status before the phone knows: %d %q", code, stdout)
+	}
+	code, stdout, stderr := phone.run(t, "", "tether", "on")
+	if code != exitOK || !strings.Contains(stdout, "USB tethering: on") {
+		t.Fatalf("tether on: %d %q %q", code, stdout, stderr)
+	}
+	phone.phone.read(func(p *fakePhone) {
+		if p.state.Tether == nil || !p.state.Tether.On {
+			t.Errorf("tether %+v", p.state.Tether)
+		}
+		p.tetherWarning = "drives need attention: x"
+	})
+	code, stdout, stderr = phone.run(t, "", "tether", "off")
+	if code != exitOK || !strings.Contains(stdout, "USB tethering: off") ||
+		!strings.Contains(stderr, "this connection drops") || !strings.Contains(stderr, "Warning: drives need attention") {
+		t.Fatalf("tether off: %d %q %q", code, stdout, stderr)
+	}
+	if code, stdout, _ := phone.run(t, "", "status"); code != exitOK || !strings.Contains(stdout, "USB tethering: off") {
+		t.Fatalf("status: %d %q", code, stdout)
+	}
+	phone.phone.read(func(p *fakePhone) {
+		p.state.Slots = []protocol.Slot{{Lun: 0, ImageID: "img", Mode: protocol.ModeCdrom, Status: "exported"}}
+	})
+	code, _, stderr = phone.run(t, "", "tether", "on")
+	if code != exitDevice || !strings.Contains(stderr, "Eject every disk first") {
+		t.Fatalf("tether with a disk exposed: %d %q", code, stderr)
 	}
 }
 

@@ -334,6 +334,68 @@ class RemoteControllerTest {
         }
 
         @Test
+        fun `tether set is a lease-holder mutation the phone decides`() {
+            h.connect("s1")
+            h.connect("s2")
+            assertEquals("lease_required", h.request("s1", "tether.set", mapOf("on" to bool(true)), 0)!!.errorCode)
+            val epoch = h.take("s1")
+            assertEquals("lease_required", h.request("s2", "tether.set", mapOf("on" to bool(true)), epoch)!!.errorCode)
+            // Exported slots don't refuse it here: root checks the live LUNs, which can be ahead of this snapshot.
+            h.setDevice(h.device.copy(slots = listOf(RemoteSlot(0, h.device.images[0].path, LunMode.CDROM, SlotIntent.EXPORTED))))
+            assertNull(h.request("s1", "tether.set", mapOf("on" to bool(true)), epoch, id = "t1"))
+            assertEquals(DeviceOp.SetUsbTethering(on = true), h.deviceCalls.single().op)
+            assertEquals("busy", h.request("s1", "tether.set", mapOf("on" to bool(false)), epoch)!!.errorCode)
+            h.handle(RemoteEvent.DeviceResult(h.deviceCalls.single().opId, DeviceOutcome.DisksExposed("eject first")))
+            assertEquals("disks_exposed", h.replyFor("s1", "t1")!!.errorCode)
+        }
+
+        @Test
+        fun `tether results carry the state, a warning and the longer deadline`() {
+            h.connect("s1")
+            val epoch = h.take("s1")
+            h.request("s1", "tether.set", mapOf("on" to bool(true)), epoch, id = "t1")
+            h.handle(
+                RemoteEvent.DeviceResult(
+                    h.deviceCalls.last().opId,
+                    DeviceOutcome.Tethering(active = true, warning = "drives need attention"),
+                ),
+            )
+            val reply = h.replyFor("s1", "t1")!!
+            assertTrue(reply.ok, "$reply")
+            assertEquals(
+                true,
+                reply
+                    .getValue("tether")
+                    .jsonObject
+                    .getValue("on")
+                    .jsonPrimitive.boolean,
+            )
+            assertEquals("drives need attention", reply.getValue("warning").jsonPrimitive.content)
+            h.request("s1", "tether.set", mapOf("on" to bool(false)), epoch, id = "t2")
+            h.handle(RemoteEvent.DeviceResult(h.deviceCalls.last().opId, DeviceOutcome.TimedOut))
+            val timedOut = h.replyFor("s1", "t2")!!
+            assertEquals("timeout", timedOut.errorCode)
+            assertTrue("${RemoteLimits.TETHER_OP_TIMEOUT_MS}" in timedOut.toString(), "$timedOut")
+        }
+
+        @Test
+        fun `state shows tethering only once Android reported it`() {
+            h.connect("s1")
+            val unknown = h.request("s1", "state.get")!!.getValue("state").jsonObject
+            assertNull(unknown["tether"])
+            h.setDevice(h.device.copy(usbTethering = true))
+            val known = h.request("s1", "state.get")!!.getValue("state").jsonObject
+            assertEquals(
+                true,
+                known
+                    .getValue("tether")
+                    .jsonObject
+                    .getValue("on")
+                    .jsonPrimitive.boolean,
+            )
+        }
+
+        @Test
         fun `release frees the lease and bumps the epoch`() {
             h.connect("s1")
             val epoch = h.take("s1")
