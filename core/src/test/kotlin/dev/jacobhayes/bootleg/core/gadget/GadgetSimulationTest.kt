@@ -22,6 +22,7 @@ class GadgetSimulationTest {
         val violations = GadgetInvariants.violations(state, GadgetTarget.of(journal), foreignBefore = foreignBefore)
         assertEquals(emptyList<String>(), violations, "$context: invariants (journal=$journal)")
         assertEquals(emptyList<String>(), fs.foreignWrites, "$context: Bootleg wrote foreign paths")
+        assertEquals(emptyList<String>(), fs.hidFdHazards, "$context: a hidg fd was open across a rebind or removal")
         // Without HAL interference nothing can bind mid-transition, so the executor never even tries to link while bound.
         // Without crashes, faults or function switches, every HAL timer has fired before our next switch (the
         // stable-bound and HAL-quiet waits outlast them), so nothing can bind into our window and no link is refused.
@@ -62,6 +63,8 @@ class GadgetSimulationTest {
                     val desired = randomDesired(random)
                     val result = controller.apply(desired)
                     assertTrue(result is ApplyResult.Applied, "seed $seed step $step: $result")
+                    // The app's session reopens after every call; the next change must close it first.
+                    rig.hidNodes.reopen()
                     // With the measured HAL and realistic op costs, every switch finishes long before the HAL can bind into it.
                     rig.assertConverged("seed $seed step $step", before, undisturbed = true)
                     val state = rig.state()
@@ -76,6 +79,7 @@ class GadgetSimulationTest {
                         rig.fs.hostEject(lun)
                         rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)
                         assertTrue(controller.reconcile() is ApplyResult.Applied)
+                        rig.hidNodes.reopen()
                         assertEquals(SlotIntent.HOST_EJECTED, rig.journal().slotIntents[lun])
                         rig.assertConverged("seed $seed step $step after host eject", before)
                     }
@@ -107,9 +111,11 @@ class GadgetSimulationTest {
                 val rig = GadgetRig(scenario.toLong())
                 val before = rig.state()
                 rig.controller().apply(first)
+                rig.hidNodes.reopen()
                 if (ejectedLun != null) {
                     rig.fs.hostEject(ejectedLun)
                     rig.controller().reconcile()
+                    rig.hidNodes.reopen()
                 }
                 val ejectedKept = ejectedLun != null && target.slots.getOrNull(ejectedLun) == first.slots[ejectedLun]
                 rig.scripted.crashAt = rig.scripted.mutationCount + crashAt
@@ -122,8 +128,11 @@ class GadgetSimulationTest {
                         true
                     }
                 rig.scripted.crashAt = null
+                // The kernel closes a dead process's fds; the dead-man may then bind.
+                if (crashed) rig.hidNodes.processDied()
                 if (crashed && rig.deadMan.arms.isNotEmpty()) rig.deadMan.fire()
                 val result = rig.settle(rig.controller())
+                rig.hidNodes.reopen()
                 assertTrue(result is ApplyResult.Applied || result is ApplyResult.Partial, "$context: $result")
                 assertEquals(target, rig.journal().desired, context)
                 rig.assertConverged(context, before)
@@ -160,6 +169,7 @@ class GadgetSimulationTest {
                         assertTrue(settled is ApplyResult.Applied || settled is ApplyResult.Partial, "$context: $result then $settled")
                     }
                     rig.assertConverged(context, before)
+                    rig.hidNodes.reopen()
                     val failures = rig.journal().slotFailures
                     assertEquals(
                         failures.keys,
@@ -213,6 +223,7 @@ class GadgetSimulationTest {
                 rig.deadMan,
                 rig.clock,
                 FakeHidDescriptors,
+                rig.hidNodes,
             ).apply(desired)
         assertTrue(result is ApplyResult.Applied, "$result")
         assertEquals(1, rig.hal.switchCount)

@@ -74,6 +74,10 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
   that re-enumerates USB, because USB adb drops for a few seconds when that happens.
 - Bootleg owns only USB gadget names containing `bootleg`. Never modify other functions or links
   (`ffs.adb`, `functionN`, other apps' `hid.*`). Always leave the gadget bound with ADB working.
+- Never rebind the UDC (any re-enumeration, `svc usb setFunctions` included), unlink, rmdir or
+  recreate a linked `hid.*` function while any `/dev/hidg*` fd for it is open: closing that fd
+  later panics the kernel. Close every hidg fd first (as root, `ls -l /proc/*/fd | grep hidg`
+  must print nothing).
 - The phone is a shared resource. Serialize device access with the lock directory: take it with
   exactly `mkdir /private/tmp/claude-501/bootleg-device.lock` (retry while it exists), release
   it with `rmdir /private/tmp/claude-501/bootleg-device.lock`.

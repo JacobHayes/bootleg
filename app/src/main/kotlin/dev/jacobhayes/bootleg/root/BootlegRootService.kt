@@ -8,6 +8,7 @@ import com.topjohnwu.superuser.ipc.RootService
 import dev.jacobhayes.bootleg.BlankImageFormat
 import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
 import dev.jacobhayes.bootleg.core.gadget.Desired
+import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
 import dev.jacobhayes.bootleg.core.hid.HidDescriptors
 import dev.jacobhayes.bootleg.core.hid.HidKind
 
@@ -25,6 +26,15 @@ class BootlegRootService : RootService() {
     private val hidLock = Any()
     private val keepAwakeLock = Any()
     private val hidRelay = HidRelay()
+    private val hidHolders = HidNodeHolders()
+
+    /** The controller's view of the relay: it closes our hidg fds before any UDC write or hid removal. */
+    private val hidNodes =
+        object : HidNodeGuard {
+            override fun closeAll() = hidRelay.closeAllForGadgetChange()
+
+            override fun holders(functions: Collection<String>): List<String> = hidHolders.scan(functions)
+        }
     private val journalStore = FileJournalStore()
     private val images = ImageStore()
     private lateinit var controller: DefaultGadgetController
@@ -39,13 +49,14 @@ class BootlegRootService : RootService() {
                 deadMan = ShellDeadMan(),
                 clock = SystemClock(),
                 hidDescriptors = HidDescriptors,
+                hidNodes = hidNodes,
                 allowedRoots = ImagePaths.allowedRoots,
             )
         runCatching { images.sweepStaleLoopDevices() }.onFailure { Log.w(TAG, "loop sweep failed", it) }
         // Without a journal, reconcile would tear down whatever Bootleg exported before; adopt it instead.
         if (!journalStore.exists()) {
             synchronized(gadgetLock) {
-                runCatching { adoptableDesired(controller.read())?.let { controller.apply(it) } }
+                runCatching { gadgetChange { adoptableDesired(controller.read())?.let { controller.apply(it) } } }
                     .onFailure { Log.w(TAG, "adopting live gadget state failed", it) }
             }
         }
@@ -63,19 +74,19 @@ class BootlegRootService : RootService() {
             override fun apply(desiredJson: String): String =
                 call {
                     val desired = BootlegJson.decodeFromString<Desired>(desiredJson)
-                    BootlegJson.encodeToString(controller.apply(canonicalize(desired)))
+                    BootlegJson.encodeToString(gadgetChange { controller.apply(canonicalize(desired)) })
                 }
 
             override fun eject(
                 lun: Int,
                 force: Boolean,
-            ): String = call { BootlegJson.encodeToString(controller.eject(lun, force)) }
+            ): String = call { BootlegJson.encodeToString(gadgetChange { controller.eject(lun, force) }) }
 
-            override fun reinsert(lun: Int): String = call { BootlegJson.encodeToString(controller.reinsert(lun)) }
+            override fun reinsert(lun: Int): String = call { BootlegJson.encodeToString(gadgetChange { controller.reinsert(lun) }) }
 
-            override fun bootlegOff(): String = call { BootlegJson.encodeToString(controller.bootlegOff()) }
+            override fun bootlegOff(): String = call { BootlegJson.encodeToString(gadgetChange { controller.bootlegOff() }) }
 
-            override fun reconcile(): String = call { BootlegJson.encodeToString(controller.reconcile()) }
+            override fun reconcile(): String = call { BootlegJson.encodeToString(gadgetChange { controller.reconcile() }) }
 
             override fun createBlankImage(
                 name: String,
@@ -137,6 +148,14 @@ class BootlegRootService : RootService() {
                 RootCommands.runChecked(listOf("cmd", "wifi", "force-low-latency-mode", if (lowLatency) "enabled" else "disabled"))
                 if (wakeScreen) RootCommands.runChecked(listOf("input", "keyevent", "KEYCODE_WAKEUP"))
             }
+        }
+
+    /** Runs a controller call that may close the relay; HID opens are allowed again once it has returned. */
+    private fun <T> gadgetChange(block: () -> T): T =
+        try {
+            block()
+        } finally {
+            hidRelay.endGadgetChange()
         }
 
     private fun hidKind(kind: String): HidKind = requireNotNull(HidKind.fromWireName(kind)) { "unknown HID kind: $kind" }

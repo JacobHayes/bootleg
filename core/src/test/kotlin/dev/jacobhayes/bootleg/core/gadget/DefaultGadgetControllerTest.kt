@@ -53,7 +53,8 @@ class DefaultGadgetControllerTest {
                     rig.journalStore.save(journal)
                 }
             }
-        val controller = DefaultGadgetController(rig.scripted, rig.hal, recordingStore, rig.deadMan, rig.clock, FakeHidDescriptors)
+        val controller =
+            DefaultGadgetController(rig.scripted, rig.hal, recordingStore, rig.deadMan, rig.clock, FakeHidDescriptors, rig.hidNodes)
         controller.apply(twoDisks)
         val phases = phasesWithUdc.map { it.first }.distinctConsecutive()
         assertEquals(listOf(TransitionPhase.MUTATING, TransitionPhase.UNBINDING, TransitionPhase.IDLE), phases)
@@ -100,7 +101,8 @@ class DefaultGadgetControllerTest {
                     rig.fs.asActor(FakeConfigFs.HAL) { rig.fs.write(GadgetPaths.UDC, udc) }
                 }
             }
-        val controller = DefaultGadgetController(interfering, rig.hal, rig.journalStore, rig.deadMan, rig.clock, FakeHidDescriptors)
+        val controller =
+            DefaultGadgetController(interfering, rig.hal, rig.journalStore, rig.deadMan, rig.clock, FakeHidDescriptors, rig.hidNodes)
         val result = assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(twoDisks))
         assertTrue(result.reenumerated)
         assertEquals(listOf("${FakeConfigFs.EXECUTOR} configs/b.1/hid.bootleg_kbd"), rig.fs.boundSymlinkRejections)
@@ -376,7 +378,8 @@ class DefaultGadgetControllerTest {
                     rig.fs.asActor(FakeConfigFs.HAL) { rig.fs.unlink(adbLink) }
                 }
             }
-        val controller = DefaultGadgetController(dropping, rig.hal, rig.journalStore, rig.deadMan, rig.clock, FakeHidDescriptors)
+        val controller =
+            DefaultGadgetController(dropping, rig.hal, rig.journalStore, rig.deadMan, rig.clock, FakeHidDescriptors, rig.hidNodes)
         val result = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.apply(twoDisks))
         assertTrue(result.reason.contains("ADB (ffs.adb) is no longer linked"), result.reason)
         assertEquals(udc, rig.fs.udc, "gadget stays bound")
@@ -580,7 +583,7 @@ class DefaultGadgetControllerTest {
                 }
             }
 
-        fun controller() = DefaultGadgetController(rig.scripted, rig.hal, store, rig.deadMan, rig.clock, FakeHidDescriptors)
+        fun controller() = DefaultGadgetController(rig.scripted, rig.hal, store, rig.deadMan, rig.clock, FakeHidDescriptors, rig.hidNodes)
     }
 
     @Test

@@ -14,6 +14,7 @@ class DefaultGadgetController(
     private val deadMan: DeadMan,
     private val clock: Clock,
     hidDescriptors: HidDescriptorProvider,
+    private val hidNodes: HidNodeGuard,
     private val allowedRoots: List<String> = GadgetInvariants.ALLOWED_ROOTS_DEFAULT,
     private val newLunInstanceNonce: () -> String = LunMarker::newNonce,
 ) : GadgetController {
@@ -203,7 +204,13 @@ class DefaultGadgetController(
                     journal = outcome.journal
                     lastProblem = outcome.reason
                 }
+                is Outcome.Refused -> {
+                    journal = outcome.journal
+                    lastProblem = outcome.reason
+                }
             }
+            // Replanning won't make a holder let go of a hidg node; the refused op changed nothing, so report it now.
+            if (outcome is Outcome.Refused) break
             // Wait out the HAL's post-bind drop before reading back; if it won't settle, finish reports it.
             ownBindMs?.let { bindMs ->
                 if (awaitStableBound(bindMs)) {
@@ -274,6 +281,8 @@ class DefaultGadgetController(
         repeat(BIND_ATTEMPT_COUNT_MAX) {
             if (reader.readUdc().isNotEmpty()) return true
             try {
+                // A hidg fd open across this bind would panic the kernel when it is closed.
+                hidNodes.closeAll()
                 fs.write(GadgetPaths.UDC, udc)
                 ownBindMs = clock.nowMs()
                 return true
@@ -311,12 +320,30 @@ class DefaultGadgetController(
         }
         if (!hasLinks()) return settled()
         if (udc.isEmpty()) return Unsettled("UDC is unbound and no UDC name is recorded", bindFailed = true)
+        hidHoldersBeforeBind()?.let { return Unsettled(it, bindFailed = false) }
         if (!bindWithRetries(udc)) return Unsettled("UDC $udc could not be bound", bindFailed = true)
         if (awaitStableBound(ownBindMs ?: clock.nowMs())) return settled()
         return Unsettled(
             "UDC $udc did not stay bound for ${STABLE_BOUND_MS}ms after binding it",
             bindFailed = reader.readUdc().isEmpty(),
         )
+    }
+
+    /**
+     * Before binding an unbound UDC outside a plan: a hidg fd still open from before the unbind (another
+     * process's; ours get closed) would be poisoned by the bind. Null when the bind may go ahead.
+     */
+    private fun hidHoldersBeforeBind(): String? {
+        val state = reader.read()
+        return closeHidAndFindHolders(HidFunctions.owned(state) + HidFunctions.linked(state))
+    }
+
+    /** Closes our hidg fds, then names whoever still holds a node of [functions]; null when nobody does. */
+    private fun closeHidAndFindHolders(functions: Set<String>): String? {
+        if (functions.isEmpty()) return null
+        hidNodes.closeAll()
+        val holders = hidNodes.holders(functions.sorted())
+        return if (holders.isEmpty()) null else "$HID_NODE_HELD_REASON: ${holders.joinToString(", ")}"
     }
 
     private fun settled(): Unsettled? {
@@ -357,6 +384,13 @@ class DefaultGadgetController(
             override val expectedUdc: String,
             val reason: String,
         ) : Outcome
+
+        /** A hidg node of ours is held open, so the plan may not rebind or remove its function. */
+        data class Refused(
+            override val journal: Journal,
+            override val expectedUdc: String,
+            val reason: String,
+        ) : Outcome
     }
 
     /** Runs [plan] stage by stage; any divergence or failure stops it so the caller replans. */
@@ -366,6 +400,7 @@ class DefaultGadgetController(
         startJournal: Journal,
     ): Outcome {
         val execution = Execution(startState, startJournal)
+        quiesceHid(plan, startState)?.let { reason -> return Outcome.Refused(startJournal, startState.udc, reason) }
         for (stage in plan.stages) {
             if (stage.prepare.isNotEmpty()) execution.awaitBound()?.let { return it }
             stage.prepare.forEach { op -> execution.bound(op)?.let { return it } }
@@ -374,6 +409,25 @@ class DefaultGadgetController(
             stage.cleanup.forEach { op -> execution.bound(op)?.let { return it } }
         }
         return Outcome.Completed(execution.journal, execution.expected.udc)
+    }
+
+    /**
+     * Before a plan that writes the UDC or removes a hid function, while one of ours exists: every hidg
+     * fd of ours is released and closed, and no other process holds one. Null when the plan may run,
+     * else why not. Runs before the first op, outside any switch window (the scan is slow).
+     */
+    private fun quiesceHid(
+        plan: Plan,
+        state: GadgetState,
+    ): String? {
+        // A switch rebinds every linked hid function, other apps' too: their fds would be poisoned as well.
+        val watched =
+            if (plan.stages.any { it.switch != null }) {
+                HidFunctions.owned(state) + HidFunctions.linked(state)
+            } else {
+                plan.ops.mapNotNull(HidFunctions::removedBy).toSet()
+            }
+        return closeHidAndFindHolders(watched)
     }
 
     private inner class Execution(
@@ -409,6 +463,8 @@ class DefaultGadgetController(
             if (journal.phase != TransitionPhase.MUTATING) journal = save(journal.copy(phase = TransitionPhase.MUTATING))
             try {
                 run(op)
+            } catch (e: HidNodeInUseException) {
+                return Outcome.Refused(journal, expected.udc, e.message ?: HID_NODE_HELD_REASON)
             } catch (e: IOException) {
                 val lun = (op as? Op.Write)?.let { GadgetPaths.lunOf(it.path) }
                 val reason = "$op failed: ${e.message}"
@@ -464,6 +520,9 @@ class DefaultGadgetController(
                 try {
                     run(op)
                     expected = GadgetSimulation.apply(expected, op)
+                } catch (e: HidNodeInUseException) {
+                    // Nothing is linked here, so stopping leaves nothing the host could see half-built.
+                    return Outcome.Refused(journal, "", e.message ?: HID_NODE_HELD_REASON)
                 } catch (e: IOException) {
                     val reason = "$op failed: ${e.message}"
                     val lun =
@@ -512,15 +571,30 @@ class DefaultGadgetController(
     private fun run(op: Op) {
         check(GadgetPaths.touchedPaths(op).all(GadgetPaths::isMutableByBootleg)) { "refusing to touch a foreign path: $op" }
         when (op) {
-            Op.Unbind -> fs.write(GadgetPaths.UDC, "")
-            is Op.Bind -> fs.write(GadgetPaths.UDC, op.udc)
+            // Cheap once quiesceHid closed everything; no UDC write of ours ever crosses an open hidg fd of ours.
+            Op.Unbind -> {
+                hidNodes.closeAll()
+                fs.write(GadgetPaths.UDC, "")
+            }
+            is Op.Bind -> {
+                hidNodes.closeAll()
+                fs.write(GadgetPaths.UDC, op.udc)
+            }
             is Op.Mkdir -> fs.mkdir(op.path)
-            is Op.Rmdir -> fs.rmdir(op.path)
+            is Op.Rmdir -> {
+                HidFunctions.removedBy(op)?.let(::requireHidNodeFree)
+                fs.rmdir(op.path)
+            }
             is Op.Write -> fs.write(op.path, op.value)
             is Op.WriteBytes -> fs.writeBytes(op.path, op.bytes)
             is Op.Symlink -> fs.symlink(op.target, op.link)
             is Op.Unlink -> fs.unlink(op.link)
         }
+    }
+
+    /** Right before removing [function]: nobody may hold its node, not even someone who opened it after quiesceHid. */
+    private fun requireHidNodeFree(function: String) {
+        closeHidAndFindHolders(setOf(function))?.let { throw HidNodeInUseException(it) }
     }
 
     /**
@@ -682,6 +756,7 @@ class DefaultGadgetController(
         const val SETTLE_WAIT_MS_MAX = 3_000L
         const val SETTLE_POLL_INTERVAL_MS = 50L
         const val EJECT_PREVENTED_REASON = "host prevents removal; force eject?"
+        const val HID_NODE_HELD_REASON = "a keyboard/mouse device node is held open, so the USB gadget was left as it was"
         private const val SLOT_FAILED = "slot failed"
         private val EJECTED_INTENTS = setOf(SlotIntent.HOST_EJECTED, SlotIntent.USER_EJECTED)
     }

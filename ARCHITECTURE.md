@@ -42,6 +42,18 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
   The kernel refuses to bind a config with no functions linked (EINVAL).
   Unlinking from a bound config force-unbinds it. Forking `getprop` costs ~110ms per read, so USB
   properties are read in-process (`android.os.SystemProperties` by reflection).
+- **An open `/dev/hidgN` across a rebind panics the kernel.** In this kernel
+  (`6.1.162-android14-11-g2ec90535fa34`, `drivers/usb/gadget/function/f_hid.c` at `2ec90535fa34`),
+  `hidg_bind` runs `cdev_init` + `cdev_device_add` on the function's cdev at every UDC bind and
+  `hidg_unbind` runs `cdev_device_del`; `cdev_init` memsets the cdev, emptying its inode list and
+  resetting its refcount. ueventd removes the node on unbind and creates a new one on bind. An fd opened under
+  one bind and still open when the same linked function is bound again keeps its inode on the
+  wiped list, and closing it (process exit included) evicts the inode: `cd_forget` hits
+  `list_del corruption` (prev->next == prev) and the kernel panics (`cd_forget ← evict ←
+  __fput`). Closing it before that bind is safe: the last close releases the cdev, which detaches
+  the inode. Unlink and rmdir with an fd open are safe in this kernel (since "usb: gadget: f_hid:
+  fix f_hidg lifetime vs cdev" the function lives until its last close), but kernels without that
+  fix free it on unlink, so Bootleg treats unlink and rmdir like a rebind.
 
 ## Modules
 
@@ -158,6 +170,45 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
   start or after a crash, reconcile reads the journal plus the full live state (UDC, links,
   functions, LUN attributes) and finishes or reverts the transition; leftover unlinked owned
   functions are reconfigured and linked, or removed.
+- **HID fds and gadget changes.** No hidg fd is open across a UDC write of Bootleg's or the
+  removal of a hid function (see Device facts):
+  - The controller takes a `HidNodeGuard`. Before running a plan that has a switch (watching
+    every owned hid function plus every linked one, other apps' included, since a rebind
+    poisons their fds too) or removes a hid function, it calls `closeAll()` (release-all, then
+    close every relay fd; the relay refuses opens until the controller call returns) and then
+    `holders()`, a bounded scan of `/proc/*/fd` as root that matches `st_rdev` against each
+    function's `dev`. Any holder refuses the operation before its first op (`NeedsAttention`,
+    naming the process), with no replans. The same check runs before the controller binds an
+    unbound UDC outside a plan (settle), every UDC write of the controller calls `closeAll()`
+    again (cheap, so also inside the window), and every rmdir of a hid function scans again
+    right before it.
+  - Someone else (a USB mode change, `svc usb setFunctions`) can still rebind behind Bootleg.
+    The relay records the inode of the node's sysfs directory (`/sys/class/hidg/hidgN`, which
+    the kernel recreates on every bind, with no ueventd lag) before each open and checks it on
+    every write, read and close, and a watch thread polls it every 50ms while anything is open.
+    Gone means unbound and not yet rebound, so the fds are closed at once, which is safe; the
+    HAL's rebind comes 350ms or more after an unbind, so a HAL-driven unbind/rebind (USB mode
+    change, tethering, a reset) normally just closes the session, which reopens with backoff. Changed means rebound under an open fd, so closing it would panic:
+    the fd is quarantined instead (kept open and logged). A quarantined fd is
+    unrecoverable without a reboot (process exit closes it too), so while one exists the relay
+    refuses opens and the holder scan reports it, which refuses every gadget change that would
+    rebind or remove a hid function. Only an unbind and rebind by someone else within one 50ms
+    poll quarantines; the user then sees the HID session fail with "restart the phone to use
+    keyboard and mouse again", and gadget changes that touch HID fail with the holder named. A
+    cable unplug by itself doesn't unbind the UDC in the kernel (whether the Pixel HAL resets
+    the gadget on unplug is unmeasured). The check-to-close race (a
+    foreign rebind between the check and the close) and an unbind-and-rebind faster than one
+    poll stay open: without a kernel fix nothing in userspace can exclude the HAL.
+  - The kernel closes a dead root process's fds at exit, which is safe because they were never
+    open across a rebind of ours. A stale root process still holding fds shows up as a holder,
+    so reconcile can't rebind or remove hid functions under it.
+  - `HidController` opens no session while its own HID apply runs (input meanwhile is dropped);
+    it opens the new session after the apply returns. Other applies close the relay's fds when
+    they re-enumerate, and the session reopens with its usual backoff.
+  - The fake configfs models hidg fds: binding a linked hid function (by anyone) while an fd
+    opened under an earlier bind is still open, or the executor unbinding, unlinking or removing
+    a hid function with an fd open, is a hard test failure. The controller and simulator suites
+    (crash at every op included) reopen relay fds after every operation.
 - **Dead-man UDC rebind.** Before every unbind (including a re-unbind after a HAL rebind), the
   executor starts a detached root shell (`sleep 15; [ -z "$(cat UDC)" ] && echo <udc> > UDC`) that
   runs independently of the executor process. If the executor dies mid-transition, the gadget
@@ -243,6 +294,7 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
   lock. Calls are synchronous from the session's single writer (well under 1ms each), so reports
   arrive in order. `hidOpen` links to a client token; if the app process dies, root writes
   release-all to both functions and closes them. The app reopens on `ENXIO`/`ESHUTDOWN` (host off).
+  `hidOpen` fails while a gadget change is running (see HID fds and gadget changes).
 
 ## Storage & files
 
@@ -665,6 +717,8 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
 | Root op timeout | 10s |
 | Reconcile | 1 per 2s, max 5 attempts |
 | Gadget replans | ≤ 3 |
+| hidg holder scan | ≤ 4096 processes, ≤ 262144 fds, 2s (incomplete counts as held) |
+| Quarantined hidg fds | ≤ 1 per function (the first blocks HID opens and hid rebinds until reboot) |
 | WebSocket message | ≤ 64 KiB |
 
 ## Verification notes

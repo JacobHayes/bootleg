@@ -9,6 +9,7 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetInvariants
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
 import dev.jacobhayes.bootleg.core.gadget.HidDescriptorProvider
+import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.JournalStore
 import dev.jacobhayes.bootleg.core.gadget.LunMode
@@ -23,8 +24,9 @@ fun createGadgetController(
     deadMan: DeadMan,
     clock: Clock,
     hidDescriptors: HidDescriptorProvider,
+    hidNodes: HidNodeGuard,
     allowedRoots: List<String>,
-): DefaultGadgetController = DefaultGadgetController(fs, props, journalStore, deadMan, clock, hidDescriptors, allowedRoots)
+): DefaultGadgetController = DefaultGadgetController(fs, props, journalStore, deadMan, clock, hidDescriptors, hidNodes, allowedRoots)
 
 /** Which file a path names: two hard links to one inode are the same file. */
 data class FileIdentity(

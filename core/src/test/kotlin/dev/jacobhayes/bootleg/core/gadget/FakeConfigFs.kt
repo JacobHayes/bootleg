@@ -7,6 +7,11 @@ class ConfigFsException(
     detail: String,
 ) : IOException("$errno: $detail")
 
+/** A gadget change that would panic the real kernel once a hidg fd is closed. An Error, so nothing catches it. */
+class HidFdHazard(
+    message: String,
+) : Error(message)
+
 /**
  * In-memory configfs gadget that models the kernel behaviour Bootleg relies on: UDC bind/unbind
  * rules, mass_storage LUN attribute rules, configfs rmdir/link rules and "unlink unbinds".
@@ -72,6 +77,26 @@ class FakeConfigFs(
     val bindsInExecutorWindow = mutableListOf<String>()
     private var executorWindowStartUs: Long? = null
 
+    /** Open `/dev/hidgN` fds: function -> holders, one entry per fd. */
+    private val hidFds = mutableMapOf<String, MutableList<String>>()
+
+    /**
+     * Every gadget change that would have left a hidg fd to panic the kernel when closed (see
+     * [HidNodeGuard]). Each one also throws [HidFdHazard] at the moment it happens.
+     */
+    val hidFdHazards = mutableListOf<String>()
+
+    /**
+     * Fds someone else (HAL, dead-man) rebound under: still open, but closing one panics the kernel
+     * (process exit included). function -> holders.
+     */
+    private val poisonedHidFds = mutableMapOf<String, MutableList<String>>()
+
+    fun isPoisoned(
+        function: String,
+        holder: String,
+    ): Boolean = holder in poisonedHidFds[function].orEmpty()
+
     init {
         nodes[""] = Dir(defaultGroup = true)
         attr("UDC", "")
@@ -94,6 +119,43 @@ class FakeConfigFs(
     }
 
     val udc: String get() = text("UDC")
+
+    /** [holder] opens [function]'s `/dev/hidgN`; the node exists only while the function is linked and bound. */
+    fun openHidFd(
+        function: String,
+        holder: String,
+    ) {
+        require(function.startsWith("hid.")) { "$function has no hidg node" }
+        if (udc.isEmpty() || !isLinked(function)) throw ConfigFsException("ENOENT", "/dev/hidg of $function: not bound")
+        hidFds.getOrPut(function) { mutableListOf() } += holder
+    }
+
+    /** Closes one of [holder]'s fds on [function]; false if it had none. */
+    fun closeHidFd(
+        function: String,
+        holder: String,
+    ): Boolean {
+        val holders = hidFds[function] ?: return false
+        if (isPoisoned(function, holder)) hidFdHazard("close of $holder's fd on $function after a rebind")
+        val closed = holders.remove(holder)
+        if (holders.isEmpty()) hidFds.remove(function)
+        return closed
+    }
+
+    fun hidFdHolders(function: String): List<String> = hidFds[function].orEmpty().toList()
+
+    /** The process [holder] exits: the kernel closes its fds. */
+    fun exitHidHolder(holder: String) {
+        if (poisonedHidFds.values.any { holder in it }) hidFdHazard("exit of $holder, which holds an fd that crossed a rebind")
+        hidFds.values.forEach { holders -> holders.removeAll { it == holder } }
+        hidFds.values.removeAll { it.isEmpty() }
+    }
+
+    private fun hidFdHazard(what: String) {
+        val hazard = "$actor $what while hidg fds are open: $hidFds"
+        hidFdHazards += hazard
+        throw HidFdHazard(hazard)
+    }
 
     /** The host ejects the medium (START STOP UNIT), as macOS does on "Eject". */
     fun hostEject(lun: Int) = asActor(HOST) { setText(lunPath(lun, "file"), "") }
@@ -170,6 +232,7 @@ class FakeConfigFs(
         if (nodes.values.any { it is Link && it.target == path }) throw ConfigFsException("EBUSY", "$path is linked")
         val lunFunction = lunOf(path)?.let { functionOf(path) }
         if (lunFunction != null && isLinked(lunFunction)) throw ConfigFsException("EBUSY", "$path: function is linked")
+        functionName(path)?.let { function -> if (hidFds.containsKey(function)) hidFdHazard("rmdir $path") }
         subtree(path).forEach { nodes.remove(it) }
     }
 
@@ -193,7 +256,9 @@ class FakeConfigFs(
 
     override fun unlink(link: String) {
         recordMutation(link)
-        if (nodes[link] !is Link) throw ConfigFsException("ENOENT", link)
+        val target = nodes[link] as? Link ?: throw ConfigFsException("ENOENT", link)
+        // Kernels without the f_hidg lifetime fix free the function under its open fds here.
+        if (hidFds.containsKey(target.target.substringAfterLast('/'))) hidFdHazard("unlink $link")
         nodes.remove(link)
         // The kernel force-unbinds a bound gadget when a function is unlinked.
         if (udc.isNotEmpty()) unbind()
@@ -217,6 +282,14 @@ class FakeConfigFs(
             val descriptor = (nodes["${GadgetPaths.function(function)}/report_desc"] as Attr).bytes
             if (reportLength <= 0 || descriptor.isEmpty()) throw ConfigFsException("EINVAL", "$function bind failed: no report descriptor")
         }
+        // hidg_bind re-initializes the cdev that an fd opened under an earlier bind still points into.
+        val linkedHid = linked.values.map { it.substringAfterLast('/') }.filter { it.startsWith("hid.") }
+        val open = linkedHid.filter(hidFds::containsKey)
+        if (open.isNotEmpty()) {
+            // Bootleg must never do this; someone else can, and then those fds may never be closed.
+            if (actor == EXECUTOR) hidFdHazard("bind")
+            open.forEach { function -> poisonedHidFds.getOrPut(function) { mutableListOf() } += hidFds.getValue(function) }
+        }
         setText("UDC", value)
         executorWindowStartUs?.let { startUs ->
             if (actor == EXECUTOR) executorWindowsUs += nowUs() - startUs else bindsInExecutorWindow += actor
@@ -227,6 +300,8 @@ class FakeConfigFs(
     }
 
     private fun unbind() {
+        // Bootleg releases and closes its fds while the host can still see the release; nobody else may hold one.
+        if (actor == EXECUTOR && hidFds.keys.any(::isLinked)) hidFdHazard("unbind")
         setText("UDC", "")
         // A disconnect resets the SCSI state, including the host's prevent-medium-removal.
         preventRemoval.clear()
@@ -363,6 +438,9 @@ class FakeConfigFs(
         val parts = path.split('/')
         return if (parts.size >= 2 && parts[0] == GadgetPaths.FUNCTIONS_DIR) parts[1] else null
     }
+
+    /** The function if [path] is a function directory itself. */
+    private fun functionName(path: String): String? = functionOf(path)?.takeIf { path == GadgetPaths.function(it) }
 
     private fun dir(
         path: String,

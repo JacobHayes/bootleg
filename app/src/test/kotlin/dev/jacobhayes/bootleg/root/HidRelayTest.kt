@@ -17,6 +17,9 @@ class HidRelayTest {
     ) : HidRelay.RelayEndpoint {
         val written = mutableListOf<List<Byte>>()
         var closed = false
+        var binding = HidRelay.Binding.CURRENT
+
+        override fun binding() = binding
 
         override fun writeWithin(report: ByteArray): HidWriteResult {
             check(!closed) { "write after close" }
@@ -139,5 +142,83 @@ class HidRelayTest {
 
         assertTrue(opened.single().releasedAndClosed)
         assertEquals(emptyMap<IBinder, IBinder.DeathRecipient>(), deathLink.linked)
+    }
+
+    @Test
+    fun `a gadget change releases and closes everything and refuses opens until it ends`() {
+        val client = token()
+        relay.open(HidKind.KEYBOARD, client)
+        relay.open(HidKind.MOUSE, client)
+        relay.closeAllForGadgetChange()
+
+        assertTrue(opened.all { it.releasedAndClosed })
+        assertEquals(HidWriteResult.DISCONNECTED, relay.write(HidKind.KEYBOARD, report(HidKind.KEYBOARD)))
+        assertThrows<IllegalStateException> { relay.open(HidKind.KEYBOARD, client) }
+        assertEquals(2, opened.size, "nothing opened while fenced")
+        relay.endGadgetChange()
+        relay.open(HidKind.KEYBOARD, client)
+        assertEquals(HidWriteResult.WRITTEN, relay.write(HidKind.KEYBOARD, report(HidKind.KEYBOARD)))
+    }
+
+    @Test
+    fun `an fd whose function was unbound behind us is closed at once, without a report`() {
+        relay.open(HidKind.KEYBOARD, token())
+        val keyboard = opened.single()
+        keyboard.binding = HidRelay.Binding.UNBOUND
+
+        assertEquals(HidWriteResult.DISCONNECTED, relay.write(HidKind.KEYBOARD, report(HidKind.KEYBOARD)))
+        assertTrue(keyboard.closed)
+        assertEquals(emptyList<List<Byte>>(), keyboard.written)
+        assertEquals(0, relay.quarantinedCount)
+    }
+
+    @Test
+    fun `the watch closes an fd as soon as its function is unbound, before any rebind`() {
+        val watches = mutableListOf<() -> Boolean>()
+        val watched = HidRelay({ kind -> FakeEndpoint(kind).also { opened += it } }, deathLink, warn = {}) { watches += it }
+        val client = token()
+        watched.open(HidKind.KEYBOARD, client)
+        watched.open(HidKind.MOUSE, client)
+        assertEquals(1, watches.size, "one watch for the open fds")
+        assertTrue(watches.single()(), "still watching while open")
+
+        opened.forEach { it.binding = HidRelay.Binding.UNBOUND }
+        assertFalse(watches.single()(), "nothing left to watch")
+        assertTrue(opened.all { it.closed })
+        assertEquals(0, watched.quarantinedCount)
+        watched.open(HidKind.KEYBOARD, client)
+        assertEquals(2, watches.size, "a new watch once something is open again")
+    }
+
+    @Test
+    fun `reopening over an fd rebound behind us quarantines it and opens nothing`() {
+        val client = token()
+        relay.open(HidKind.KEYBOARD, client)
+        opened.single().binding = HidRelay.Binding.REBOUND
+        assertThrows<IllegalStateException> { relay.open(HidKind.KEYBOARD, client) }
+        assertEquals(1, opened.size)
+        assertFalse(opened.single().closed)
+        assertEquals(1, relay.quarantinedCount)
+    }
+
+    @Test
+    fun `an fd rebound behind us is never closed, and HID stays refused`() {
+        val client = token()
+        relay.open(HidKind.KEYBOARD, client)
+        relay.open(HidKind.MOUSE, client)
+        val (keyboard, mouse) = opened.toList()
+        keyboard.binding = HidRelay.Binding.REBOUND
+
+        assertEquals(ByteArray(0).toList(), relay.readOutput(HidKind.KEYBOARD).toList())
+        relay.closeAllForGadgetChange()
+        deathLink.linked[client]?.binderDied()
+
+        assertFalse(keyboard.closed, "closing it would panic the kernel")
+        assertEquals(emptyList<List<Byte>>(), keyboard.written)
+        assertTrue(mouse.releasedAndClosed)
+        assertEquals(1, relay.quarantinedCount)
+        relay.endGadgetChange()
+        val refused = assertThrows<IllegalStateException> { relay.open(HidKind.MOUSE, client) }
+        assertEquals(HidRelay.QUARANTINED_MESSAGE, refused.message)
     }
 }

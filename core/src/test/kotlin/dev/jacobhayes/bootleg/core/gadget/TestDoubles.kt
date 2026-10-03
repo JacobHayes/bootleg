@@ -369,6 +369,71 @@ class RecordingDeadMan(
     }
 }
 
+/**
+ * The root HID relay as [HidNodeGuard] sees it, over [FakeConfigFs]'s fd model: [reopen] is the app's
+ * session opening its endpoints after a controller call (when the root service lifts the fence).
+ */
+class FakeHidNodes(
+    private val fs: FakeConfigFs,
+) : HidNodeGuard {
+    var fenced = false
+        private set
+    var closeAllCount = 0
+        private set
+    var holderScanCount = 0
+        private set
+
+    /** Releases written before closing, in order, so tests can check they reached the host while bound. */
+    val releasesWhileBound = mutableListOf<Boolean>()
+
+    override fun closeAll() {
+        closeAllCount++
+        fenced = true
+        for (function in RELAY_FUNCTIONS) {
+            if (RELAY !in fs.hidFdHolders(function) || function in quarantined) continue
+            // Like the relay's binding check: an fd someone else rebound under is kept open forever.
+            if (fs.isPoisoned(function, RELAY)) {
+                quarantined += function
+                continue
+            }
+            releasesWhileBound += fs.udc.isNotEmpty()
+            check(fs.closeHidFd(function, RELAY))
+        }
+    }
+
+    /** Functions whose relay fd crossed someone else's rebind; still open (the holder scan sees them). */
+    val quarantined = mutableSetOf<String>()
+
+    override fun holders(functions: Collection<String>): List<String> {
+        holderScanCount++
+        return functions.flatMap { function -> fs.hidFdHolders(function).map { "$it ($function)" } }
+    }
+
+    /** The controller call ended: the fence lifts and the session opens whatever is linked and bound. */
+    fun reopen() {
+        fenced = false
+        // The relay refuses opens once anything is quarantined.
+        if (fs.udc.isEmpty() || quarantined.isNotEmpty()) return
+        val state = GadgetReader(fs).read()
+        for (function in RELAY_FUNCTIONS.filter { it in state.configLinks.values }) {
+            if (RELAY !in fs.hidFdHolders(function)) fs.openHidFd(function, RELAY)
+        }
+    }
+
+    /** The root process died: the kernel closed its fds. */
+    fun processDied() {
+        fs.exitHidHolder(RELAY)
+        fenced = false
+    }
+
+    fun relayOpenCount(): Int = RELAY_FUNCTIONS.sumOf { function -> fs.hidFdHolders(function).count { it == RELAY } }
+
+    companion object {
+        const val RELAY = "relay"
+        val RELAY_FUNCTIONS = listOf(GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_MOUSE_FUNCTION)
+    }
+}
+
 object FakeHidDescriptors : HidDescriptorProvider {
     override fun keyboard(): ByteArray = byteArrayOf(0x05, 0x01, 0x09, 0x06, 0xA1.toByte(), 0x01, 0xC0.toByte())
 
@@ -391,6 +456,7 @@ class GadgetRig(
     val journalStore = InMemoryJournalStore(clock, JOURNAL_SAVE_COST_US)
     var deadMan = RecordingDeadMan(fs, clock, DEAD_MAN_ARM_COST_US)
         private set
+    val hidNodes = FakeHidNodes(fs)
 
     init {
         fs.nowUs = { clock.nowUs }
@@ -399,7 +465,16 @@ class GadgetRig(
     /** A fresh controller process over the same kernel state and journal. */
     fun controller(): DefaultGadgetController {
         deadMan = RecordingDeadMan(fs, clock, DEAD_MAN_ARM_COST_US)
-        return DefaultGadgetController(scripted, hal, journalStore, deadMan, clock, FakeHidDescriptors, newLunInstanceNonce = { NONCE })
+        return DefaultGadgetController(
+            scripted,
+            hal,
+            journalStore,
+            deadMan,
+            clock,
+            FakeHidDescriptors,
+            hidNodes,
+            newLunInstanceNonce = { NONCE },
+        )
     }
 
     fun state(): GadgetState = GadgetReader(fs, hal).read()
