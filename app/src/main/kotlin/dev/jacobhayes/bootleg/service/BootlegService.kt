@@ -178,7 +178,7 @@ class BootlegService : Service() {
             )
         return Notification
             .Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+            .setSmallIcon(R.drawable.ic_drive)
             .setContentTitle(title)
             .setContentText(text.lineSequence().firstOrNull().orEmpty())
             .setStyle(Notification.BigTextStyle().bigText(text))

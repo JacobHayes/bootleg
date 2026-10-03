@@ -58,7 +58,7 @@
         <service
             android:name=".tile.BootlegTileService"
             android:exported="true"
-            android:icon="@android:drawable/stat_sys_data_bluetooth"
+            android:icon="@drawable/ic_drive"
             android:label="@string/tile_label"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
