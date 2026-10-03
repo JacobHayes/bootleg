@@ -4,6 +4,10 @@
 # the debug hook → `status` ok → `mount` a read-only FAT fixture, the Mac mounts it read-only,
 # `diskutil eject` → `hid on`, harmless keys only (F24, Shift), `hid off` → revoke via the debug
 # hook: a live session is closed and the next command exits 3 → Remote off → gadget clean, ADB up.
+# Catalog downloads in between: `catalog` lists the rescue entries; netboot.xyz (or, when it is
+# already in the library as the e2e fixture, another small netboot.xyz image) downloads with the
+# app in the background and lands in the library SHA-256 verified, and a large entry is started
+# then cancelled with no partial left. Whatever this run downloaded is deleted again.
 #
 # The approve/revoke hooks stand in for the in-app buttons (the screen may be locked). The phone
 # must already be enrolled in the tailnet (auth key or sign-in once); this Mac must be on it.
@@ -11,7 +15,8 @@
 # ejects the volume, revokes the approval, turns HID off (and waits for the Mac to drop it), then
 # turns Remote and Bootleg's drives off.
 #
-# Usage: scripts/check-device-remote.sh   (env: BOOTLEG_WIFI_SERIAL, BOOTLEG_USB_SERIAL)
+# Usage: scripts/check-device-remote.sh   (env: BOOTLEG_WIFI_SERIAL, BOOTLEG_USB_SERIAL;
+#        BOOTLEG_DEVICE_LOCK_HELD=1 when the caller already holds the device lock, which is then kept)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -35,6 +40,13 @@ ENUMERATE_WAIT_S=10
 ADB_WAIT_S=20
 SESSION_CLOSE_WAIT_S=5
 POLL_S=0.25
+STORE=/sdcard/bootleg
+SMALL_DOWNLOAD_SIZE_BYTES_MAX=$((64 * 1024 * 1024))
+# A few MiB each; the catalog lists no size for them, so they are picked by name, in this order.
+SMALL_DOWNLOAD_FILE_NAMES=(netboot.xyz.iso netboot.xyz.img netboot.xyz-sb.iso netboot.xyz-sb.img)
+LARGE_DOWNLOAD_SIZE_BYTES_MIN=$((200 * 1024 * 1024))
+DOWNLOAD_WAIT_S=180
+CANCEL_PROGRESS_WAIT_S=30
 
 now_ms() { local ns; ns=$(date +%s%N); echo $((ns / 1000000)); }
 run_started_ms=$(now_ms)
@@ -44,6 +56,8 @@ remote_on=false
 approved_node=
 summary=()
 holder_pid=
+downloaded_image= # a library image this run added (deleted in cleanup)
+started_large=     # a large download this run started (cancelled in cleanup)
 
 fail() {
     echo "FAIL [$current_step]: $*" >&2
@@ -108,6 +122,16 @@ cleanup() {
     [[ -n $holder_pid ]] && kill "$holder_pid" 2>/dev/null
     if $have_lock; then
         if is_mounted; then diskutil eject "/Volumes/$VOLUME" >/dev/null 2>&1 || true; fi
+        if [[ -n $started_large ]]; then
+            "$CLI" --host "$HOST" download --cancel "$started_large" >/dev/null 2>&1 || true
+            wadb shell rm -f "$STORE/$started_large.partial" >/dev/null 2>&1 || true
+        fi
+        if [[ -n $downloaded_image ]]; then
+            # A download that failed or timed out may still be running on the phone.
+            "$CLI" --host "$HOST" download --cancel "$downloaded_image" >/dev/null 2>&1 || true
+            wadb shell rm -f "$STORE/$downloaded_image.partial" >/dev/null 2>&1 || true
+            wadb shell content call --uri "$PROVIDER" --method DELETE_IMAGE --extra "path:s:$STORE/$downloaded_image" >/dev/null 2>&1 || true
+        fi
         if $remote_on; then
             [[ -n $approved_node ]] && wadb shell content call --uri "$PROVIDER" --method REMOTE_REVOKE --extra "node:s:$approved_node" >/dev/null 2>&1
         fi
@@ -137,7 +161,7 @@ cleanup() {
         fi
         # The fixture has to live in the library while the check runs; don't leave it there.
         wadb shell rm -f "$PHONE_IMAGE" >/dev/null 2>&1 || true
-        rmdir "$LOCK_DIR"
+        [[ ${BOOTLEG_DEVICE_LOCK_HELD:-0} == 1 ]] || rmdir "$LOCK_DIR"
     fi
     local total_ms=$(($(now_ms) - run_started_ms))
     echo
@@ -156,6 +180,11 @@ trap 'exit 130' INT TERM
 # ---------------------------------------------------------------------------------------------
 
 take_lock() {
+    if [[ ${BOOTLEG_DEVICE_LOCK_HELD:-0} == 1 ]]; then
+        [[ -d $LOCK_DIR ]] || fail "BOOTLEG_DEVICE_LOCK_HELD=1 but $LOCK_DIR doesn't exist"
+        have_lock=true
+        return 0
+    fi
     local deadline_ms=$(($(now_ms) + LOCK_WAIT_S * 1000))
     until mkdir "$LOCK_DIR" 2>/dev/null; do
         (($(now_ms) < deadline_ms)) || fail "device lock $LOCK_DIR still held after ${LOCK_WAIT_S}s"
@@ -294,6 +323,88 @@ revoke_closes_session() {
         fail "an approved session is still open after the revoke"
 }
 
+# in_store NAME: whether the library holds NAME. An adb failure fails the check rather than reading
+# as "absent", which could pick (and cleanup later delete) the e2e runner's shared fixture.
+in_store() {
+    local answer
+    answer=$(wadb shell "if [ -e $STORE/$1 ]; then echo present; else echo absent; fi" 2>/dev/null | tr -d '\r') || answer=
+    case $answer in
+    present) return 0 ;;
+    absent) return 1 ;;
+    *) fail "couldn't tell whether $STORE/$1 is in the library (adb said '$answer')" ;;
+    esac
+}
+no_partial() { ! in_store "$1.partial"; }
+
+# rescue_entries: the x86_64 rescue entries as JSON lines {entryId, fileName, sizeBytes, state}.
+rescue_entries() {
+    cli 0 catalog --category rescue --json | jq -c '.distros[].entries[] | {entryId, fileName, sizeBytes: (.sizeBytes // 0), state}'
+}
+
+catalog_downloads() {
+    local entries small='' name large output download_status
+    entries=$(rescue_entries)
+    [[ -n $entries ]] || fail "the catalog lists no rescue entries"
+    jq -e 'select(.fileName == "netboot.xyz.iso")' <<<"$entries" >/dev/null || fail "the catalog has no netboot.xyz.iso"
+    if in_store netboot.xyz.iso; then
+        # The e2e runner's shared fixture: never deleted here. A start is a no-op.
+        cli 0 download netboot.xyz.iso | grep -q 'already in the library' || fail "netboot.xyz.iso in the library but download didn't say so"
+    fi
+    for name in "${SMALL_DOWNLOAD_FILE_NAMES[@]}"; do
+        if jq -e --arg name "$name" 'select(.fileName == $name and .state == "available")' <<<"$entries" >/dev/null &&
+            ! in_store "$name"; then
+            small=$name
+            break
+        fi
+    done
+    if [[ -z $small ]]; then
+        small=$(jq -r --argjson max "$SMALL_DOWNLOAD_SIZE_BYTES_MAX" \
+            'select(.state == "available" and .sizeBytes > 0 and .sizeBytes <= $max) | [.sizeBytes, .fileName] | @tsv' <<<"$entries" |
+            sort -n | head -1 | cut -f2)
+    fi
+    [[ -n $small ]] || fail "no small rescue entry is available to download (${SMALL_DOWNLOAD_FILE_NAMES[*]} are all in the library or missing)"
+    [[ $small == netboot.xyz.iso ]] || echo "    netboot.xyz.iso is in the library or unavailable (kept); downloading $small instead"
+    in_store "$small" && fail "$small is already in the library"
+    # The app in the background, so Android refuses the job and root's broadcast has to schedule it.
+    wadb shell input keyevent KEYCODE_HOME
+    local since
+    since=$(wadb shell "date '+%m-%d %H:%M:%S.000'" | tr -d '\r')
+    downloaded_image=$small
+    output=$(cli 0 download "$small" --follow --timeout "${DOWNLOAD_WAIT_S}s")
+    grep -q "SHA-256 verified" <<<"$output" || fail "$small finished without a verified SHA-256: $output"
+    if wadb logcat -d -T "$since" -s BootlegDownloads:I | grep -q "through root's background broadcast"; then
+        echo "    scheduled through root's background broadcast"
+    else
+        echo "    scheduled directly (the app could still schedule user-initiated jobs)"
+    fi
+    in_store "$small" || fail "$small is not in the library"
+    cli 0 images --json | jq -e --arg name "$small" 'any(.[]; .name == $name and .verified == true)' >/dev/null ||
+        fail "the library doesn't list $small as verified"
+    no_partial "$small" || fail "$small left a partial file"
+
+    large=$(jq -r --argjson min "$LARGE_DOWNLOAD_SIZE_BYTES_MIN" \
+        'select(.state == "available" and .sizeBytes >= $min) | .fileName' <<<"$entries" | head -1)
+    [[ -n $large ]] || fail "no large rescue entry is available to cancel"
+    started_large=$large
+    cli 0 download "$large" >/dev/null
+    progressing() {
+        download_status=$(cli 0 downloads --json | jq -r --arg name "$large" '.downloads[] | select(.fileName == $name) | "\(.status) \(.downloadedBytes)"')
+        [[ $download_status == running\ * && ${download_status#running } != 0 ]]
+    }
+    wait_until "$CANCEL_PROGRESS_WAIT_S" "$large to start transferring" progressing
+    cli 0 download --cancel "$large" | grep -q '^cancelled$' || fail "cancelling $large didn't say cancelled"
+    gone() { [[ -z $(cli 0 downloads --json | jq -r --arg name "$large" '.downloads[] | select(.fileName == $name) | .status') ]]; }
+    wait_until 10 "$large to leave the download list" gone
+    wait_until 10 "$large.partial to be deleted" no_partial "$large"
+    started_large=
+    echo "    $large: cancelled at ${download_status#running } bytes, no partial left"
+
+    call DELETE_IMAGE --extra "path:s:$STORE/$small" >/dev/null
+    downloaded_image=
+    in_store "$small" && fail "$small is still in the library after the delete"
+    return 0
+}
+
 remote_down() {
     local state
     state=$(call REMOTE_OFF)
@@ -322,6 +433,7 @@ step "build CLI, find this Mac's node" build_cli
 step "fixture (cached) + preflight" fixture
 step "Remote on, node Running" remote_up
 step "status pending (3) → approve → ok" pending_then_approve
+step "catalog download (verified) and cancel" catalog_downloads
 step "mount RO over tailnet, Mac reads, eject" mount_read_only
 step "hid on, F24/Shift taps, hid off" harmless_hid
 step "revoke closes live session, next exits 3" revoke_closes_session
