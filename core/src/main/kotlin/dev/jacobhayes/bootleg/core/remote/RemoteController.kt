@@ -1,5 +1,6 @@
 package dev.jacobhayes.bootleg.core.remote
 
+import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.LunMode
@@ -61,8 +62,12 @@ class RemoteController(
         val plans = LinkedHashMap<String, PastePlan>()
         var stateDirty = false
         var leaseDirty = false
+        var catalogDirty = false
+        var downloadsDirty = false
         var lastStatePushMs = nowMs - RemoteLimits.PUSH_INTERVAL_MS_MIN
         var lastLeasePushMs = nowMs - RemoteLimits.PUSH_INTERVAL_MS_MIN
+        var lastCatalogPushMs = nowMs - RemoteLimits.PUSH_INTERVAL_MS_MIN
+        var lastDownloadsPushMs = nowMs - RemoteLimits.DOWNLOAD_PUSH_INTERVAL_MS_MIN
         var frameBudgetMilli = FRAME_BUDGET_MILLI_MAX
         var frameBudgetRefilledAtMs = nowMs
 
@@ -101,6 +106,20 @@ class RemoteController(
         val sessionId: Long,
         val requestId: JsonPrimitive,
         val timeoutMs: Long,
+    )
+
+    private class CatalogEntry(
+        val release: Release,
+        val distroName: String,
+    )
+
+    private class DownloadCall(
+        val opId: Long,
+        val sessionId: Long,
+        val requestId: JsonPrimitive,
+        val entryId: String,
+        val fileName: String,
+        val isStart: Boolean,
     )
 
     private class Barrier(
@@ -160,6 +179,12 @@ class RemoteController(
     private val held = HeldInput()
     private var barrier: Barrier? = null
     private var lastInputMs = 0L
+    private var catalog = CatalogSnapshot()
+    private var catalogRev = 1L
+    private val catalogEntries = LinkedHashMap<String, CatalogEntry>()
+    private var downloads: List<RemoteDownload> = emptyList()
+    private var downloadCall: DownloadCall? = null
+    private var catalogRefreshRequestedAtMs: Long? = null
 
     private var nowMs = 0L
     private var wallMs = 0L
@@ -216,6 +241,10 @@ class RemoteController(
         for (session in sessions.values) {
             if (session.stateDirty) wakeMs = minOf(wakeMs, session.lastStatePushMs + RemoteLimits.PUSH_INTERVAL_MS_MIN)
             if (session.leaseDirty) wakeMs = minOf(wakeMs, session.lastLeasePushMs + RemoteLimits.PUSH_INTERVAL_MS_MIN)
+            if (session.catalogDirty) wakeMs = minOf(wakeMs, session.lastCatalogPushMs + RemoteLimits.PUSH_INTERVAL_MS_MIN)
+            if (session.downloadsDirty) {
+                wakeMs = minOf(wakeMs, session.lastDownloadsPushMs + RemoteLimits.DOWNLOAD_PUSH_INTERVAL_MS_MIN)
+            }
         }
         return wakeMs
     }
@@ -263,6 +292,9 @@ class RemoteController(
             is RemoteEvent.HidRejected -> onHidRejected()
             is RemoteEvent.DeviceResult -> onDeviceResult(event.opId, event.outcome)
             is RemoteEvent.DeviceChanged -> onDeviceChanged(event.snapshot)
+            is RemoteEvent.DownloadResult -> onDownloadResult(event.opId, event.outcome)
+            is RemoteEvent.CatalogChanged -> onCatalogChanged(event.snapshot)
+            is RemoteEvent.DownloadsChanged -> onDownloadsChanged(event.downloads)
             is RemoteEvent.HidReleaseDelivered -> onReleaseDelivered()
             is RemoteEvent.LocalCaptureStarted -> onLocalCaptureStarted()
             is RemoteEvent.LocalCaptureStopped -> onLocalCaptureStopped()
@@ -393,7 +425,10 @@ class RemoteController(
                 lease = if (approved) leaseViewFor() else null,
             ),
         )
-        if (approved) session.stateDirty = true
+        if (approved) {
+            session.stateDirty = true
+            session.downloadsDirty = true
+        }
     }
 
     private fun dispatch(
@@ -455,6 +490,9 @@ class RemoteController(
             is PastePrepareRequest -> admit(session, epoch) ?: onPastePrepare(session, body.text)
             is PasteRunRequest -> admit(session, epoch) ?: onPasteRun(session, id, body.planId)
             is PasteCancelRequest -> admit(session, epoch) ?: onJobCancel(JobKind.PASTE)
+            is CatalogListRequest -> onCatalogList(body)
+            is DownloadStartRequest -> admit(session, epoch) ?: onDownloadStart(session, id, body.entryId)
+            is DownloadCancelRequest -> admit(session, epoch) ?: onDownloadCancel(session, id, body.entryId)
         }
     }
 
@@ -694,6 +732,7 @@ class RemoteController(
         send(session, AuthPush(AuthStatus.APPROVED, allowRw(session)))
         session.stateDirty = true
         session.leaseDirty = true
+        session.downloadsDirty = true
     }
 
     private fun onDeny(nodeId: String) {
@@ -913,6 +952,246 @@ class RemoteController(
         }
         if (!device.hid.mouse) held.buttonBits = 0
         if (!device.hid.keyboard && !device.hid.mouse) barrier = null
+    }
+
+    // ---- Catalog downloads. They aren't held input: after admission nothing here depends on the lease.
+
+    private fun onCatalogChanged(snapshot: CatalogSnapshot) {
+        val bounded = boundedCatalog(snapshot)
+        if (bounded == catalog) return
+        catalog = bounded
+        catalogEntries.clear()
+        for (distro in bounded.distros) {
+            for (release in distro.releases) {
+                catalogEntries[CatalogEntryIds.idFor(release.fileName)] =
+                    CatalogEntry(release, distro.distro.name)
+            }
+        }
+        catalogRev++
+        for (session in sessions.values) if (session.auth == SessionAuth.APPROVED) session.catalogDirty = true
+    }
+
+    /** At most [RemoteLimits.CATALOG_ENTRY_COUNT_MAX] releases, one per file name (the first wins, as in the download store). */
+    private fun boundedCatalog(snapshot: CatalogSnapshot): CatalogSnapshot {
+        val seen = HashSet<String>()
+        val distros =
+            snapshot.distros.map { distro ->
+                val releases =
+                    distro.releases.filter { release ->
+                        seen.size < RemoteLimits.CATALOG_ENTRY_COUNT_MAX && seen.add(release.fileName)
+                    }
+                distro.copy(releases = releases)
+            }
+        return snapshot.copy(distros = distros)
+    }
+
+    private fun onDownloadsChanged(changed: List<RemoteDownload>) {
+        val bounded = changed.take(RemoteLimits.DOWNLOAD_COUNT_MAX)
+        if (bounded == downloads) return
+        downloads = bounded
+        for (session in sessions.values) if (session.auth == SessionAuth.APPROVED) session.downloadsDirty = true
+    }
+
+    /**
+     * Lets the app refresh a stale catalog (its own rules decide what's stale), at most once per
+     * [RemoteLimits.CATALOG_REFRESH_INTERVAL_MS_MIN] for all sessions together.
+     */
+    private fun maybeRefreshCatalog() {
+        if (catalog.refreshing) return
+        val lastMs = catalogRefreshRequestedAtMs
+        if (lastMs != null && nowMs - lastMs < RemoteLimits.CATALOG_REFRESH_INTERVAL_MS_MIN) return
+        catalogRefreshRequestedAtMs = nowMs
+        emit(RemoteEffect.CatalogRefreshIfStale)
+    }
+
+    private fun onCatalogList(request: CatalogListRequest): Outcome {
+        maybeRefreshCatalog()
+        val libraryNames = device.images.mapTo(HashSet()) { it.path.substringAfterLast('/') }
+        val downloadsByName = downloads.associateBy { it.fileName }
+        var budgetBytes = RemoteLimits.CATALOG_REPLY_SIZE_BYTES_MAX - CATALOG_REPLY_ENVELOPE_BYTES
+        var entryCount = 0
+        var truncated = false
+        val distros = ArrayList<CatalogDistroView>()
+        for (distro in catalog.distros) {
+            if (truncated) break
+            if (request.category != null && distro.distro.category != request.category.category) continue
+            if (request.distroId != null && distro.distro.id != request.distroId) continue
+            val shell =
+                CatalogDistroView(
+                    distroId = distro.distro.id,
+                    name = distro.distro.name.take(RemoteLimits.CATALOG_TEXT_LENGTH_MAX),
+                    category = WireCategory.of(distro.distro.category),
+                    fetchedAtMs = distro.fetchedAtWallMs,
+                    error = distro.error?.take(RemoteLimits.CATALOG_TEXT_LENGTH_MAX),
+                    entries = emptyList(),
+                )
+            // The separating comma is counted too.
+            val shellBytes = jsonSizeBytes(CatalogDistroView.serializer(), shell) + 1
+            if (shellBytes > budgetBytes) {
+                truncated = true
+                break
+            }
+            budgetBytes -= shellBytes
+            val entries = ArrayList<CatalogEntryView>()
+            for (release in distro.releases) {
+                if (release.arch != request.arch.arch) continue
+                if (entryCount >= RemoteLimits.CATALOG_REPLY_ENTRY_COUNT_MAX) {
+                    truncated = true
+                    break
+                }
+                val view = entryView(release, libraryNames, downloadsByName)
+                val viewBytes = jsonSizeBytes(CatalogEntryView.serializer(), view) + 1
+                if (viewBytes > budgetBytes) {
+                    truncated = true
+                    break
+                }
+                budgetBytes -= viewBytes
+                entryCount++
+                entries += view
+            }
+            distros += shell.copy(entries = entries)
+        }
+        return ok(
+            CatalogResult.serializer(),
+            CatalogResult(catalogRev, refreshing = catalog.refreshing, truncated = truncated, distros = distros),
+        )
+    }
+
+    private fun entryView(
+        release: Release,
+        libraryNames: Set<String>,
+        downloadsByName: Map<String, RemoteDownload>,
+    ): CatalogEntryView =
+        CatalogEntryView(
+            entryId = CatalogEntryIds.idFor(release.fileName),
+            version = release.version.take(RemoteLimits.CATALOG_TEXT_LENGTH_MAX),
+            variant = release.variant.takeIf { it.isNotBlank() }?.take(RemoteLimits.CATALOG_TEXT_LENGTH_MAX),
+            arch = WireArch.of(release.arch),
+            fileName = release.fileName,
+            sizeBytes = release.sizeBytes,
+            supportedUntil = release.supportedUntil?.take(RemoteLimits.CATALOG_TEXT_LENGTH_MAX),
+            state =
+                when {
+                    release.fileName in libraryNames -> WireEntryState.DOWNLOADED
+                    else -> downloadsByName[release.fileName]?.let { WireEntryState.of(it.status) } ?: WireEntryState.AVAILABLE
+                },
+        )
+
+    private fun onDownloadStart(
+        session: Session,
+        requestId: JsonPrimitive,
+        entryId: String,
+    ): Outcome {
+        if (downloadCall != null) return err(ErrorCode.BUSY, "another download request is running")
+        val entry = catalogEntries[entryId] ?: return err(ErrorCode.NOT_FOUND, "no such catalog entry; list the catalog again")
+        val fileName = entry.release.fileName
+        // A repeat start never fails for capacity: already-downloaded and already-active answer first.
+        if (device.images.any { it.path.substringAfterLast('/') == fileName }) {
+            return ok(DownloadStartResult.serializer(), DownloadStartResult(entryId, fileName, DownloadStartResultKind.DOWNLOADED))
+        }
+        if (downloads.any { it.fileName == fileName && it.status.isActive }) {
+            return ok(DownloadStartResult.serializer(), DownloadStartResult(entryId, fileName, DownloadStartResultKind.ACTIVE))
+        }
+        // A cheap early answer; the app enforces the same bound atomically when it enqueues.
+        if (downloads.count { it.status.isActive } >= RemoteLimits.DOWNLOAD_ACTIVE_COUNT_MAX) {
+            return err(ErrorCode.TOO_MANY_DOWNLOADS, "${RemoteLimits.DOWNLOAD_ACTIVE_COUNT_MAX} downloads are already queued or running")
+        }
+        return startDownloadCall(session, requestId, entryId, fileName, DownloadOp.Start(entry.release, entry.distroName))
+    }
+
+    private fun onDownloadCancel(
+        session: Session,
+        requestId: JsonPrimitive,
+        entryId: String,
+    ): Outcome {
+        if (downloadCall != null) return err(ErrorCode.BUSY, "another download request is running")
+        // The record may not have reached this snapshot yet (a start that just finished), so the catalog names it too.
+        val download = downloads.firstOrNull { it.entryId == entryId }
+        if (download?.status == RemoteDownloadStatus.COMPLETED) return ok(CancelResult.serializer(), CancelResult(cancelled = false))
+        val fileName =
+            download?.fileName ?: catalogEntries[entryId]?.release?.fileName
+                ?: return ok(CancelResult.serializer(), CancelResult(cancelled = false))
+        return startDownloadCall(session, requestId, entryId, fileName, DownloadOp.Cancel(fileName))
+    }
+
+    private fun startDownloadCall(
+        session: Session,
+        requestId: JsonPrimitive,
+        entryId: String,
+        fileName: String,
+        op: DownloadOp,
+    ): Outcome {
+        check(downloadCall == null)
+        val opId = nextOpId++
+        downloadCall = DownloadCall(opId, session.id, requestId, entryId, fileName, isStart = op is DownloadOp.Start)
+        emit(RemoteEffect.Download(opId, op))
+        return Outcome.Deferred
+    }
+
+    private fun onDownloadResult(
+        opId: Long,
+        outcome: DownloadOutcome,
+    ) {
+        val call = downloadCall?.takeIf { it.opId == opId } ?: return
+        downloadCall = null
+        val answersStart =
+            outcome is DownloadOutcome.Started ||
+                outcome is DownloadOutcome.AlreadyActive ||
+                outcome is DownloadOutcome.AlreadyDownloaded ||
+                outcome is DownloadOutcome.TooMany ||
+                outcome is DownloadOutcome.StorageLow
+        check(!(call.isStart && outcome is DownloadOutcome.Cancelled)) { "a start answered as a cancel" }
+        check(call.isStart || !answersStart) { "a cancel answered as a start: $outcome" }
+        // The reply goes nowhere if the session ended; the download carries on either way.
+        val session = sessions[call.sessionId] ?: return
+
+        fun started(kind: DownloadStartResultKind) =
+            ok(DownloadStartResult.serializer(), DownloadStartResult(call.entryId, call.fileName, kind))
+        val reply =
+            when (outcome) {
+                is DownloadOutcome.Started -> started(DownloadStartResultKind.STARTED)
+                is DownloadOutcome.AlreadyActive -> started(DownloadStartResultKind.ACTIVE)
+                is DownloadOutcome.AlreadyDownloaded -> started(DownloadStartResultKind.DOWNLOADED)
+                is DownloadOutcome.Cancelled -> ok(CancelResult.serializer(), CancelResult(outcome.cancelled))
+                is DownloadOutcome.TooMany -> err(ErrorCode.TOO_MANY_DOWNLOADS, outcome.reason.take(ERROR_MESSAGE_LENGTH_MAX))
+                is DownloadOutcome.StorageLow -> err(ErrorCode.STORAGE_LOW, outcome.reason.take(ERROR_MESSAGE_LENGTH_MAX))
+                is DownloadOutcome.Rejected -> err(ErrorCode.DEVICE, outcome.reason.take(ERROR_MESSAGE_LENGTH_MAX))
+                is DownloadOutcome.TimedOut ->
+                    err(
+                        ErrorCode.TIMEOUT,
+                        "the phone did not answer in ${RemoteLimits.DOWNLOAD_OP_TIMEOUT_MS} ms",
+                    )
+                is DownloadOutcome.Busy -> err(ErrorCode.BUSY, "an earlier download request is still running")
+            }
+        completeDeferred(session, call.requestId, reply)
+    }
+
+    /** Active downloads first, then the rest, as many as fit [RemoteLimits.DOWNLOADS_PUSH_SIZE_BYTES_MAX]. */
+    private fun downloadsPush(): DownloadsPush {
+        var budgetBytes = RemoteLimits.DOWNLOADS_PUSH_SIZE_BYTES_MAX - DOWNLOADS_PUSH_ENVELOPE_BYTES
+        val views = ArrayList<DownloadView>()
+        var truncated = false
+        for (download in downloads.sortedByDescending { it.status.isActive }) {
+            val view =
+                DownloadView(
+                    entryId = download.entryId,
+                    fileName = download.fileName.take(RemoteLimits.CATALOG_TEXT_LENGTH_MAX),
+                    title = download.title.take(RemoteLimits.CATALOG_TEXT_LENGTH_MAX),
+                    status = WireDownloadStatus.of(download.status),
+                    downloadedBytes = download.downloadedBytes,
+                    totalBytes = download.totalBytes,
+                    verified = download.verified.takeIf { it },
+                    error = download.error?.take(RemoteLimits.CATALOG_TEXT_LENGTH_MAX),
+                )
+            val viewBytes = jsonSizeBytes(DownloadView.serializer(), view) + 1
+            if (viewBytes > budgetBytes) {
+                truncated = true
+                break
+            }
+            budgetBytes -= viewBytes
+            views += view
+        }
+        return DownloadsPush(views, truncated)
     }
 
     // ---- HID input.
@@ -1288,8 +1567,15 @@ class RemoteController(
         finishReply(session, id, outcome)
     }
 
+    /** Evicts the oldest finished replies first, so a deferred request stays deduplicated until it answers. */
     private fun trimReplyCache(session: Session) {
-        while (session.replies.size > RemoteLimits.REQUEST_ID_CACHE_SIZE) session.replies.remove(session.replies.keys.first())
+        while (session.replies.size > RemoteLimits.REQUEST_ID_CACHE_SIZE) {
+            val oldest =
+                session.replies.entries
+                    .firstOrNull { it.value != null }
+                    ?.key ?: session.replies.keys.first()
+            session.replies.remove(oldest)
+        }
     }
 
     private fun send(
@@ -1308,6 +1594,16 @@ class RemoteController(
                 session.leaseDirty = false
                 session.lastLeasePushMs = nowMs
                 send(session, LeasePush(leaseViewFor()))
+            }
+            if (session.catalogDirty && nowMs - session.lastCatalogPushMs >= RemoteLimits.PUSH_INTERVAL_MS_MIN) {
+                session.catalogDirty = false
+                session.lastCatalogPushMs = nowMs
+                send(session, CatalogPush(catalogRev, catalog.refreshing))
+            }
+            if (session.downloadsDirty && nowMs - session.lastDownloadsPushMs >= RemoteLimits.DOWNLOAD_PUSH_INTERVAL_MS_MIN) {
+                session.downloadsDirty = false
+                session.lastDownloadsPushMs = nowMs
+                send(session, downloadsPush())
             }
             if (session.stateDirty && nowMs - session.lastStatePushMs >= RemoteLimits.PUSH_INTERVAL_MS_MIN) {
                 session.stateDirty = false
@@ -1340,7 +1636,18 @@ class RemoteController(
                         status = WireSlotStatus.of(slot.intent),
                     )
                 },
-            images = device.images.map { ImageView(it.imageId, it.displayName, it.sizeBytes, WireLunMode.of(it.defaultMode)) },
+            images =
+                device.images.map {
+                    ImageView(
+                        it.imageId,
+                        it.displayName,
+                        it.sizeBytes,
+                        WireLunMode.of(it.defaultMode),
+                        it.verified.takeIf { verified ->
+                            verified
+                        },
+                    )
+                },
             hid =
                 HidView(
                     device.hid.keyboard,
@@ -1381,6 +1688,15 @@ class RemoteController(
         value: T,
     ): Outcome.Ok = Outcome.Ok(ProtocolJson.resultOf(serializer, value))
 
+    private fun <T> jsonSizeBytes(
+        serializer: KSerializer<T>,
+        value: T,
+    ): Int =
+        ProtocolJson.json
+            .encodeToString(serializer, value)
+            .encodeToByteArray()
+            .size
+
     private fun <T> decode(
         serializer: KSerializer<T>,
         element: JsonElement,
@@ -1413,10 +1729,21 @@ class RemoteController(
             check((session.auth == SessionAuth.APPROVED) == (session.principal != null)) { "auth and principal disagree" }
         }
         if (leaseHolder !is LeaseHolder.Remote) check(!held.keyboardHeld && held.buttonBits == 0) { "input held without a remote holder" }
+        check(downloads.size <= RemoteLimits.DOWNLOAD_COUNT_MAX) { "too many downloads: ${downloads.size}" }
+        check(catalogEntries.size <= RemoteLimits.CATALOG_ENTRY_COUNT_MAX) { "too many catalog entries: ${catalogEntries.size}" }
     }
 
     private companion object {
         const val ERROR_MESSAGE_LENGTH_MAX = 200
+
+        /**
+         * `{"id":…,"ok":true,"catalogRev":…,"refreshing":…,"truncated":…,"distros":[]}` with the
+         * longest request id (64 chars, up to 4 UTF-8 bytes each), with room to spare.
+         */
+        const val CATALOG_REPLY_ENVELOPE_BYTES = 512
+
+        /** `{"t":"downloads","truncated":…,"downloads":[]}`, with room to spare. */
+        const val DOWNLOADS_PUSH_ENVELOPE_BYTES = 128
         const val PLAN_ID_SIZE_BYTES = 8
         const val FRAME_COST_MILLI = 1_000L
         const val FRAME_BUDGET_MILLI_MAX = RemoteLimits.HID_FRAME_RATE_PER_SECOND_MAX * FRAME_COST_MILLI

@@ -55,9 +55,22 @@ sealed interface RemoteEvent {
         val outcome: DeviceOutcome,
     ) : RemoteEvent
 
+    data class DownloadResult(
+        val opId: Long,
+        val outcome: DownloadOutcome,
+    ) : RemoteEvent
+
     // From the app.
     data class DeviceChanged(
         val snapshot: DeviceSnapshot,
+    ) : RemoteEvent
+
+    data class CatalogChanged(
+        val snapshot: CatalogSnapshot,
+    ) : RemoteEvent
+
+    data class DownloadsChanged(
+        val downloads: List<RemoteDownload>,
     ) : RemoteEvent
 
     /** The HidSession's owed release-all reached the host (or its endpoints reopened). */
@@ -148,6 +161,14 @@ sealed interface RemoteEffect {
         val opId: Long,
         val op: DeviceOp,
     ) : RemoteEffect
+
+    data class Download(
+        val opId: Long,
+        val op: DownloadOp,
+    ) : RemoteEffect
+
+    /** [DownloadPort.refreshCatalogIfStale]. */
+    data object CatalogRefreshIfStale : RemoteEffect
 
     data class SaveApprovals(
         val records: List<ApprovalRecord>,

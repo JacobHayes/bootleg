@@ -23,6 +23,8 @@ import kotlinx.coroutines.withTimeoutOrNull
  * bridge's 20ms budget on Go's goroutine threads. Device calls run on [deviceDispatcher] with a
  * [RemoteLimits.DEVICE_OP_TIMEOUT_MS] deadline, one at a time: the device lane stays held until the
  * call really finishes, even after a timeout, and a call that finds it held answers `busy`.
+ * Download calls ([DownloadPort.start]/[DownloadPort.cancel]) get their own lane with the same
+ * rules, so they never wait on a gadget operation.
  *
  * Any failure in a step (the controller's invariants or a port throwing mid-dispatch) fails closed:
  * release-all, close every session Go holds, stop the loop and report it to [onFatal].
@@ -33,19 +35,26 @@ class RemoteActor(
     private val transport: TransportPort,
     private val device: DevicePort,
     private val hid: HidPort,
+    private val downloads: DownloadPort,
     private val approvalStore: ApprovalStore,
     private val pairingStore: PairingStore,
     private val notifier: Notifier,
     private val scope: CoroutineScope,
     private val deviceDispatcher: CoroutineDispatcher,
+    /** For [DownloadPort.start]/[DownloadPort.cancel]; not the device lane's dispatcher, so neither waits on the other. */
+    private val downloadDispatcher: CoroutineDispatcher,
     /** Called once if the controller trips an invariant; the actor has already failed closed. */
     private val onFatal: (Throwable) -> Unit = {},
     private val deviceTimeoutMs: Long = RemoteLimits.DEVICE_OP_TIMEOUT_MS,
+    private val downloadTimeoutMs: Long = RemoteLimits.DOWNLOAD_OP_TIMEOUT_MS,
 ) {
     init {
         require(
             deviceTimeoutMs in 1..RemoteLimits.DEVICE_OP_TIMEOUT_MS,
         ) { "device timeout must be 1..${RemoteLimits.DEVICE_OP_TIMEOUT_MS} ms" }
+        require(
+            downloadTimeoutMs in 1..RemoteLimits.DOWNLOAD_OP_TIMEOUT_MS,
+        ) { "download timeout must be 1..${RemoteLimits.DOWNLOAD_OP_TIMEOUT_MS} ms" }
     }
 
     private val lock = Any()
@@ -66,9 +75,12 @@ class RemoteActor(
     /** Set once a step fails; the bridge then queues nothing and closes new sessions at once. */
     private var failed = false
     private var pendingSnapshot: DeviceSnapshot? = null
+    private var pendingCatalog: CatalogSnapshot? = null
+    private var pendingDownloads: List<RemoteDownload>? = null
 
     private val wakeUp = Channel<Unit>(Channel.CONFLATED)
     private val deviceLane = Semaphore(1)
+    private val downloadLane = Semaphore(1)
     private val statusFlow = MutableStateFlow(controller.status())
     private var loop: Job? = null
 
@@ -78,6 +90,18 @@ class RemoteActor(
         check(loop == null) { "already started" }
         loop = scope.launch { runLoop() }
         scope.launch { device.snapshots.collect { deviceChanged(it) } }
+        scope.launch {
+            downloads.catalog.collect { snapshot ->
+                synchronized(lock) { pendingCatalog = snapshot }
+                wakeUp.trySend(Unit)
+            }
+        }
+        scope.launch {
+            downloads.downloads.collect { list ->
+                synchronized(lock) { pendingDownloads = list }
+                wakeUp.trySend(Unit)
+            }
+        }
     }
 
     // ---- Go → Kotlin bridge. All nonblocking.
@@ -240,6 +264,14 @@ class RemoteActor(
                 pendingSnapshot = null
                 return RemoteEvent.DeviceChanged(it)
             }
+            pendingDownloads?.let {
+                pendingDownloads = null
+                return RemoteEvent.DownloadsChanged(it)
+            }
+            pendingCatalog?.let {
+                pendingCatalog = null
+                return RemoteEvent.CatalogChanged(it)
+            }
             val sessionId = inbound.entries.firstOrNull { it.value.isNotEmpty() }?.key ?: return null
             val queue = inbound.remove(sessionId)!!
             val event = queue.removeFirst()
@@ -325,6 +357,8 @@ class RemoteActor(
             }
             is RemoteEffect.HidReleaseAll -> hid.releaseAll()
             is RemoteEffect.Device -> startDeviceCall(effect.opId, effect.op)
+            is RemoteEffect.Download -> startDownloadCall(effect.opId, effect.op)
+            is RemoteEffect.CatalogRefreshIfStale -> downloads.refreshCatalogIfStale()
             is RemoteEffect.SaveApprovals -> approvalStore.save(effect.records)
             is RemoteEffect.SavePairing -> pairingStore.save(effect.record)
             is RemoteEffect.PendingChanged -> notifier.pendingChanged(effect.pending)
@@ -376,8 +410,40 @@ class RemoteActor(
             deviceTimeoutMs
         }
 
-    /** Device results bypass the soft priority bound: the controller waits on every one. */
-    private fun enqueueResult(result: RemoteEvent.DeviceResult) {
+    private fun startDownloadCall(
+        opId: Long,
+        op: DownloadOp,
+    ) {
+        if (!downloadLane.tryAcquire()) {
+            // Only a call that timed out can still hold the lane: the controller runs one call at a time.
+            enqueueResult(RemoteEvent.DownloadResult(opId, DownloadOutcome.Busy))
+            return
+        }
+        // Like a gadget operation, a started enqueue or cancel finishes even if nobody waits for it any more.
+        val work =
+            scope.async(downloadDispatcher) {
+                runCatching {
+                    when (op) {
+                        is DownloadOp.Start -> downloads.start(op.release, op.distroName)
+                        is DownloadOp.Cancel -> downloads.cancel(op.fileName)
+                    }
+                }
+            }
+        work.invokeOnCompletion { downloadLane.release() }
+        scope.launch {
+            val result = withTimeoutOrNull(downloadTimeoutMs) { work.await() }
+            val outcome =
+                when {
+                    result == null -> DownloadOutcome.TimedOut
+                    result.isFailure -> DownloadOutcome.Rejected(result.exceptionOrNull()?.message ?: "download request failed")
+                    else -> result.getOrThrow()
+                }
+            enqueueResult(RemoteEvent.DownloadResult(opId, outcome))
+        }
+    }
+
+    /** Device and download results bypass the soft priority bound: the controller waits on every one. */
+    private fun enqueueResult(result: RemoteEvent) {
         synchronized(lock) {
             if (failed) return
             priority.addLast(result)
@@ -401,11 +467,13 @@ class RemoteActor(
             transport: TransportPort,
             device: DevicePort,
             hid: HidPort,
+            downloads: DownloadPort,
             approvalStore: ApprovalStore,
             pairingStore: PairingStore,
             notifier: Notifier,
             scope: CoroutineScope,
             deviceDispatcher: CoroutineDispatcher,
+            downloadDispatcher: CoroutineDispatcher,
             onFatal: (Throwable) -> Unit = {},
         ): RemoteActor =
             RemoteActor(
@@ -414,11 +482,13 @@ class RemoteActor(
                 transport,
                 device,
                 hid,
+                downloads,
                 approvalStore,
                 pairingStore,
                 notifier,
                 scope,
                 deviceDispatcher,
+                downloadDispatcher,
                 onFatal,
             )
     }

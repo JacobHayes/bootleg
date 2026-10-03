@@ -87,6 +87,34 @@ object RemoteLimits {
 
     const val IMAGE_COUNT_MAX = 512
 
+    // Catalog downloads.
+
+    /** Catalog entries the controller keeps (the scrapers cap themselves well below this). */
+    const val CATALOG_ENTRY_COUNT_MAX = 2048
+
+    /** `catalog.list` reply: entries and JSON size, well under one 64 KiB WebSocket message. */
+    const val CATALOG_REPLY_ENTRY_COUNT_MAX = 256
+    const val CATALOG_REPLY_SIZE_BYTES_MAX = 48 * 1024
+
+    /** A remote `catalog.list` lets the app refresh a stale catalog at most this often (for all sessions together). */
+    const val CATALOG_REFRESH_INTERVAL_MS_MIN = 60_000L
+
+    /** Downloads queued or running (from any source) when the remote may start another. */
+    const val DOWNLOAD_ACTIVE_COUNT_MAX = 4
+
+    /** Download records in a `downloads` push (the app's store holds at most this many). */
+    const val DOWNLOAD_COUNT_MAX = 64
+
+    /** A `downloads` push's JSON, well under one 64 KiB WebSocket message; active downloads go first. */
+    const val DOWNLOADS_PUSH_SIZE_BYTES_MAX = 48 * 1024
+
+    /** At most 2 `downloads` pushes per second per session (progress is coalesced). */
+    const val DOWNLOAD_PUSH_INTERVAL_MS_MIN = 500L
+    const val DOWNLOAD_OP_TIMEOUT_MS = 10_000L
+
+    /** Catalog and download display strings (names, versions, errors), in chars. */
+    const val CATALOG_TEXT_LENGTH_MAX = 200
+
     /** The actor wakes at least this often so lazy expirations (plans, approvals) are processed. */
     const val TICK_INTERVAL_MS_MAX = 1_000L
 }

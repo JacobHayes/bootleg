@@ -121,7 +121,7 @@ A reconnect is a fresh session with a fresh snapshot; nothing is replayed.
   `{"id":8,"ok":false,"error":{"code":"lease_held","msg":"..."}}`. `msg` is human-readable.
 - Requests before `hello` get `hello_required`.
 - Replies come in request order except deferred ones (`lease.takeover`, device operations,
-  `paste.run`, `bootkey.run`), which come when they complete.
+  `paste.run`, `bootkey.run`, `download.start`, `download.cancel`), which come when they complete.
 
 **Mutations** (M) need the lease and the current epoch in the envelope: not the holder →
 `lease_required`; holder with a missing or different epoch → `stale_epoch`. The epoch is checked
@@ -145,6 +145,9 @@ when the request is admitted and again in the same actor step that dispatches it
 | `paste.prepare` | `text` | M | `planId`, `unsupported`, `unsupportedCount`, `durationMs` |
 | `paste.run` | `planId` | M | `durationMs` (when the typing finishes) |
 | `paste.cancel` | — | M | `cancelled` |
+| `catalog.list` | `arch`? (`x86_64`), `category`? (all), `distroId`? (all) | | `Catalog` fields inline |
+| `download.start` | `entryId` | M | `entryId`, `fileName`, `result` (deferred) |
+| `download.cancel` | `entryId` | M | `cancelled` (deferred) |
 
 Details:
 
@@ -199,6 +202,32 @@ Details:
   `unsupportedCount` is the total). At most 4 plans per session (`too_many_plans`), each valid for
   2 minutes, single use, and void once the lease changes (`not_found`, `plan_expired`,
   `stale_epoch`).
+- **`catalog.list`** needs an approved session, not the lease (like `state.get`). It answers from
+  the app's cached catalog (the same one the phone's Catalog tab shows), never a scrape per
+  request. `arch` is `x86_64` or `arm64`; `category` is `desktop`, `server` or `rescue`
+  (`bad_request` otherwise); `distroId` picks one distro. The request also lets the phone refresh
+  a stale catalog in the background (its own rule, as when the Catalog tab opens: older than 6 h
+  or never fetched), at most once per 60 s for all sessions together; `refreshing` says one is
+  running and a `catalog` push follows when it ends. The reply is bounded: at most 256 entries and
+  48 KiB of JSON; whatever doesn't fit is left out and `truncated` is true (narrow it with
+  `arch`, `category` or `distroId`).
+- **`download.start`** starts the catalog entry's download exactly as the phone's Catalog does:
+  the same user-initiated job, resume, SHA-256 check, archive extraction and "Wi-Fi only"
+  setting, landing in the library. Clients name entries by `entryId` only, never a URL or path.
+  `result` is `started`, `active` (already queued or running) or `downloaded` (already in the
+  library; nothing starts). A paused or failed download is resumed from its partial file. Errors:
+  `not_found` (unknown entry), `too_many_downloads` (4 downloads already queued or running, from
+  any source, or 64 download records; at most 2 transfer at once), `storage_low` (free space under
+  what's left to fetch plus 512 MiB), `busy` (another `download.*` request is in flight), `device`
+  (the phone refused to schedule it), `timeout` (10 s: the outcome is unknown, and the download
+  may still start; `downloads` pushes show it).
+- **`download.cancel`** stops a queued, running, paused or failed download and deletes its
+  partial file and record, as the phone's Cancel does. `cancelled` is false when there was
+  nothing to cancel (no download for the entry, or it already finished: delete a finished image
+  on the phone). Same `busy` and `timeout` as `download.start`.
+- **Downloads outlive the lease and the session.** They are not held input: a revoke, takeover,
+  lease loss or disconnect leaves them running, and every approved session keeps seeing them in
+  `downloads` pushes. A `download.*` reply whose session is gone goes nowhere.
 
 #### Error codes (from Kotlin)
 
@@ -233,6 +262,8 @@ Details:
 | `disks_exposed` | `tether.set` while a disk is exposed. |
 | `device_attention` | The gadget needs the user's attention on the phone. |
 | `timeout` | The device didn't answer within 10 s (75 s for `tether.set`). |
+| `too_many_downloads` | 4 downloads are already queued or running. |
+| `storage_low` | Not enough free space on the phone for that download. |
 
 Go itself also answers `not_authorized` (request before authorization), `bad_request`,
 `rate_limited` and `unavailable`.
@@ -245,11 +276,29 @@ Lease = {holder?: int, holderName?: string, epoch: int, local: bool}
 State = {rev: int, slots: [Slot], images: [Image], hid: Hid, tether?: Tether, lease: Lease}
 Slot  = {lun: int, imageId: string, name: string, mode: "cdrom"|"disk_ro"|"disk_rw",
          status: "exported"|"host_ejected"|"user_ejected"|"failed"}
-Image = {imageId: string, name: string, sizeBytes: int, defaultMode: "cdrom"|"disk_ro"|"disk_rw"}
+Image = {imageId: string, name: string, sizeBytes: int, defaultMode: "cdrom"|"disk_ro"|"disk_rw",
+         verified?: true}
 Hid   = {keyboard: bool, mouse: bool, wheel: bool, status?: "release_pending",
          link?: "stopped"|"connecting"|"open"|"reconnecting"|"failed"|"restart_required"}
 Tether = {on: bool}   // the phone's USB tethering, as Android reports it; absent until known
+
+Catalog  = {catalogRev: int, refreshing: bool, truncated: bool, distros: [Distro]}
+Distro   = {distroId: string, name: string, category: "desktop"|"server"|"rescue",
+            fetchedAtMs?: int, error?: string, entries: [Entry]}
+Entry    = {entryId: string, version: string, variant?: string, arch: "x86_64"|"arm64",
+            fileName: string, sizeBytes?: int, supportedUntil?: string, state: EntryState}
+Download = {entryId: string, fileName: string, title: string, status: DownloadStatus,
+            downloadedBytes: int, totalBytes?: int, verified?: true, error?: string}
+EntryState     = "available" | DownloadStatus | "downloaded"   // downloaded: in the library
+DownloadStatus = "queued" | "running" | "paused" | "verifying" | "completed" | "failed"
 ```
+
+`Image.verified` is true when the image's SHA-256 matched the distro's published sum (a
+`.sha256` sidecar from a finished download). `entryId` is opaque (16 hex characters), derived
+from the entry's file name, so it is stable across catalog refreshes and also names the entry's
+download; `catalogRev` counts catalog changes. `fetchedAtMs` is wall-clock Unix ms; `error` is
+the last refresh's error for that distro (its entries are then the last good ones). A download
+started on the phone shows up too. All strings are untrusted display text.
 
 `imageId` is opaque (16 hex characters), stable for a path; a slot exposing a file outside the
 image library still has one, so `slots.apply` can keep it. `hid.wheel` is true when the mouse is on with the scroll-wheel layout
@@ -272,8 +321,10 @@ phone brings the keyboard and mouse back.
 | `lease` | `lease: Lease` | Lease changed, or you sent input with a stale epoch; ≤ 10/s per session. |
 | `lease.takeover_request` | `requester` (int), `requesterName`, `epoch`, `timeoutMs` | To the holder: someone asks for the lease. |
 | `lease.takeover_cancelled` | `requester` | To the holder: the request was withdrawn or timed out. |
+| `downloads` | `downloads: [Download]`, `truncated` | After `welcome` (approved) and whenever a download changes; ≤ 2/s per session (coalesced, latest wins). Active downloads first; at most 64 and 48 KiB, `truncated` when some finished or paused ones didn't fit. |
+| `catalog` | `catalogRev`, `refreshing` | The cached catalog changed or a refresh started or ended; ≤ 10/s per session. Send `catalog.list` again for the entries. |
 
-Pending sessions get no `state` or `lease` pushes.
+Pending sessions get no `state`, `lease`, `downloads` or `catalog` pushes.
 
 ### 2.5 Lease epoch
 
@@ -350,3 +401,7 @@ the 11th locks pairing until it's reset on the phone. Attempts while pairing is 
 | Boot keys | ≤ 30 s, ≥ 100 ms between taps |
 | Device operation | 10 s (`tether.set` 75 s), one at a time |
 | Heartbeat | ping every 5 s, dead after 15 s without pong |
+| `catalog.list` reply | ≤ 256 entries, ≤ 48 KiB |
+| Catalog refresh from the remote | when older than 6 h, ≤ 1 per 60 s |
+| Downloads | ≤ 4 queued or running (≤ 2 transferring); one `download.*` request at a time, 10 s |
+| `downloads` push | ≤ 64 downloads, ≤ 48 KiB, ≤ 2/s per session |

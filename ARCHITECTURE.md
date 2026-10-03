@@ -583,8 +583,8 @@ required for direct LAN paths and incoming hotspot connections. Log upload is of
 ### Ownership
 - **Kotlin `core/remote`** has all authority, in `RemoteController`: pure, deterministic,
   JVM-tested, and driven by an injected clock. A single actor serializes it.
-  - It owns authorization, pairing, sessions, the lease, mutation gating, input ownership and
-    paste/boot-key jobs.
+  - It owns authorization, pairing, sessions, the lease, mutation gating, input ownership,
+    paste/boot-key jobs and remote catalog downloads.
   - Blocking work (gadget/root calls, HID writes) runs on a separate bounded executor with
     deadlines (10s root op). It never runs on the actor or the main thread.
 - **Go** (`remote/`) only does transport:
@@ -813,10 +813,46 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   `REMOTE_STATE`, `REMOTE_APPROVE --extra node:s:<id>`, `REMOTE_REVOKE --extra node:s:<id>`.
   They stand in for the in-app buttons while the screen is locked.
 
+### Catalog downloads from the remote
+- **Authority:** the lease holder (current epoch) may start and cancel catalog downloads, the
+  same authority as a read-only mount: no per-device flag, no confirmation on the phone. Any
+  approved session may list the catalog and sees download progress. `RemoteController` decides
+  (lease, epoch, entry lookup, bounds); Go only carries the messages.
+- **One download path:** `download.start` resolves the `entryId` to a `Release` from the app's
+  cached catalog (never a URL or path from the client) and goes through the same `Downloads`
+  admission and `DownloadScheduler` job as the Catalog tab: same record, engine, resume, SHA-256
+  check, extraction, notifications, "Wi-Fi only" and library result. A paused or failed download
+  resumes from its partial file. The controller sees the catalog and the download records through
+  `DownloadPort` flows (latest wins, like device snapshots) and runs `start`/`cancel` on its own
+  lane and dispatcher, one at a time with a 10 s deadline, so a download request never waits on a
+  gadget operation. The catalog is consumed only as a snapshot (distros, releases, last fetch,
+  error, refreshing) plus "refresh if stale"; the app's own staleness rule (6 h, as on the Catalog
+  screen) decides, and the controller asks at most once per 60 s.
+- **Background scheduling:** Android schedules a user-initiated job only while the app is
+  visible or may start activities from the background (AOSP `canScheduleUserInitiatedJobs`); the
+  Remote `connectedDevice` FGS doesn't qualify, so with the phone in a drawer `schedule` returns
+  `RESULT_FAILURE`. Then root sends the app's `ScheduleDownloadReceiver` (exported, guarded by
+  `DUMP`) a broadcast with `am broadcast --allow-background-activity-starts`; while it is being
+  delivered the process holds background-activity-start privileges, and the receiver schedules
+  the same job for the record that's waiting for it (a broadcast nobody asked for schedules
+  nothing). Only if that fails too is the download marked failed and `download.start` answers
+  `device`.
+- **Bounds:** ≤ 4 downloads queued or running when the remote starts one, checked atomically with
+  the record's admission (`too_many_downloads`; ≤ 2 transfer at once, as on the phone; the
+  phone's own starts are never refused for it); ≤ 64 download records; free space ≥ what's left
+  to fetch + 512 MiB (`storage_low`; the engine re-checks); `catalog.list` ≤ 256 entries / 48 KiB;
+  `downloads` pushes ≤ 64 entries at ≤ 2/s.
+- **Not held input:** revoke, takeover, lease loss and disconnect leave downloads running; a
+  `download.*` call already dispatched finishes and its reply goes nowhere if the session ended.
+
 ### CLI (`remote/cmd/bootleg`)
 - **Connection:** uses the Mac's own Tailscale. Offline, it takes `--host` plus a 0600 token file.
-- **Commands:** `status`, `images`, `mount`, `eject`, `hid on|off`, `tether on|off|status`, `type <text>|-`,
-  `key <chord> [--repeat --interval]`, `bootkey`, `lease take|takeover|release`, `pair <code>`.
+- **Commands:** `status`, `images`, `mount`, `eject`, `hid on|off`, `tether on|off|status`,
+  `type <text>|-`, `key <chord> [--repeat --interval]`, `scroll <detents> [--horizontal]`,
+  `bootkey`, `lease take|takeover|release`, `pair <code>`, `catalog [--arch] [--category]`,
+  `download <entry> [--follow]`, `download --cancel <entry>`, `downloads`. An entry is its
+  `entryId` or exact file name; `--follow` prints progress until the download finishes (exit 0
+  verified or unverifiable, 5 failed).
 - **`kbd`:** decoded text and key taps only, since terminals don't report key-up. It restores
   the terminal and sends release-all on signals and errors.
 - **Takeover consent:** `kbd` and `lease take|takeover` prompt on a `lease.takeover_request`
@@ -890,7 +926,6 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
     computers), need a second tailnet identity (an ephemeral key from the user); until then
     they're covered at L2 and by the CLI's fake-phone tests.
   - Hotspot hardware checks are manual; the hotspot policy is tested at L2.
-- **Scope:** catalog downloads from the remote are deferred.
 
 ## Hard limits
 

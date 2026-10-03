@@ -1,5 +1,6 @@
 package dev.jacobhayes.bootleg.core.remote
 
+import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
@@ -83,6 +84,31 @@ interface DevicePort {
 
     /** The current device state and every change to it. */
     val snapshots: Flow<DeviceSnapshot>
+}
+
+/**
+ * The app's catalog and downloads (`CatalogRepository`, `Downloads`): the same ones the Catalog
+ * and Downloads screens use. [start]/[cancel] may block briefly; the actor runs them on their own
+ * lane with a [RemoteLimits.DOWNLOAD_OP_TIMEOUT_MS] deadline.
+ */
+interface DownloadPort {
+    /** The cached catalog and every change to it. */
+    val catalog: Flow<CatalogSnapshot>
+
+    /** Every download record, with progress, and every change. */
+    val downloads: Flow<List<RemoteDownload>>
+
+    /** `Downloads.enqueue`, after a free-space check. */
+    suspend fun start(
+        release: Release,
+        distroName: String,
+    ): DownloadOutcome
+
+    /** `Downloads.cancel`: stops it, deletes the partial and the record. */
+    suspend fun cancel(fileName: String): DownloadOutcome
+
+    /** Starts a background refresh if the app's own rules say the catalog is stale (no-op while one runs); returns at once. */
+    fun refreshCatalogIfStale()
 }
 
 enum class HidSendResult {

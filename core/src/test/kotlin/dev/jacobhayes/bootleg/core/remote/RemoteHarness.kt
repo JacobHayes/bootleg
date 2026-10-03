@@ -126,6 +126,9 @@ class RemoteHarness(
     val closes = ArrayList<RemoteEffect.Close>()
     val revoked = ArrayList<String>()
     val deviceCalls = ArrayList<RemoteEffect.Device>()
+    val downloadCalls = ArrayList<RemoteEffect.Download>()
+    private val answeredDownloadOps = HashSet<Long>()
+    var catalogRefreshes = 0
     val effectLog = ArrayList<RemoteEffect>()
     var pendingNotified: List<PendingApproval> = emptyList()
 
@@ -170,6 +173,9 @@ class RemoteHarness(
     /** Simulates a process restart: new controller from the stores; Go's sessions are gone. */
     fun restart() {
         controller = RemoteController(clock, random, approvalStore.load(), pairingStore.load())
+        // The old process's download calls die with it; the new controller numbers its ops from 1 again.
+        downloadCalls.clear()
+        answeredDownloadOps.clear()
         trackedHolder = controller.leaseView.first
         trackedEpoch = controller.leaseView.second
         authorized.clear()
@@ -194,6 +200,7 @@ class RemoteHarness(
             authorized -= name(event.sessionId)
         }
         val effects = controller.handle(event)
+        if (event is RemoteEvent.DownloadResult) answeredDownloadOps += event.opId
         recent.addLast("    -> $effects")
         val followUps = ArrayList<RemoteEvent>()
         for (effect in effects) apply(effect, followUps)
@@ -257,6 +264,18 @@ class RemoteHarness(
             }
             is RemoteEffect.HidReleaseAll -> hidHost.releaseAll()
             is RemoteEffect.Device -> deviceCalls += effect
+            is RemoteEffect.Download -> {
+                if (checking) {
+                    // Admitted and dispatched in this step: the requester holds the lease right now.
+                    val holder = controller.leaseView.first
+                    check(
+                        holder is LeaseHolder.Remote && name(holder.sessionId) in authorized,
+                    ) { "download op without a remote holder ($holder)" }
+                    check(downloadCalls.none { it.opId !in answeredDownloadOps }) { "two download ops in flight" }
+                }
+                downloadCalls += effect
+            }
+            is RemoteEffect.CatalogRefreshIfStale -> catalogRefreshes++
             is RemoteEffect.SaveApprovals -> approvalStore.save(effect.records)
             is RemoteEffect.SavePairing -> pairingStore.save(effect.record)
             is RemoteEffect.PendingChanged -> pendingNotified = effect.pending

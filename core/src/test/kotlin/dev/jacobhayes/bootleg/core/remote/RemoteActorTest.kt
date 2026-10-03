@@ -1,5 +1,9 @@
 package dev.jacobhayes.bootleg.core.remote
 
+import dev.jacobhayes.bootleg.core.catalog.Arch
+import dev.jacobhayes.bootleg.core.catalog.Category
+import dev.jacobhayes.bootleg.core.catalog.Distro
+import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
@@ -125,6 +129,31 @@ class RemoteActorTest {
         }
     }
 
+    private class FakeDownloads : DownloadPort {
+        val hang = CompletableDeferred<DownloadOutcome>()
+        val calls = ConcurrentLinkedQueue<String>()
+        val refreshes = AtomicInteger()
+        override val catalog = MutableStateFlow(CatalogSnapshot())
+        override val downloads = MutableStateFlow<List<RemoteDownload>>(emptyList())
+
+        override suspend fun start(
+            release: Release,
+            distroName: String,
+        ): DownloadOutcome {
+            calls += "start ${release.fileName}"
+            return hang.await()
+        }
+
+        override suspend fun cancel(fileName: String): DownloadOutcome {
+            calls += "cancel $fileName"
+            return DownloadOutcome.Cancelled(true)
+        }
+
+        override fun refreshCatalogIfStale() {
+            refreshes.incrementAndGet()
+        }
+    }
+
     private class FakeHid(
         private val fault: PortFault,
     ) : HidPort {
@@ -162,6 +191,7 @@ class RemoteActorTest {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, _ -> })
         val transport = FakeTransport(fault)
         val device = FakeDevice()
+        val downloads = FakeDownloads()
         val hid = FakeHid(fault)
         val approvals = InMemoryApprovalStore()
         val pairing = InMemoryPairingStore()
@@ -174,6 +204,7 @@ class RemoteActorTest {
                 transport,
                 device,
                 hid,
+                downloads,
                 object : ApprovalStore {
                     override fun load() = approvals.load()
 
@@ -189,8 +220,10 @@ class RemoteActorTest {
                 },
                 scope,
                 deviceDispatcher,
+                Dispatchers.IO,
                 onFatal = { fatal.set(it) },
                 deviceTimeoutMs = 100,
+                downloadTimeoutMs = 100,
             )
 
         fun connect(sessionId: Long) {
@@ -272,6 +305,41 @@ class RemoteActorTest {
             transport.sent.any { it.second.contains(""""id":"retry""") && it.second.contains("\"ok\":true") }
         }
         assertEquals(1, device.runningMax.get())
+    }
+
+    @Test
+    fun `download calls have their own lane - a hung gadget op doesn't block them, and they time out alone`() {
+        actor.start()
+        val epoch = rig.connectAndTake(1L)
+        val release = Release("netboot", "2.0", Arch.X86_64, url = "https://example.org/n.iso", sha256 = "a".repeat(64), fileName = "n.iso")
+        val distro = Distro("netboot", "netboot.xyz", Category.RESCUE, "https://example.org")
+        rig.downloads.catalog.value = CatalogSnapshot(listOf(CatalogDistroSnapshot(distro, listOf(release), 1L, null)))
+        awaitUntil("catalog push") { rig.sentTo(1L, "\"t\":\"catalog\"") }
+        actor.command(1L, """{"id":"c","t":"catalog.list"}""")
+        awaitUntil("catalog") { rig.sentTo(1L, "\"id\":\"c\"") }
+        assertTrue(rig.sentTo(1L, "\"fileName\":\"n.iso\""))
+        assertEquals(1, rig.downloads.refreshes.get())
+        device.snapshots.value = device.snapshots.value.copy(slots = listOf(RemoteSlot(0, "/x.img", LunMode.DISK_RO, SlotIntent.EXPORTED)))
+        awaitUntil("snapshot") { transport.sent.any { it.second.contains("x.img") } }
+        // A gadget op hangs on the device lane; the download start still runs on its own lane.
+        actor.command(1L, """{"id":"r","t":"slot.reinsert","epoch":$epoch,"lun":0}""")
+        val entryId = CatalogEntryIds.idFor("n.iso")
+        actor.command(1L, """{"id":"d","t":"download.start","epoch":$epoch,"entryId":"$entryId"}""")
+        awaitUntil("start called") { rig.downloads.calls.contains("start n.iso") }
+        awaitUntil("download timeout") { transport.sent.any { it.second.contains("\"id\":\"d\"") && it.second.contains("\"timeout\"") } }
+        // Still running on the phone: the next one is refused, not started beside it.
+        actor.command(1L, """{"id":"x","t":"download.cancel","epoch":$epoch,"entryId":"$entryId"}""")
+        awaitUntil("busy") { transport.sent.any { it.second.contains("\"id\":\"x\"") && it.second.contains("\"busy\"") } }
+        rig.downloads.hang.complete(DownloadOutcome.Started)
+        var retry = 0
+        awaitUntil("cancel runs once the lane frees") {
+            actor.command(1L, """{"id":"y$retry","t":"download.cancel","epoch":$epoch,"entryId":"$entryId"}""")
+            retry++
+            Thread.sleep(10)
+            transport.sent.any { it.second.contains(""""id":"y""") && it.second.contains("\"cancelled\":true") }
+        }
+        assertEquals("cancel n.iso", rig.downloads.calls.last())
+        device.hang.complete(ApplyResult.Applied(GadgetState("udc", emptySet(), emptyMap(), emptyMap()), reenumerated = false))
     }
 
     @Test

@@ -121,6 +121,9 @@ class ProtocolTest {
                 "paste.prepare",
                 "paste.run",
                 "paste.cancel",
+                "catalog.list",
+                "download.start",
+                "download.cancel",
             ),
             ProtocolJson.requestTypes,
         )

@@ -1,5 +1,7 @@
 package dev.jacobhayes.bootleg.core.remote
 
+import dev.jacobhayes.bootleg.core.catalog.Arch
+import dev.jacobhayes.bootleg.core.catalog.Category
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.KeyUsage
@@ -108,6 +110,12 @@ enum class ErrorCode {
 
     @SerialName("timeout")
     TIMEOUT,
+
+    @SerialName("too_many_downloads")
+    TOO_MANY_DOWNLOADS,
+
+    @SerialName("storage_low")
+    STORAGE_LOW,
     ;
 
     val wireName: String get() = serializer().descriptor.getElementName(ordinal)
@@ -188,6 +196,117 @@ enum class WireSlotStatus(
     companion object {
         fun of(intent: SlotIntent): WireSlotStatus = entries.single { it.intent == intent }
     }
+}
+
+@Serializable
+enum class WireArch(
+    val arch: Arch,
+) {
+    @SerialName("x86_64")
+    X86_64(Arch.X86_64),
+
+    @SerialName("arm64")
+    ARM64(Arch.ARM64),
+    ;
+
+    companion object {
+        fun of(arch: Arch): WireArch = entries.single { it.arch == arch }
+    }
+}
+
+@Serializable
+enum class WireCategory(
+    val category: Category,
+) {
+    @SerialName("desktop")
+    DESKTOP(Category.DESKTOP),
+
+    @SerialName("server")
+    SERVER(Category.SERVER),
+
+    @SerialName("rescue")
+    RESCUE(Category.RESCUE),
+    ;
+
+    companion object {
+        fun of(category: Category): WireCategory = entries.single { it.category == category }
+    }
+}
+
+@Serializable
+enum class WireDownloadStatus(
+    val status: RemoteDownloadStatus,
+) {
+    @SerialName("queued")
+    QUEUED(RemoteDownloadStatus.QUEUED),
+
+    @SerialName("running")
+    RUNNING(RemoteDownloadStatus.RUNNING),
+
+    @SerialName("paused")
+    PAUSED(RemoteDownloadStatus.PAUSED),
+
+    @SerialName("verifying")
+    VERIFYING(RemoteDownloadStatus.VERIFYING),
+
+    @SerialName("completed")
+    COMPLETED(RemoteDownloadStatus.COMPLETED),
+
+    @SerialName("failed")
+    FAILED(RemoteDownloadStatus.FAILED),
+    ;
+
+    companion object {
+        fun of(status: RemoteDownloadStatus): WireDownloadStatus = entries.single { it.status == status }
+    }
+}
+
+/** A catalog entry's state: not downloaded, its download's status, or in the library. */
+@Serializable
+enum class WireEntryState {
+    @SerialName("available")
+    AVAILABLE,
+
+    @SerialName("queued")
+    QUEUED,
+
+    @SerialName("running")
+    RUNNING,
+
+    @SerialName("paused")
+    PAUSED,
+
+    @SerialName("verifying")
+    VERIFYING,
+
+    @SerialName("completed")
+    COMPLETED,
+
+    @SerialName("failed")
+    FAILED,
+
+    @SerialName("downloaded")
+    DOWNLOADED,
+    ;
+
+    companion object {
+        fun of(status: RemoteDownloadStatus): WireEntryState = valueOf(status.name)
+    }
+}
+
+/** `download.start`'s `result`. */
+@Serializable
+enum class DownloadStartResultKind {
+    @SerialName("started")
+    STARTED,
+
+    /** Already queued or running; nothing new started. */
+    @SerialName("active")
+    ACTIVE,
+
+    /** Already in the library; nothing started. */
+    @SerialName("downloaded")
+    DOWNLOADED,
 }
 
 @Serializable
@@ -325,6 +444,31 @@ data class PasteRunRequest(
 @SerialName("paste.cancel")
 data object PasteCancelRequest : RequestBody
 
+/** The cached catalog, filtered. Needs an approved session, not the lease. */
+@Serializable
+@SerialName("catalog.list")
+data class CatalogListRequest(
+    val arch: WireArch = WireArch.X86_64,
+    /** Absent: every category. */
+    val category: WireCategory? = null,
+    /** Absent: every distro. */
+    val distroId: String? = null,
+) : RequestBody
+
+/** Answered once the phone has enqueued it (or refused). */
+@Serializable
+@SerialName("download.start")
+data class DownloadStartRequest(
+    val entryId: String,
+) : RequestBody
+
+/** Answered once the phone has cancelled it. */
+@Serializable
+@SerialName("download.cancel")
+data class DownloadCancelRequest(
+    val entryId: String,
+) : RequestBody
+
 // ---- Replies: {id, ok, error?: {code, msg}, ...result fields}. No "t".
 
 @Serializable
@@ -360,6 +504,8 @@ data class ImageView(
     val name: String,
     val sizeBytes: Long,
     val defaultMode: WireLunMode,
+    /** True (else absent) when the image matched the distro's published SHA-256. */
+    val verified: Boolean? = null,
 )
 
 @Serializable
@@ -443,6 +589,58 @@ data class CancelResult(
     val cancelled: Boolean,
 )
 
+@Serializable
+data class CatalogEntryView(
+    val entryId: String,
+    val version: String,
+    val variant: String? = null,
+    val arch: WireArch,
+    val fileName: String,
+    val sizeBytes: Long? = null,
+    val supportedUntil: String? = null,
+    val state: WireEntryState,
+)
+
+@Serializable
+data class CatalogDistroView(
+    val distroId: String,
+    val name: String,
+    val category: WireCategory,
+    /** Wall-clock Unix ms of the last good fetch. */
+    val fetchedAtMs: Long? = null,
+    /** The last refresh's error; [entries] are then the last good ones. */
+    val error: String? = null,
+    val entries: List<CatalogEntryView>,
+)
+
+@Serializable
+data class CatalogResult(
+    val catalogRev: Long,
+    val refreshing: Boolean,
+    /** Some entries didn't fit the reply; narrow it with `arch`/`category`. */
+    val truncated: Boolean,
+    val distros: List<CatalogDistroView>,
+)
+
+@Serializable
+data class DownloadStartResult(
+    val entryId: String,
+    val fileName: String,
+    val result: DownloadStartResultKind,
+)
+
+@Serializable
+data class DownloadView(
+    val entryId: String,
+    val fileName: String,
+    val title: String,
+    val status: WireDownloadStatus,
+    val downloadedBytes: Long,
+    val totalBytes: Long? = null,
+    val verified: Boolean? = null,
+    val error: String? = null,
+)
+
 // ---- Pushes: {"t": "...", ...}, no id.
 
 @Serializable
@@ -499,6 +697,23 @@ data class TakeoverRequestPush(
 @SerialName("lease.takeover_cancelled")
 data class TakeoverCancelledPush(
     val requester: Long,
+) : Push
+
+/** Every download the phone knows (from the phone or the remote), with progress. */
+@Serializable
+@SerialName("downloads")
+data class DownloadsPush(
+    val downloads: List<DownloadView>,
+    /** Some (finished or paused) downloads didn't fit the message. */
+    val truncated: Boolean = false,
+) : Push
+
+/** The cached catalog changed, or a refresh started or ended; `catalog.list` again for the entries. */
+@Serializable
+@SerialName("catalog")
+data class CatalogPush(
+    val catalogRev: Long,
+    val refreshing: Boolean,
 ) : Push
 
 // ---- JSON configuration.

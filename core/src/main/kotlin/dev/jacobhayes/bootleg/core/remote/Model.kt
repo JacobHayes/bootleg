@@ -1,5 +1,7 @@
 package dev.jacobhayes.bootleg.core.remote
 
+import dev.jacobhayes.bootleg.core.catalog.Distro
+import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
@@ -184,6 +186,8 @@ data class RemoteImage(
     val sizeBytes: Long,
     val path: String,
     val defaultMode: LunMode,
+    /** The image matched the distro's published SHA-256 (a `.sha256` sidecar). */
+    val verified: Boolean = false,
 ) {
     companion object {
         private const val IMAGE_ID_HEX_LENGTH = 16
@@ -366,3 +370,91 @@ internal fun sha256Hex(text: String): String =
         .joinToString("") { "%02x".format(it.toInt() and 0xFF) }
 
 enum class JobKind { PASTE, BOOTKEY }
+
+/** One distro of the app's cached catalog (`CatalogRepository`), as the remote sees it. */
+data class CatalogDistroSnapshot(
+    val distro: Distro,
+    val releases: List<Release>,
+    /** Wall-clock Unix ms of the last good fetch; null if never fetched. */
+    val fetchedAtWallMs: Long?,
+    val error: String?,
+)
+
+data class CatalogSnapshot(
+    val distros: List<CatalogDistroSnapshot> = emptyList(),
+    val refreshing: Boolean = false,
+)
+
+enum class RemoteDownloadStatus {
+    QUEUED,
+    RUNNING,
+    PAUSED,
+    VERIFYING,
+    COMPLETED,
+    FAILED,
+    ;
+
+    /** Counts toward [RemoteLimits.DOWNLOAD_ACTIVE_COUNT_MAX]. */
+    val isActive: Boolean get() = this == QUEUED || this == RUNNING || this == VERIFYING
+}
+
+/** One download record (from the phone or the remote), keyed by [fileName] like the app's store. */
+data class RemoteDownload(
+    val fileName: String,
+    val title: String,
+    val status: RemoteDownloadStatus,
+    val downloadedBytes: Long,
+    val totalBytes: Long?,
+    val verified: Boolean,
+    val error: String?,
+) {
+    val entryId: String get() = CatalogEntryIds.idFor(fileName)
+}
+
+/** Catalog entries and their downloads are named by an opaque id of the stored file name (the store's key). */
+object CatalogEntryIds {
+    private const val ENTRY_ID_HEX_LENGTH = 16
+
+    fun idFor(fileName: String): String = sha256Hex("catalog\n$fileName").take(ENTRY_ID_HEX_LENGTH)
+}
+
+sealed interface DownloadOp {
+    data class Start(
+        val release: Release,
+        val distroName: String,
+    ) : DownloadOp
+
+    data class Cancel(
+        val fileName: String,
+    ) : DownloadOp
+}
+
+sealed interface DownloadOutcome {
+    data object Started : DownloadOutcome
+
+    data object AlreadyActive : DownloadOutcome
+
+    data object AlreadyDownloaded : DownloadOutcome
+
+    data class Cancelled(
+        val cancelled: Boolean,
+    ) : DownloadOutcome
+
+    /** [RemoteLimits.DOWNLOAD_ACTIVE_COUNT_MAX] downloads are active, or the download list is full. */
+    data class TooMany(
+        val reason: String,
+    ) : DownloadOutcome
+
+    data class StorageLow(
+        val reason: String,
+    ) : DownloadOutcome
+
+    data class Rejected(
+        val reason: String,
+    ) : DownloadOutcome
+
+    data object TimedOut : DownloadOutcome
+
+    /** Not started: an earlier call (one that timed out) is still running on the download lane. */
+    data object Busy : DownloadOutcome
+}

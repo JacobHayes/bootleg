@@ -1,5 +1,9 @@
 package dev.jacobhayes.bootleg.core.remote
 
+import dev.jacobhayes.bootleg.core.catalog.Arch
+import dev.jacobhayes.bootleg.core.catalog.Category
+import dev.jacobhayes.bootleg.core.catalog.Distro
+import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.hid.KeyUsage
 import dev.jacobhayes.bootleg.core.remote.RemoteHarness.Companion.bool
@@ -62,6 +66,7 @@ class RemoteControllerPropertyTest {
                 ),
             )
         val h = RemoteHarness(clock, approvals, seed = seed, autoDeliverRelease = random.nextBoolean())
+        h.handle(RemoteEvent.CatalogChanged(catalog(clock.wall)))
         val sessionIds = (0 until SESSION_ID_COUNT).map { "s$it" }
         val planIds = ArrayList<JsonElement>()
         val tokenHashes = ArrayList<String>()
@@ -120,8 +125,17 @@ class RemoteControllerPropertyTest {
             sessionId: String = holderOrAny(),
         ) = h.request(sessionId, type, body, epoch, id = "q${usedIds.size}").also { usedIds += "q${usedIds.size}" }
 
+        fun entryId(): String =
+            if (random.nextInt(8) ==
+                0
+            ) {
+                "0123456789abcdef"
+            } else {
+                CatalogEntryIds.idFor(DOWNLOAD_FILE_NAMES[random.nextInt(DOWNLOAD_FILE_NAMES.size)])
+            }
+
         repeat(STEP_COUNT) {
-            when (random.nextInt(32)) {
+            when (random.nextInt(36)) {
                 0, 1 -> {
                     val identity =
                         if (random.nextInt(6) == 0) {
@@ -273,6 +287,51 @@ class RemoteControllerPropertyTest {
                         else -> h.slowSessions.clear()
                     }
                 31 -> request("state.get", epoch = null, sessionId = liveSession())
+                32 -> request(if (random.nextBoolean()) "download.start" else "download.cancel", mapOf("entryId" to str(entryId())))
+                33 -> {
+                    // The phone answers some call, maybe a stale one; the outcome fits the call's kind.
+                    val call = h.downloadCalls.takeIf { it.isNotEmpty() }?.let { it[random.nextInt(it.size)] } ?: return@repeat
+                    val outcome =
+                        if (call.op is DownloadOp.Start) {
+                            listOf(
+                                DownloadOutcome.Started,
+                                DownloadOutcome.AlreadyActive,
+                                DownloadOutcome.StorageLow("x"),
+                                DownloadOutcome.TimedOut,
+                            )[
+                                random.nextInt(4),
+                            ]
+                        } else {
+                            listOf(
+                                DownloadOutcome.Cancelled(random.nextBoolean()),
+                                DownloadOutcome.Busy,
+                                DownloadOutcome.Rejected("x"),
+                            )[random.nextInt(3)]
+                        }
+                    h.handle(RemoteEvent.DownloadResult(call.opId, outcome))
+                }
+                34 ->
+                    h.handle(
+                        RemoteEvent.DownloadsChanged(
+                            DOWNLOAD_FILE_NAMES.filter { random.nextBoolean() }.map {
+                                RemoteDownload(
+                                    it,
+                                    it,
+                                    RemoteDownloadStatus.entries[random.nextInt(6)],
+                                    random.nextInt(1000).toLong(),
+                                    1000,
+                                    false,
+                                    null,
+                                )
+                            },
+                        ),
+                    )
+                35 ->
+                    if (random.nextBoolean()) {
+                        request("catalog.list", epoch = null, sessionId = liveSession())
+                    } else {
+                        h.handle(RemoteEvent.CatalogChanged(catalog(h.clock.wall).copy(refreshing = random.nextBoolean())))
+                    }
             }
         }
     }
@@ -297,6 +356,29 @@ class RemoteControllerPropertyTest {
     }
 
     private companion object {
+        val DOWNLOAD_FILE_NAMES = listOf("netboot.xyz.iso", "debian.iso", "big.iso")
+
+        fun catalog(wallMs: Long) =
+            CatalogSnapshot(
+                listOf(
+                    CatalogDistroSnapshot(
+                        Distro("d", "Distro", Category.RESCUE, "https://example.org"),
+                        DOWNLOAD_FILE_NAMES.map {
+                            Release(
+                                "d",
+                                "1",
+                                Arch.X86_64,
+                                url = "https://example.org/$it",
+                                sha256 = "a".repeat(64),
+                                fileName = it,
+                            )
+                        },
+                        wallMs,
+                        null,
+                    ),
+                ),
+            )
+
         const val ITERATIONS = 200
         const val STEP_COUNT = 300
         const val SESSION_ID_COUNT = 7

@@ -9,11 +9,16 @@ import android.os.SystemClock
 import android.util.Log
 import bootlegremote.Bootlegremote
 import dev.jacobhayes.bootleg.Prefs
+import dev.jacobhayes.bootleg.core.catalog.Release
 import dev.jacobhayes.bootleg.core.remote.AuthStatus
+import dev.jacobhayes.bootleg.core.remote.CatalogSnapshot
+import dev.jacobhayes.bootleg.core.remote.DownloadOutcome
+import dev.jacobhayes.bootleg.core.remote.DownloadPort
 import dev.jacobhayes.bootleg.core.remote.LeaseHolder
 import dev.jacobhayes.bootleg.core.remote.Principal
 import dev.jacobhayes.bootleg.core.remote.RemoteActor
 import dev.jacobhayes.bootleg.core.remote.RemoteClock
+import dev.jacobhayes.bootleg.core.remote.RemoteDownload
 import dev.jacobhayes.bootleg.core.remote.RemoteStatus
 import dev.jacobhayes.bootleg.core.remote.SecureRandomSource
 import dev.jacobhayes.bootleg.hid.HidController
@@ -25,11 +30,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -102,6 +109,21 @@ interface RemoteActions {
 
     /** Re-reads runtime permission state (the screen calls this on resume). */
     fun refreshPermissions()
+}
+
+/** No catalog behind the remote yet: an empty catalog, no downloads, and every start or cancel refused. */
+private object NoRemoteDownloads : DownloadPort {
+    override val catalog: Flow<CatalogSnapshot> = flowOf(CatalogSnapshot())
+    override val downloads: Flow<List<RemoteDownload>> = flowOf(emptyList())
+
+    override suspend fun start(
+        release: Release,
+        distroName: String,
+    ): DownloadOutcome = DownloadOutcome.Rejected("catalog downloads are not available")
+
+    override suspend fun cancel(fileName: String): DownloadOutcome = DownloadOutcome.Rejected("catalog downloads are not available")
+
+    override fun refreshCatalogIfStale() = Unit
 }
 
 /**
@@ -257,8 +279,10 @@ class RemoteManager(
                         approvalStore = FileApprovalStore(directory),
                         pairingStore = FilePairingStore(directory),
                         notifier = { pending -> notifications.showPending(pending) },
+                        downloads = NoRemoteDownloads,
                         scope = actorScope,
                         deviceDispatcher = Dispatchers.IO.limitedParallelism(1),
+                        downloadDispatcher = Dispatchers.IO.limitedParallelism(1),
                         onFatal = { failure -> scope.launch { onFatal(failure) } },
                     )
                 }
