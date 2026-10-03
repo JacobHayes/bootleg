@@ -19,6 +19,10 @@ const MESSAGE_BYTES_MAX = 64 * 1024;
 // paste.prepare text, in UTF-8 bytes.
 const PASTE_TEXT_BYTES_MAX = 64 * 1024;
 const TAKEOVER_TIMEOUT_MS_DEFAULT = 30000;
+const FUNCTION_KEY_COUNT_VISIBLE = 12;
+const FUNCTION_KEY_COUNT_MAX = 24;
+// Close reasons after which reconnecting would only ask the phone for approval again.
+const CLOSE_REASONS_FINAL = new Set(["revoked", "expired", "denied", "unauthorized"]);
 
 const OP_KEY_DOWN = 1, OP_KEY_UP = 2, OP_MOUSE_MOVE = 3, OP_MOUSE_BUTTONS = 4, OP_RELEASE_ALL = 5;
 const MODIFIER_USAGE_MIN = 0xe0;
@@ -28,6 +32,9 @@ const BOOT_VENDORS = [
   ["asus", "ASUS"], ["acer", "Acer"], ["msi", "MSI"], ["gigabyte", "Gigabyte"],
   ["intel_nuc", "Intel NUC"], ["apple_mac", "Apple Mac (Intel)"], ["microsoft_surface", "Microsoft Surface"],
 ];
+
+const MODE_LABELS = { cdrom: "CD-ROM", disk_ro: "Read-only", disk_rw: "Read-write" };
+const STATUS_LABELS = { exported: "Inserted", host_ejected: "Ejected by the computer", user_ejected: "Ejected", failed: "Failed" };
 
 const CHORD_ALIASES = {
   ctrl: "ControlLeft", control: "ControlLeft", shift: "ShiftLeft", alt: "AltLeft", option: "AltLeft",
@@ -52,6 +59,8 @@ const app = {
   pressed: new Set(),
   buttons: 0,
   pastePlanId: null,
+  // LUNs whose plain eject the computer refused: their row offers Force eject.
+  forceEjectLuns: new Set(),
   frames: [],
   frameTokens: FRAMES_PER_SECOND_MAX,
   frameRefillAt: performance.now(),
@@ -138,16 +147,19 @@ function onClosed(socket, event) {
     setBanner("bad", "This page is out of date. Reload it.");
     return;
   }
-  if (event.code === 4401) {
-    if (app.transport === "hotspot") {
-      showPairing("This browser is no longer paired.");
-      return;
-    }
-    setBanner("bad", "Access was revoked on the phone.");
-  } else {
-    const reason = event.reason ? ` (${event.reason})` : "";
-    setBanner("bad", `Disconnected${reason}. Reconnecting…`);
+  if (event.code === 4401 && app.transport === "hotspot") {
+    showPairing("This browser is no longer paired.");
+    return;
   }
+  // A reconnect after a revoke or deny would show up on the phone as a new
+  // approval request, so the page stops here until the user reloads it.
+  if (event.code === 4401 || CLOSE_REASONS_FINAL.has(event.reason)) {
+    const what = event.reason === "denied" ? "This device was denied" : event.reason === "expired" ? "This device's approval expired" : "Access was revoked";
+    setBanner("bad", `${what} on the phone. Reload the page to ask again.`);
+    return;
+  }
+  const reason = event.reason ? ` (${event.reason})` : "";
+  setBanner("bad", `Disconnected${reason}. Reconnecting…`);
   scheduleReconnect();
 }
 
@@ -360,16 +372,28 @@ function renderState() {
   const body = $("slots").querySelector("tbody");
   body.replaceChildren(...slots.map((slot) => {
     const row = document.createElement("tr");
-    for (const text of [String(slot.lun), slot.name || imageNames.get(slot.imageId) || slot.imageId, slot.mode || "", slot.status || ""]) {
+    const name = slot.name || imageNames.get(slot.imageId) || slot.imageId;
+    const mode = MODE_LABELS[slot.mode] || slot.mode || "";
+    const status = STATUS_LABELS[slot.status] || slot.status || "";
+    for (const text of [String(slot.lun), name, mode, status]) {
       const cell = document.createElement("td");
       cell.textContent = text;
       row.append(cell);
     }
+    // Ejecting an ejected slot does nothing on the phone, so offer only the
+    // action that applies.
     const actions = document.createElement("td");
-    const eject = button("Eject", () => act(`Eject LUN ${slot.lun}`, "slot.eject", { lun: slot.lun, force: false }));
-    const reinsert = button("Reinsert", () => act(`Reinsert LUN ${slot.lun}`, "slot.reinsert", { lun: slot.lun }));
-    eject.disabled = reinsert.disabled = !holdsLease();
-    actions.append(eject, " ", reinsert);
+    let action;
+    if (slot.status !== "exported") {
+      app.forceEjectLuns.delete(slot.lun);
+      action = button("Reinsert", () => act(`Reinsert LUN ${slot.lun}`, "slot.reinsert", { lun: slot.lun }));
+    } else if (app.forceEjectLuns.has(slot.lun)) {
+      action = button("Force eject", () => ejectSlot(slot.lun, true));
+    } else {
+      action = button("Eject", () => ejectSlot(slot.lun, false));
+    }
+    action.disabled = !holdsLease();
+    actions.append(action);
     row.append(actions);
     return row;
   }));
@@ -405,6 +429,27 @@ function renderState() {
   $("hid-status").textContent = hid.status || "";
 }
 
+// The computer may hold the medium (macOS keeps it locked even after an
+// unmount): the phone answers device_attention, and the row then offers a
+// forced eject. Eject the volume on the computer first.
+async function ejectSlot(lun, force) {
+  const label = `${force ? "Force eject" : "Eject"} LUN ${lun}`;
+  try {
+    await request("slot.eject", { lun, force });
+    log(`${label}: done`);
+    app.forceEjectLuns.delete(lun);
+    refreshState();
+  } catch (error) {
+    if (!force && error.message.startsWith("device_attention")) {
+      app.forceEjectLuns.add(lun);
+      log(`${label}: the computer is holding the disk. Eject it there first, then use Force eject.`);
+    } else {
+      log(`${label}: ${error.message}`);
+    }
+    render();
+  }
+}
+
 // Sets the expose mode for the selected image: the phone's defaultMode, or
 // the file-name rule only if it sent none.
 function applyDefaultMode() {
@@ -429,6 +474,30 @@ function option(value, label) {
   element.value = value;
   element.textContent = label;
   return element;
+}
+
+// `unsupported` is [{index, codePoint}] (the first 64); `unsupportedCount`
+// is the total.
+function describePastePlan(text, plan) {
+  const characters = [...text].length;
+  const seconds = Math.max(1, Math.ceil((plan.durationMs || 0) / 1000));
+  const skipped = Array.isArray(plan.unsupported) ? plan.unsupported : [];
+  const skippedCount = Number.isInteger(plan.unsupportedCount) ? plan.unsupportedCount : skipped.length;
+  let description = `${characters} characters, about ${seconds}s of typing.`;
+  if (skippedCount > 0) {
+    const shown = [...new Set(skipped.map((entry) => describeCodePoint(entry.codePoint)))].join(" ");
+    description += ` Skips ${skippedCount} it can't type (US layout): ${shown}${skippedCount > skipped.length ? " …" : ""}`;
+  }
+  return description;
+}
+
+function describeCodePoint(codePoint) {
+  if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return "?";
+  const hex = `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+  // Control and invisible characters by number only.
+  return codePoint < 0x20 || (codePoint >= 0x7f && codePoint < 0xa0) || /\p{Cf}|\p{Z}/u.test(String.fromCodePoint(codePoint))
+    ? hex
+    : `${String.fromCodePoint(codePoint)} (${hex})`;
 }
 
 // ---- HID frames -------------------------------------------------------
@@ -628,14 +697,14 @@ function clickButton(bit) {
 // ---- Controls ---------------------------------------------------------
 
 function buildStaticControls() {
-  const fkeys = $("fkeys");
-  for (let number = 1; number <= 12; number++) {
+  // F1–F12 always; F13–F24 in the "More keys" overflow.
+  for (let number = 1; number <= FUNCTION_KEY_COUNT_MAX; number++) {
     const key = document.createElement("button");
     key.type = "button";
     key.className = "needs-lease";
     key.dataset.chord = `F${number}`;
     key.textContent = `F${number}`;
-    fkeys.append(key);
+    $(number <= FUNCTION_KEY_COUNT_VISIBLE ? "fkeys" : "fkeys-extra").append(key);
   }
   $("boot-vendor").replaceChildren(...BOOT_VENDORS.map(([value, label]) => option(value, label)));
 }
@@ -687,7 +756,7 @@ function bindControls() {
   $("hid-apply").addEventListener("click", () =>
     act("Keyboard & mouse", "hid.set", { keyboard: $("hid-keyboard").checked, mouse: $("hid-mouse").checked }));
 
-  for (const container of [$("toolbar"), $("fkeys")]) {
+  for (const container of [$("toolbar"), $("fkeys"), $("fkeys-extra")]) {
     container.addEventListener("click", (event) => {
       const chord = event.target.dataset?.chord;
       if (!chord) return;
@@ -726,9 +795,7 @@ function bindControls() {
     const plan = await act("Prepare paste", "paste.prepare", { text });
     if (!plan) return;
     app.pastePlanId = plan.planId;
-    const unsupported = Array.isArray(plan.unsupported) ? plan.unsupported.join("") : String(plan.unsupported || "");
-    const seconds = Math.ceil((plan.durationMs || 0) / 1000);
-    $("paste-plan").textContent = `${text.length} characters, about ${seconds}s.` + (unsupported && unsupported !== "0" ? ` Can't type: ${unsupported}` : "");
+    $("paste-plan").textContent = describePastePlan(text, plan);
     $("paste-run").hidden = false;
     $("paste-cancel").hidden = false;
   });

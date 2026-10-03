@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>Bootleg Remote</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 <script src="app.js" defer></script>
 </head>
@@ -85,6 +86,10 @@
       <button type="button" class="needs-lease" data-chord="enter">Enter</button>
     </div>
     <div id="fkeys" class="toolbar" aria-label="Function keys"></div>
+    <details id="more-keys" class="more-keys">
+      <summary>More keys</summary>
+      <div id="fkeys-extra" class="toolbar" aria-label="More function keys"></div>
+    </details>
 
     <div id="pad" class="pad" tabindex="0" aria-label="Keyboard and mouse capture area">
       <span id="pad-hint">Click here to capture keyboard and mouse.</span>

@@ -130,6 +130,9 @@ textarea { width: 100%; resize: vertical; }
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .toolbar button { padding: 4px 8px; font-size: 13px; }
+.more-keys { margin-top: 8px; }
+.more-keys summary { cursor: pointer; color: var(--accent); font-size: 13px; width: max-content; }
+.more-keys .toolbar { margin-top: 6px; }
 
 .pad {
   margin-top: 10px;
