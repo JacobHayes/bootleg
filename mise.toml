@@ -56,6 +56,10 @@ run = "bash scripts/check-device-remote.sh"
 description = "L4 web: the phone's web UI in Chrome over the tailnet: pending, approve, RO mount + eject, F24, tab-switch release, paste prepare/cancel, takeover, revoke (needs `mise run deploy`, Chrome and node)"
 run = "bash scripts/check-device-web.sh"
 
+[tasks."check:device:ui"]
+description = "L4 UI: drive the real app through its UI, one small test per behaviour (scripts/e2e-ui.sh; pass test names or globs, --list; results in build/e2e-ui/results.tsv; needs `mise run deploy`)"
+run = "bash scripts/e2e-ui.sh"
+
 [tasks.deploy]
 description = "Install the debug app on the phone and pre-grant root + storage access"
 run = ["./gradlew --console=plain -q :app:installDebug", "sh scripts/grant-root.sh"]
