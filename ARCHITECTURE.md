@@ -103,7 +103,10 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   planned while nothing is linked, and that window ops run only while nothing is linked.
 - **Ejection.** A normal eject writes `file=""`. If the host prevents removal, Bootleg tells the
   user and offers "Force eject" (`forced_eject`). An eject started by the host (`file` becomes
-  empty) is recorded as `HostEjected`, and Bootleg never re-inserts that media on its own. With the
+  empty) is recorded as `HostEjected`, and Bootleg never re-inserts that media on its own.
+  Re-applying an unchanged slot spec keeps the eject; picking the image again in Drives (removing
+  the slot and adding it back, or choosing it as the slot's image) is a re-insert the user asked
+  for, so the app calls `reinsert` for that slot after the apply. With the
   journal idle, an existing LUN whose `file` is empty (and whose `ro`/`cdrom` still match the slot)
   is a host eject even if the HAL has since unbound the UDC or our link was removed; a missing or
   recreated LUN is not. To tell them apart even when a recreated LUN's defaults match (an RW slot),

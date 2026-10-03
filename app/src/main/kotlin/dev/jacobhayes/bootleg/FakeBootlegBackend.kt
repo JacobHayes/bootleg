@@ -47,10 +47,20 @@ class FakeBootlegBackend(
         require(desired.slots.size <= GadgetLimits.LUN_COUNT_MAX) { "too many slots: ${desired.slots.size}" }
         require(desired.slots.map { it.lun } == desired.slots.indices.toList()) { "LUNs must be dense" }
         (rootFlow.value as? RootStatus.Unavailable)?.let { return ApplyResult.Failed("Root unavailable: ${it.reason}") }
+        // Like the real controller: re-applying the same slot spec keeps a host or user eject.
+        val previous = journalFlow.value
         val journal =
             Journal(
                 desired = desired,
-                slotIntents = desired.slots.associate { it.lun to SlotIntent.EXPORTED },
+                slotIntents =
+                    desired.slots.associate { spec ->
+                        val kept =
+                            previous.slotIntents[spec.lun]?.takeIf {
+                                (it == SlotIntent.HOST_EJECTED || it == SlotIntent.USER_EJECTED) &&
+                                    previous.desired.slots.getOrNull(spec.lun) == spec
+                            }
+                        spec.lun to (kept ?: SlotIntent.EXPORTED)
+                    },
                 udc = FAKE_UDC,
             )
         journalFlow.value = journal

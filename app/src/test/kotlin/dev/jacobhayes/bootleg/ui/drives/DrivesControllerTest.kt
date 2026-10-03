@@ -93,6 +93,44 @@ class DrivesControllerTest {
         }
 
     @Test
+    fun `removing an ejected slot and adding the same image back exports it again`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val backend = FakeBootlegBackend()
+            val controller = DrivesController(backend, backgroundScope)
+            controller.addSlot(iso)
+            controller.apply()
+            controller.eject(0, force = false)
+            assertEquals(SlotIntent.USER_EJECTED, backend.journal.value.slotIntents[0])
+
+            controller.removeSlot(0)
+            controller.addSlot(iso)
+            assertTrue(controller.state.value.dirty, "a re-added image is a change to apply")
+            controller.apply()
+
+            assertEquals(listOf(SlotSpec(0, iso, LunMode.CDROM)), backend.journal.value.desired.slots)
+            assertEquals(SlotIntent.EXPORTED, backend.journal.value.slotIntents[0])
+            assertFalse(controller.state.value.dirty)
+        }
+
+    @Test
+    fun `picking the same image again re-inserts a host-ejected slot, other ejected slots stay`() =
+        runTest(UnconfinedTestDispatcher()) {
+            val backend = FakeBootlegBackend()
+            val controller = DrivesController(backend, backgroundScope)
+            controller.addSlot(iso)
+            controller.addSlot(img)
+            controller.apply()
+            controller.eject(0, force = false)
+            controller.eject(1, force = false)
+
+            controller.replaceImage(0, iso)
+            controller.apply()
+
+            assertEquals(SlotIntent.EXPORTED, backend.journal.value.slotIntents[0])
+            assertEquals(SlotIntent.USER_EJECTED, backend.journal.value.slotIntents[1], "an untouched ejected slot stays ejected")
+        }
+
+    @Test
     fun `slot limit is enforced`() =
         runTest(UnconfinedTestDispatcher()) {
             val controller = DrivesController(FakeBootlegBackend(), backgroundScope)

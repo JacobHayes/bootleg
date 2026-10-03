@@ -7,6 +7,7 @@ import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
 import dev.jacobhayes.bootleg.storage.StoragePaths
 import kotlinx.coroutines.CoroutineScope
@@ -18,10 +19,15 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-/** A slot as edited in the UI. [modeOverride] null means Auto (by extension). */
+/**
+ * A slot as edited in the UI. [modeOverride] null means Auto (by extension). [fresh] marks an image
+ * the user (re)picked in this draft: after Apply it is inserted even if the same image was ejected
+ * in that slot before, because the core keeps an eject when the slot spec doesn't change.
+ */
 data class DraftSlot(
     val path: String,
     val modeOverride: LunMode? = null,
+    val fresh: Boolean = false,
 ) {
     val mode: LunMode get() = modeOverride ?: StoragePaths.autoMode(path)
     val displayName: String get() = path.substringAfterLast('/')
@@ -61,14 +67,14 @@ class DrivesController(
 
     fun addSlot(path: String): Boolean {
         if (!canAddSlot) return false
-        editDraft { it + DraftSlot(path) }
+        editDraft { it + DraftSlot(path, fresh = true) }
         return true
     }
 
     fun replaceImage(
         index: Int,
         path: String,
-    ) = editDraft { slots -> slots.mapIndexed { i, slot -> if (i == index) DraftSlot(path) else slot } }
+    ) = editDraft { slots -> slots.mapIndexed { i, slot -> if (i == index) DraftSlot(path, fresh = true) else slot } }
 
     fun setMode(
         index: Int,
@@ -92,8 +98,29 @@ class DrivesController(
     fun apply() =
         run("Applying") {
             val slots = state.value.slots
-            backend.apply(desiredFor(slots, backend.journal.value)).also { draft.value = null }
+            val result = backend.apply(desiredFor(slots, backend.journal.value))
+            draft.value = null
+            reinsertFreshSlots(slots, result) ?: result
         }
+
+    /**
+     * Re-inserts slots the user picked again in this draft that are still ejected after [applied]
+     * (same image as before, so the core kept the eject). Returns the first failure, else the last
+     * re-insert's result, or null when nothing needed it.
+     */
+    private suspend fun reinsertFreshSlots(
+        slots: List<DraftSlot>,
+        applied: ApplyResult,
+    ): ApplyResult? {
+        if (applied !is ApplyResult.Applied && applied !is ApplyResult.Partial) return null
+        var last: ApplyResult? = null
+        for ((lun, slot) in slots.withIndex()) {
+            if (!slot.fresh || backend.journal.value.slotIntents[lun] !in EJECTED_INTENTS) continue
+            last = backend.reinsert(lun)
+            if (last !is ApplyResult.Applied) return last
+        }
+        return last
+    }
 
     /** Adds the image as a new slot and applies straight away (Library's "Expose"). */
     fun expose(path: String): Boolean {
@@ -169,6 +196,8 @@ class DrivesController(
     companion object {
         /** Prefix of the NeedsAttention reason when the host has the medium mounted (EBUSY). */
         const val EJECT_PREVENTED_REASON = DefaultGadgetController.EJECT_PREVENTED_REASON
+
+        private val EJECTED_INTENTS = setOf(SlotIntent.HOST_EJECTED, SlotIntent.USER_EJECTED)
 
         fun slotsOf(journal: Journal): List<DraftSlot> =
             journal.desired.slots.sortedBy { it.lun }.map { spec ->
