@@ -39,6 +39,19 @@ owned_like_store() {
 
 no_leftovers() { ! adb shell ls /sdcard/bootleg/ | grep -qE '\.(partial|zip)$'; }
 
+# find_download_row PATTERN: the file name of the first "Download <file>" button matching PATTERN,
+# swiping up a few times to bring it into view; empty if none shows.
+find_download_row() {
+    local attempt file=""
+    for attempt in 1 2 3; do
+        file=$(ui grep-text "^Download $1\$" | head -1 | sed 's/^Download //' || true)
+        [[ -n $file ]] && break
+        ui swipe-up >/dev/null
+        sleep 0.5
+    done
+    echo "$file"
+}
+
 # download RELEASE_CARD FILE_REGEX: Catalog -> Rescue -> expand card -> Download the first file
 # matching FILE_REGEX -> Downloads view. Sets $file.
 download() {
@@ -49,15 +62,14 @@ download() {
     ui scroll-to "$card" 4
     ui tap "$card"
     sleep 1
-    # Bring the expanded card's rows into view (it may sit at the bottom of the list).
-    ui scroll-to "~Download " 2 || true
-    ui swipe-up
-    file=$(ui grep-text "^Download $pattern\$" | head -1 | sed 's/^Download //' || true)
+    # The Catalog keeps expanded cards across tab switches, so other cards' rows may be open too:
+    # swipe until this card's row shows, and if the tap collapsed an already expanded card, reopen it.
+    file=$(find_download_row "$pattern")
     if [[ -z $file ]]; then
-        # The card was already expanded (the tab kept its state) and the tap collapsed it.
+        ui scroll-to "$card" 4
         ui tap "$card"
         sleep 1
-        file=$(ui grep-text "^Download $pattern\$" | head -1 | sed 's/^Download //' || true)
+        file=$(find_download_row "$pattern")
     fi
     require "$card: a download button matching $pattern" test -n "$file"
     ui tap "Download $file"

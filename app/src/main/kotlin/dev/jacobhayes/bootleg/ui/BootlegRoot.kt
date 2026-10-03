@@ -27,6 +27,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.LifecycleResumeEffect
@@ -67,6 +68,8 @@ fun BootlegRoot(
     val activeDownloads = records.values.count { it.isActive }
     val remoteState by app.remote.state.collectAsState()
     val browse = rememberBrowseForImage(app)
+    // Each tab keeps its rememberSaveable state (Catalog category, expanded cards, scroll) while another is shown.
+    val tabStates = rememberSaveableStateHolder()
 
     Scaffold(
         bottomBar = {
@@ -90,38 +93,48 @@ fun BootlegRoot(
         contentWindowInsets = WindowInsets(0),
     ) { padding ->
         Box(Modifier.padding(padding).consumeWindowInsets(padding).fillMaxSize()) {
-            when (selectedTab) {
-                Tab.DRIVES -> DrivesScreen(app.backend, app.drives, browse)
-                Tab.CONTROL -> {
-                    // The Control tab in the foreground preempts any remote controller.
-                    LifecycleResumeEffect(Unit) {
-                        app.remote.setLocalCapture(true)
-                        onPauseOrDispose { app.remote.setLocalCapture(false) }
-                    }
-                    ControlScreen(app.backend, app.hid)
-                }
-                Tab.LIBRARY ->
-                    LibraryScreen(
-                        app.backend,
-                        app.drives,
-                        app.fileTasks,
-                        app.downloads,
-                        onExposed = { onSelectTab(Tab.DRIVES) },
-                        onShowDownloads = { onSelectTab(Tab.DOWNLOADS) },
-                    )
-                Tab.CATALOG -> CatalogScreen(app.catalog, app.downloads, onShowDownloads = { onSelectTab(Tab.DOWNLOADS) })
-                Tab.DOWNLOADS ->
-                    DownloadsScreen(
-                        app.downloads,
-                        app.prefs.wifiOnlyDownloads
-                            .collectAsState()
-                            .value,
-                        onBack = { onSelectTab(Tab.LIBRARY) },
-                    )
-                Tab.REMOTE -> RemoteRoute(app.remote)
-                Tab.SETTINGS -> SettingsScreen(app.prefs)
-            }
+            tabStates.SaveableStateProvider(selectedTab.name) { TabContent(app, selectedTab, onSelectTab, browse) }
         }
+    }
+}
+
+@Composable
+private fun TabContent(
+    app: BootlegApp,
+    selectedTab: Tab,
+    onSelectTab: (Tab) -> Unit,
+    browse: ((String) -> Unit) -> Unit,
+) {
+    when (selectedTab) {
+        Tab.DRIVES -> DrivesScreen(app.backend, app.drives, browse)
+        Tab.CONTROL -> {
+            // The Control tab in the foreground preempts any remote controller.
+            LifecycleResumeEffect(Unit) {
+                app.remote.setLocalCapture(true)
+                onPauseOrDispose { app.remote.setLocalCapture(false) }
+            }
+            ControlScreen(app.backend, app.hid)
+        }
+        Tab.LIBRARY ->
+            LibraryScreen(
+                app.backend,
+                app.drives,
+                app.fileTasks,
+                app.downloads,
+                onExposed = { onSelectTab(Tab.DRIVES) },
+                onShowDownloads = { onSelectTab(Tab.DOWNLOADS) },
+            )
+        Tab.CATALOG -> CatalogScreen(app.catalog, app.downloads, onShowDownloads = { onSelectTab(Tab.DOWNLOADS) })
+        Tab.DOWNLOADS ->
+            DownloadsScreen(
+                app.downloads,
+                app.prefs.wifiOnlyDownloads
+                    .collectAsState()
+                    .value,
+                onBack = { onSelectTab(Tab.LIBRARY) },
+            )
+        Tab.REMOTE -> RemoteRoute(app.remote)
+        Tab.SETTINGS -> SettingsScreen(app.prefs)
     }
 }
 
