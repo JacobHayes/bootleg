@@ -14,6 +14,7 @@ import dev.jacobhayes.bootleg.BlankImageFormat
 import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.ImageFile
 import dev.jacobhayes.bootleg.RootStatus
+import dev.jacobhayes.bootleg.boot.BootGeneration
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
@@ -74,16 +75,16 @@ class BootlegBackendImpl(
         imagesFlow.value = listed.map { it.toImageFile() }
     }
 
-    override suspend fun apply(desired: Desired): ApplyResult = gadgetCall { it.apply(BootlegJson.encodeToString(desired)) }
+    override suspend fun apply(desired: Desired): ApplyResult = userGadgetCall { it.apply(BootlegJson.encodeToString(desired)) }
 
     override suspend fun eject(
         lun: Int,
         force: Boolean,
-    ): ApplyResult = gadgetCall { it.eject(lun, force) }
+    ): ApplyResult = userGadgetCall { it.eject(lun, force) }
 
-    override suspend fun reinsert(lun: Int): ApplyResult = gadgetCall { it.reinsert(lun) }
+    override suspend fun reinsert(lun: Int): ApplyResult = userGadgetCall { it.reinsert(lun) }
 
-    override suspend fun bootlegOff(): ApplyResult = gadgetCall { it.bootlegOff() }
+    override suspend fun bootlegOff(): ApplyResult = userGadgetCall { it.bootlegOff() }
 
     override suspend fun setHid(spec: HidSpec): ApplyResult {
         // Apply against the freshest journal so the drives the root side holds are kept as they are.
@@ -153,6 +154,12 @@ class BootlegBackendImpl(
             }
         gadgetStateFlow.value = state
         journalFlow.value = journal
+    }
+
+    /** A change someone asked for in this boot: the journal it writes belongs to this boot (see [BootGeneration]). */
+    private suspend fun userGadgetCall(block: (IBootlegRoot) -> String): ApplyResult {
+        withContext(Dispatchers.IO) { BootGeneration.markJournalCurrent(context) }
+        return gadgetCall(block)
     }
 
     private suspend fun gadgetCall(block: (IBootlegRoot) -> String): ApplyResult {

@@ -213,6 +213,12 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   uid. Calls are serialized (the controller isn't thread-safe); image formatting has its own lock
   so it never blocks an eject. A delete takes the image lock and then the gadget lock (never the
   other order), so no apply can export the file between the exported check and the unlink.
+- **Boot.** After a real reboot the boot receiver either restores the journal's exported slots
+  (opt-in) or forgets the journal. Android 15+ also sends BOOT_COMPLETED when an app leaves the
+  force-stopped state, while the kernel still exports its drives, so the receiver compares
+  `Settings.Global.BOOT_COUNT` with the boot count stored when the journal last became current
+  (when a boot is handled, and on every apply, eject, re-insert or Bootleg-off). Equal counts mean
+  the same boot: nothing is restored or torn down. An unknown count is treated as a reboot.
 - With no journal (first start), the root service adopts Bootleg's live exports (`apply` of the
   live state) instead of letting `reconcile` remove them.
 - The journal lives at `/data/adb/bootleg/journal.json` (dir 0700), written temp + fsync + rename +
