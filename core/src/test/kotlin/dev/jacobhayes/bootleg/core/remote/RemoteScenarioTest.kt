@@ -154,7 +154,7 @@ class RemoteScenarioTest {
         runBlocking<Unit> {
             checkAll(500, Arb.byteArray(Arb.int(0..6), Arb.byte())) { bytes ->
                 val decoded = HidFrameCodec.decode(bytes)
-                if (decoded != null) assertArrayEquals(bytes, HidFrameCodec.encode(decoded))
+                if (decoded != null) assertArrayEquals(canonicalFrame(bytes), HidFrameCodec.encode(decoded))
             }
             var index = 0
             checkAll(100, Arb.byteArray(Arb.int(0..6), Arb.byte())) { bytes ->
@@ -267,5 +267,19 @@ class RemoteScenarioTest {
                 .filter { "ok" in it }
         assertEquals(listOf("7", "\"7\""), replies.map { it.getValue("id").toString() })
         assertTrue(replies.all { it.ok })
+    }
+
+    /** [bytes] as the decoder normalizes it: motion and scroll are symmetric, so a -128 byte reads as -127. */
+    private fun canonicalFrame(bytes: ByteArray): ByteArray {
+        val op = HidFrameCodec.opOf(bytes)
+        if (op != HidFrameCodec.OP_MOUSE_MOVE && op != HidFrameCodec.OP_SCROLL) return bytes
+        return bytes.copyOf().also { frame ->
+            for (index in DELTA_BYTE_INDICES) if (frame[index] == Byte.MIN_VALUE) frame[index] = (Byte.MIN_VALUE + 1).toByte()
+        }
+    }
+
+    private companion object {
+        /** The two signed bytes after the 3-byte header of a move or scroll frame. */
+        val DELTA_BYTE_INDICES = 3..4
     }
 }

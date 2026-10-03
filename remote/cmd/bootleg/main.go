@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -30,6 +31,10 @@ const (
 	keyRepeatIntervalMax = 10 * time.Second
 	defaultKeyInterval   = 100 * time.Millisecond
 	cleanupTimeout       = 2 * time.Second
+	scrollDetentsMax     = 100
+	// scrollStepDetentsMax spreads a long scroll over several frames, the
+	// way a wheel turns, rather than one jump.
+	scrollStepDetentsMax = 5
 )
 
 const usageText = `usage: bootleg [flags] <command> [args]
@@ -47,6 +52,9 @@ Commands:
   type <text> | type -           type text (from stdin with -), up to 64 KiB
   key <chord> [--repeat N] [--interval 100ms]
                                  tap a chord such as ctrl+alt+delete, cmd+space, f12
+  scroll <detents> [--horizontal]
+                                 scroll the mouse wheel: positive is up (or right),
+                                 at most 100 detents
   bootkey <vendor> [menu|setup]  mash a firmware boot key while the target powers on
   lease take|takeover|release    take the controller lease and hold it until Ctrl-C
   pair <code>                    pair over the offline hotspot (needs --host)
@@ -70,19 +78,20 @@ Exit codes: 0 ok, 2 usage, 3 auth or pending, 4 lease, 5 device, 6 timeout.
 `
 
 type options struct {
-	host      string
-	tokenFile string
-	timeout   time.Duration
-	takeover  bool
-	wait      bool
-	json      bool
-	lun       int
-	mode      string
-	force     bool
-	repeat    int
-	interval  time.Duration
-	keyboard  bool
-	mouse     bool
+	host       string
+	tokenFile  string
+	timeout    time.Duration
+	takeover   bool
+	wait       bool
+	json       bool
+	lun        int
+	mode       string
+	force      bool
+	repeat     int
+	interval   time.Duration
+	keyboard   bool
+	mouse      bool
+	horizontal bool
 }
 
 type invocation struct {
@@ -140,11 +149,13 @@ func newFlagSet(target *options) *flag.FlagSet {
 	set.DurationVar(&target.interval, "interval", defaultKeyInterval, "")
 	set.BoolVar(&target.keyboard, "keyboard", false, "")
 	set.BoolVar(&target.mouse, "mouse", false, "")
+	set.BoolVar(&target.horizontal, "horizontal", false, "")
 	return set
 }
 
 // parseArgs accepts flags anywhere (before or after the command); "--" ends
-// flags, and a lone "-" is a positional (type -).
+// flags, and a lone "-" or a negative number is a positional (type -,
+// scroll -3).
 func parseArgs(args []string) (*invocation, error) {
 	parsed := &invocation{options: options{host: os.Getenv("BOOTLEG_HOST"), tokenFile: os.Getenv("BOOTLEG_TOKEN_FILE")}}
 	if parsed.host == "" {
@@ -161,7 +172,7 @@ func parseArgs(args []string) (*invocation, error) {
 		if arg == "-h" || arg == "--help" || arg == "-help" {
 			return nil, flag.ErrHelp
 		}
-		if !strings.HasPrefix(arg, "-") || arg == "-" {
+		if !strings.HasPrefix(arg, "-") || arg == "-" || isNegativeNumber(arg) {
 			positionals = append(positionals, arg)
 			continue
 		}
@@ -195,7 +206,7 @@ func parseArgs(args []string) (*invocation, error) {
 
 var commandArgCounts = map[string][2]int{ // min, max positional args
 	"status": {0, 0}, "images": {0, 0}, "mount": {1, 1}, "eject": {1, 1}, "reinsert": {1, 1},
-	"hid": {1, 1}, "type": {1, 1}, "key": {1, 1}, "bootkey": {1, 2}, "lease": {1, 1}, "pair": {1, 1}, "kbd": {0, 0},
+	"hid": {1, 1}, "type": {1, 1}, "key": {1, 1}, "scroll": {1, 1}, "bootkey": {1, 2}, "lease": {1, 1}, "pair": {1, 1}, "kbd": {0, 0},
 }
 
 func validate(parsed *invocation) error {
@@ -236,6 +247,10 @@ func validate(parsed *invocation) error {
 		if _, err := parseChord(parsed.args[0]); err != nil {
 			return err
 		}
+	case "scroll":
+		if _, err := parseScroll(parsed.args[0]); err != nil {
+			return err
+		}
 	case "pair":
 		if !validPairCode(parsed.args[0]) {
 			return errors.New("the pairing code is 6 digits")
@@ -249,6 +264,21 @@ func validate(parsed *invocation) error {
 		}
 	}
 	return nil
+}
+
+// isNegativeNumber lets `scroll -3` pass a negative count as a positional.
+func isNegativeNumber(arg string) bool {
+	_, err := strconv.Atoi(arg)
+	return err == nil && strings.HasPrefix(arg, "-")
+}
+
+// parseScroll reads a signed, non-zero detent count within scrollDetentsMax.
+func parseScroll(text string) (int, error) {
+	detents, err := strconv.Atoi(text)
+	if err != nil || detents == 0 || detents < -scrollDetentsMax || detents > scrollDetentsMax {
+		return 0, fmt.Errorf("scroll takes a non-zero number of detents, -%d to %d", scrollDetentsMax, scrollDetentsMax)
+	}
+	return detents, nil
 }
 
 func validPairCode(code string) bool {

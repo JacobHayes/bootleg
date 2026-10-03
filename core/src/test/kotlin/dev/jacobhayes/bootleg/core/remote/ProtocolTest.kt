@@ -35,6 +35,7 @@ class ProtocolTest {
                         HidFrame.KeyUp(epoch, usage),
                         HidFrame.MouseMove(epoch, delta, -delta),
                         HidFrame.MouseButtons(epoch, (delta and 0x07)),
+                        HidFrame.Scroll(epoch, delta, -delta),
                         HidFrame.ReleaseAll(epoch),
                     )
                 for (frame in frames) {
@@ -65,6 +66,16 @@ class ProtocolTest {
         assertThrows<IllegalArgumentException> { HidFrameCodec.encode(HidFrame.MouseMove(7, -128, 0)) }
         assertThrows<IllegalArgumentException> { HidFrameCodec.encode(HidFrame.MouseMove(7, 0, -128)) }
         assertThrows<IllegalArgumentException> { HidFrameCodec.encode(HidFrame.MouseMove(7, 128, 0)) }
+    }
+
+    @Test
+    fun `scroll frames carry signed wheel and pan, clamping -128`() {
+        assertEquals(HidFrame.Scroll(7, -3, 2), HidFrameCodec.decode(byteArrayOf(0, 7, 6, -3, 2)))
+        assertEquals(HidFrame.Scroll(7, -127, 127), HidFrameCodec.decode(byteArrayOf(0, 7, 6, -128, 127)))
+        assertArrayEquals(byteArrayOf(0, 9, 6, 1, -1), HidFrameCodec.encode(HidFrame.Scroll(9, 1, -1)))
+        assertNull(HidFrameCodec.decode(byteArrayOf(0, 7, 6, 1)))
+        assertThrows<IllegalArgumentException> { HidFrameCodec.encode(HidFrame.Scroll(7, -128, 0)) }
+        assertThrows<IllegalArgumentException> { HidFrameCodec.encode(HidFrame.Scroll(7, 0, 128)) }
     }
 
     @Test

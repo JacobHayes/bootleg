@@ -613,6 +613,7 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   - `02 uu` key up.
   - `03 dx dy` mouse move (int8).
   - `04 bb` mouse buttons (low 3 bits).
+  - `06 wheel pan` scroll (int8 each); ignored while the mouse uses the compatible layout.
   - `05` release-all. It's coalesced and exempt from rate limits, for the lease holder only.
   - Limits: 200 frames/s, paste ≤ 64 KiB and ≤ 5 min, boot keys within BootKeyMasher limits.
 - **Connections:** at most 8, with at most 4 pending.

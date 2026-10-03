@@ -138,7 +138,7 @@ when the request is admitted and again in the same actor step that dispatches it
 | `slots.apply` | `slots: [{lun, imageId, mode?}]`, `ifRev` | M | `slotFailures` (deferred) |
 | `slot.eject` | `lun`, `force`? (false), `ifRev`? | M | `slotFailures` (deferred) |
 | `slot.reinsert` | `lun`, `ifRev`? | M | `slotFailures` (deferred) |
-| `hid.set` | `keyboard`, `mouse`, `ifRev`? | M | `slotFailures` (deferred) |
+| `hid.set` | `keyboard`, `mouse`, `ifRev`? | M | `slotFailures` (deferred); the mouse layout stays the phone's setting |
 | `bootkey.run` | `vendor`, `action`, `keyIndex`? (0), `durationMs`? (20000) | M | `durationMs` (when the keys finish) |
 | `bootkey.cancel` | — | M | `cancelled` |
 | `paste.prepare` | `text` | M | `planId`, `unsupported`, `unsupportedCount`, `durationMs` |
@@ -234,12 +234,14 @@ State = {rev: int, slots: [Slot], images: [Image], hid: Hid, lease: Lease}
 Slot  = {lun: int, imageId: string, name: string, mode: "cdrom"|"disk_ro"|"disk_rw",
          status: "exported"|"host_ejected"|"user_ejected"|"failed"}
 Image = {imageId: string, name: string, sizeBytes: int, defaultMode: "cdrom"|"disk_ro"|"disk_rw"}
-Hid   = {keyboard: bool, mouse: bool, status?: "release_pending",
+Hid   = {keyboard: bool, mouse: bool, wheel: bool, status?: "release_pending",
          link?: "stopped"|"connecting"|"open"|"reconnecting"|"failed"|"restart_required"}
 ```
 
 `imageId` is opaque (16 hex characters), stable for a path; a slot exposing a file outside the
-image library still has one, so `slots.apply` can keep it. `hid.status` is `release_pending` once
+image library still has one, so `slots.apply` can keep it. `hid.wheel` is true when the mouse is on with the scroll-wheel layout
+(false with the phone's "Compatible mouse (no wheel)" setting, or when an older phone omits it):
+clients send `06` frames only when it is true. `hid.status` is `release_pending` once
 release-all retries have failed for 60 s; input is refused until the HID node reopens or HID is
 turned off. `hid.link` (present while the keyboard or mouse is on) is the phone's HID session:
 `stopped` until input opens it, `reconnecting` while the phone reopens its devices (after a USB
@@ -286,6 +288,7 @@ closes the session (`malformed`).
 | `03` | 5 | `dx dy` (int8) | Relative mouse move; senders never emit -128, receivers clamp it to -127; `0 0` is ignored. |
 | `04` | 4 | `bb` | Mouse buttons: bit 0 left, 1 right, 2 middle; other bits → malformed. |
 | `05` | 3 | — | Release all keys and buttons. Holder only, coalesced, exempt from the rate limit. |
+| `06` | 5 | `wheel pan` (int8) | Scroll: `wheel` > 0 scrolls up, `pan` > 0 scrolls right, in detents. Same -128 rule as `03`; `0 0` is ignored. Ignored (not malformed) while the mouse is off or `hid.wheel` is false. No held state, so release-all is unaffected. Counts toward the frame rate limit. |
 
 Frames from a session that isn't the holder, or with another epoch, are dropped and trigger a
 `lease` push to that session. At most 200 frames per second per session (Go closes with

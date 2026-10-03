@@ -78,6 +78,8 @@ func dispatch(ctx context.Context, call *invocation) error {
 			return withLease(ctx, call, c, func() error { return typeCommand(ctx, call, c) })
 		case "key":
 			return withLease(ctx, call, c, func() error { return keyCommand(ctx, call, c) })
+		case "scroll":
+			return withLease(ctx, call, c, func() error { return scrollCommand(ctx, call, c) })
 		case "bootkey":
 			return withLease(ctx, call, c, func() error { return bootkeyCommand(ctx, call, c) })
 		case "lease":
@@ -187,7 +189,11 @@ func statusCommand(ctx context.Context, call *invocation, c *client) error {
 	}
 	fmt.Fprintf(call.stdout, "Session %d, %s, over %s\n", c.sessionID(), c.currentAuth(), call.host)
 	fmt.Fprintf(call.stdout, "Lease: %s\n", describeLease(state.Lease, c.sessionID()))
-	fmt.Fprintf(call.stdout, "HID: keyboard %s, mouse %s%s\n", onOff(state.Hid.Keyboard), onOff(state.Hid.Mouse), suffix(hidStatus(state.Hid)))
+	mouse := onOff(state.Hid.Mouse)
+	if state.Hid.Mouse && !state.Hid.Wheel {
+		mouse += " (no wheel)"
+	}
+	fmt.Fprintf(call.stdout, "HID: keyboard %s, mouse %s%s\n", onOff(state.Hid.Keyboard), mouse, suffix(hidStatus(state.Hid)))
 	if len(state.Slots) == 0 {
 		fmt.Fprintln(call.stdout, "Disks: none")
 	}
@@ -511,6 +517,44 @@ func keyCommand(ctx context.Context, call *invocation, c *client) error {
 			}
 		}
 		if err := sendChord(ctx, c, pace, keys); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// scrollCommand turns the wheel (or pans) in steps of at most
+// scrollStepDetentsMax. Scrolling holds nothing, so there is nothing to
+// release afterwards.
+func scrollCommand(ctx context.Context, call *invocation, c *client) error {
+	remaining, err := parseScroll(call.args[0])
+	if err != nil {
+		return usageErrorf("%v", err)
+	}
+	state, _, err := c.fetchState(ctx)
+	if err != nil {
+		return err
+	}
+	if !state.Hid.Mouse {
+		return &deviceError{errors.New("the mouse is off; run bootleg hid on")}
+	}
+	if !state.Hid.Wheel {
+		return &deviceError{errors.New("the phone's mouse has no scroll wheel (\"Compatible mouse\" is on in its Settings, or the app is too old)")}
+	}
+	pace := newPacer()
+	for remaining != 0 {
+		step := max(-scrollStepDetentsMax, min(scrollStepDetentsMax, remaining))
+		remaining -= step
+		frame := protocol.Frame{Epoch: c.currentLease().Epoch, Op: protocol.OpScroll}
+		if call.horizontal {
+			frame.Pan = int8(step)
+		} else {
+			frame.Wheel = int8(step)
+		}
+		if err := pace.wait(ctx); err != nil {
+			return err
+		}
+		if err := c.frame(ctx, frame); err != nil {
 			return err
 		}
 	}

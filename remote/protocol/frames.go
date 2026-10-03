@@ -15,6 +15,7 @@ const (
 	OpMouseMove    FrameOp = 0x03 // dx int8, dy int8
 	OpMouseButtons FrameOp = 0x04 // buttons (low 3 bits)
 	OpReleaseAll   FrameOp = 0x05
+	OpScroll       FrameOp = 0x06 // wheel int8 (+ up), pan int8 (+ right)
 )
 
 const (
@@ -32,7 +33,7 @@ func FrameLength(op FrameOp) int {
 	switch op {
 	case OpKeyDown, OpKeyUp, OpMouseButtons:
 		return frameHeaderBytes + 1
-	case OpMouseMove:
+	case OpMouseMove, OpScroll:
 		return frameHeaderBytes + 2
 	case OpReleaseAll:
 		return frameHeaderBytes
@@ -47,10 +48,12 @@ type Frame struct {
 	DeltaX  int8 // mouse move
 	DeltaY  int8
 	Buttons byte // mouse buttons
+	Wheel   int8 // scroll
+	Pan     int8
 }
 
-// MouseDeltaMin is the smallest mouse delta: -128 is clamped to -127 on
-// decode and encode, as Kotlin does, so a move is symmetric.
+// MouseDeltaMin is the smallest mouse delta (motion and scroll): -128 is
+// clamped to -127 on decode and encode, as Kotlin does, so it is symmetric.
 const MouseDeltaMin = -127
 
 func clampDelta(delta int8) int8 {
@@ -81,6 +84,8 @@ func DecodeFrame(data []byte) (Frame, error) {
 		}
 	case OpMouseMove:
 		frame.DeltaX, frame.DeltaY = clampDelta(int8(data[3])), clampDelta(int8(data[4]))
+	case OpScroll:
+		frame.Wheel, frame.Pan = clampDelta(int8(data[3])), clampDelta(int8(data[4]))
 	case OpMouseButtons:
 		frame.Buttons = data[3]
 		if frame.Buttons&^MouseButtonsMask != 0 {
@@ -105,6 +110,8 @@ func (f Frame) Encode() []byte {
 		data[3] = f.Usage
 	case OpMouseMove:
 		data[3], data[4] = byte(clampDelta(f.DeltaX)), byte(clampDelta(f.DeltaY))
+	case OpScroll:
+		data[3], data[4] = byte(clampDelta(f.Wheel)), byte(clampDelta(f.Pan))
 	case OpMouseButtons:
 		data[3] = f.Buttons
 	}

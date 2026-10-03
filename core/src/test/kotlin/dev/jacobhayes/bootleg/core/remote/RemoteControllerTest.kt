@@ -2,6 +2,7 @@ package dev.jacobhayes.bootleg.core.remote
 
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.KeyUsage
@@ -321,6 +322,18 @@ class RemoteControllerTest {
         }
 
         @Test
+        fun `hid set keeps the phone's mouse layout`() {
+            h.setDevice(h.device.copy(hid = HidSpec(keyboard = true, mouse = true, mouseLayout = MouseLayout.BOOT)))
+            h.connect("s1")
+            val epoch = h.take("s1")
+            assertNull(h.request("s1", "hid.set", mapOf("keyboard" to bool(false), "mouse" to bool(true)), epoch))
+            assertEquals(
+                DeviceOp.SetHid(HidSpec(keyboard = false, mouse = true, mouseLayout = MouseLayout.BOOT)),
+                h.deviceCalls.single().op,
+            )
+        }
+
+        @Test
         fun `release frees the lease and bumps the epoch`() {
             h.connect("s1")
             val epoch = h.take("s1")
@@ -614,6 +627,43 @@ class RemoteControllerTest {
             )
             h.frame("s1", HidFrame.MouseMove(epoch, 0, 0))
             assertEquals(2, h.hidHost.sent.size)
+        }
+
+        @Test
+        fun `scroll frames send a wheel report that keeps the held buttons`() {
+            h.connect("s1")
+            val epoch = h.take("s1")
+            h.frame("s1", HidFrame.MouseButtons(epoch, 0b001))
+            h.frame("s1", HidFrame.Scroll(epoch, -3, 2))
+            assertEquals(
+                MouseReport(0b001, wheel = -3, pan = 2),
+                MouseReport.decode(
+                    h.hidHost.sent
+                        .last()
+                        .report,
+                ),
+            )
+            h.frame("s1", HidFrame.Scroll(epoch, 0, 0))
+            assertEquals(2, h.hidHost.sent.size)
+            assertEquals(true, hidBooleanField("s1", "wheel"))
+        }
+
+        @Test
+        fun `scroll frames are ignored, not malformed, with the compatible mouse or the mouse off`() {
+            h.connect("s1")
+            val epoch = h.take("s1")
+            for (hid in listOf(
+                HidSpec(keyboard = true, mouse = true, mouseLayout = MouseLayout.BOOT),
+                HidSpec(keyboard = true, mouse = false),
+            )) {
+                h.setDevice(h.device.copy(hid = hid))
+                h.frame("s1", HidFrame.Scroll(epoch, 1, 0))
+                assertTrue(h.hidHost.sent.isEmpty())
+                assertEquals(false, hidBooleanField("s1", "wheel"))
+            }
+            // The session is still open: a later frame still works.
+            h.down("s1", KeyUsage.A)
+            assertEquals(listOf(HidKind.KEYBOARD), h.hidHost.sent.map { it.kind })
         }
 
         @Test
@@ -1112,6 +1162,17 @@ class RemoteControllerTest {
             .jsonObject[field]
             ?.jsonPrimitive
             ?.content
+
+    private fun hidBooleanField(
+        name: String,
+        field: String,
+    ): Boolean? =
+        checkNotNull(h.request(name, "state.get"))["state"]!!
+            .jsonObject
+            .getValue("hid")
+            .jsonObject[field]
+            ?.jsonPrimitive
+            ?.boolean
 
     private fun rev(): Long = checkNotNull(h.request("s1", "state.get"))["state"]!!.jsonObject.long("rev")
 }

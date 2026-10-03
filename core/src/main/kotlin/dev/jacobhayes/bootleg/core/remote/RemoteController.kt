@@ -2,8 +2,8 @@ package dev.jacobhayes.bootleg.core.remote
 
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
-import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
 import dev.jacobhayes.bootleg.core.hid.BootKey
 import dev.jacobhayes.bootleg.core.hid.BootKeyMasher
@@ -443,7 +443,8 @@ class RemoteController(
                 }
             is HidSetRequest ->
                 admit(session, epoch) ?: admitDevice(body.ifRev)
-                    ?: startDeviceCall(session, id, DeviceOp.SetHid(HidSpec(body.keyboard, body.mouse)))
+                    // The mouse layout is a phone setting; remote only turns the functions on and off.
+                    ?: startDeviceCall(session, id, DeviceOp.SetHid(device.hid.copy(keyboard = body.keyboard, mouse = body.mouse)))
             is BootKeyRunRequest -> admit(session, epoch) ?: onBootKeyRun(session, id, body)
             is BootKeyCancelRequest -> admit(session, epoch) ?: onJobCancel(JobKind.BOOTKEY)
             is PastePrepareRequest -> admit(session, epoch) ?: onPastePrepare(session, body.text)
@@ -930,6 +931,11 @@ class RemoteController(
                 held.buttonBits = frame.buttonBits
                 sendHid(session.id, HidKind.MOUSE, MouseReport(held.buttonBits).encode())
             }
+            is HidFrame.Scroll -> {
+                // Not malformed: the client may not have seen the layout change yet.
+                if (!device.hid.mouse || device.hid.mouseLayout != MouseLayout.WHEEL || (frame.wheel == 0 && frame.pan == 0)) return
+                sendHid(session.id, HidKind.MOUSE, MouseReport.scroll(held.buttonBits, frame.wheel, frame.pan).encode())
+            }
             is HidFrame.ReleaseAll -> error("handled above")
         }
     }
@@ -1322,6 +1328,7 @@ class RemoteController(
                 HidView(
                     device.hid.keyboard,
                     device.hid.mouse,
+                    device.hid.mouse && device.hid.mouseLayout == MouseLayout.WHEEL,
                     if (barrier?.pendingReported ==
                         true
                     ) {

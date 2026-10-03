@@ -13,6 +13,7 @@ func TestDecodeFrameExactLengths(t *testing.T) {
 		"mouse move":    {0xFF, 0xFF, 0x03, 0x81, 0x7F},
 		"mouse buttons": {0x00, 0x01, 0x04, 0x07},
 		"release all":   {0x00, 0x01, 0x05},
+		"scroll":        {0x00, 0x01, 0x06, 0xFD, 0x02},
 	}
 	for name, data := range valid {
 		frame, err := DecodeFrame(data)
@@ -31,6 +32,10 @@ func TestDecodeFrameExactLengths(t *testing.T) {
 	if encoded := (Frame{Op: OpMouseMove, DeltaX: -128, DeltaY: -128}).Encode(); !bytes.Equal(encoded[3:], []byte{0x81, 0x81}) {
 		t.Errorf("encoded -128 as %x, want clamped to 81 81", encoded)
 	}
+	scroll, _ := DecodeFrame([]byte{0x00, 0x07, 0x06, 0x80, 0x05})
+	if scroll.Wheel != -127 || scroll.Pan != 5 {
+		t.Errorf("decoded %+v; scroll -128 must clamp to -127", scroll)
+	}
 
 	invalid := map[string][]byte{
 		"empty":              {},
@@ -42,7 +47,9 @@ func TestDecodeFrameExactLengths(t *testing.T) {
 		"move long":          {0x00, 0x01, 0x03, 0x01, 0x01, 0x01},
 		"buttons long":       {0x00, 0x01, 0x04, 0x01, 0x00},
 		"release all long":   {0x00, 0x01, 0x05, 0x00},
-		"unknown op":         {0x00, 0x01, 0x06},
+		"unknown op":         {0x00, 0x01, 0x07},
+		"scroll short":       {0x00, 0x01, 0x06, 0x01},
+		"scroll long":        {0x00, 0x01, 0x06, 0x01, 0x01, 0x01},
 		"op zero":            {0x00, 0x01, 0x00, 0x04},
 		"usage error code":   {0x00, 0x01, 0x01, 0x01},
 		"usage reserved":     {0x00, 0x01, 0x01, 0xE8},

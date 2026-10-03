@@ -355,6 +355,8 @@ data class ImageView(
 data class HidView(
     val keyboard: Boolean,
     val mouse: Boolean,
+    /** The mouse is on with the scroll-wheel layout, so scroll frames work. */
+    val wheel: Boolean,
     /** [HID_STATUS_RELEASE_PENDING] once release-all hasn't reached the host for 60 s; input is refused. */
     val status: String? = null,
     /** The phone's HID session ([HidLinkStatus.wireName]) while the keyboard or mouse is on. */
@@ -556,6 +558,13 @@ sealed interface HidFrame {
         val buttonBits: Int,
     ) : HidFrame
 
+    /** Detents: [wheel] > 0 scrolls up, [pan] > 0 scrolls right. */
+    data class Scroll(
+        override val epoch: Int,
+        val wheel: Int,
+        val pan: Int,
+    ) : HidFrame
+
     data class ReleaseAll(
         override val epoch: Int,
     ) : HidFrame
@@ -567,6 +576,7 @@ object HidFrameCodec {
     const val OP_MOUSE_MOVE = 0x03
     const val OP_MOUSE_BUTTONS = 0x04
     const val OP_RELEASE_ALL = 0x05
+    const val OP_SCROLL = 0x06
     const val KEY_USAGE_ID_MIN = 0x04
     const val KEY_USAGE_ID_MAX = 0xE7
     private const val HEADER_SIZE_BYTES = 3
@@ -583,6 +593,7 @@ object HidFrameCodec {
             OP_MOUSE_MOVE to 5,
             OP_MOUSE_BUTTONS to 4,
             OP_RELEASE_ALL to 3,
+            OP_SCROLL to 5,
         )
 
     /** Op byte of a frame, or null if it has no header. Used to route release-all onto the priority lane. */
@@ -602,6 +613,7 @@ object HidFrameCodec {
                 if (bits and BUTTON_BITS_MASK.inv() != 0) null else HidFrame.MouseButtons(epoch, bits)
             }
             OP_RELEASE_ALL -> HidFrame.ReleaseAll(epoch)
+            OP_SCROLL -> HidFrame.Scroll(epoch, mouseDeltaOf(frame[3]), mouseDeltaOf(frame[4]))
             else -> null
         }
     }
@@ -623,12 +635,18 @@ object HidFrameCodec {
                     require(frame.buttonBits in 0..BUTTON_BITS_MASK)
                     byteArrayOf(OP_MOUSE_BUTTONS.toByte(), frame.buttonBits.toByte())
                 }
+                is HidFrame.Scroll -> {
+                    require(frame.wheel in MOUSE_DELTA_RANGE && frame.pan in MOUSE_DELTA_RANGE) {
+                        "scroll outside $MOUSE_DELTA_RANGE: ${frame.wheel}, ${frame.pan}"
+                    }
+                    byteArrayOf(OP_SCROLL.toByte(), frame.wheel.toByte(), frame.pan.toByte())
+                }
                 is HidFrame.ReleaseAll -> byteArrayOf(OP_RELEASE_ALL.toByte())
             }
         return header + body
     }
 
-    /** HID mouse reports are symmetric (-127..127), so -128 is clamped. */
+    /** HID mouse reports (motion and scroll) are symmetric (-127..127), so -128 is clamped. */
     private fun mouseDeltaOf(byte: Byte): Int = byte.toInt().coerceAtLeast(MOUSE_DELTA_RANGE.first)
 
     private fun usageIdOf(byte: Byte): Int? = (byte.toInt() and 0xFF).takeIf { it in KEY_USAGE_ID_MIN..KEY_USAGE_ID_MAX }

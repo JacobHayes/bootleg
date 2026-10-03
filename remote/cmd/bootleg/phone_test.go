@@ -26,6 +26,8 @@ type fakePhone struct {
 	epoch    uint16
 	sessions map[int64]bool
 	frames   [][]byte
+	// wheel is the phone's mouse layout: false means "Compatible mouse".
+	wheel    bool
 	requests []map[string]any
 	pasted   []string
 	// takeover is the pending lease.takeover, if any.
@@ -215,6 +217,7 @@ func (p *fakePhone) Command(id int64, raw string) {
 	case protocol.TypeHidSet:
 		p.state.Hid.Keyboard, _ = message["keyboard"].(bool)
 		p.state.Hid.Mouse, _ = message["mouse"].(bool)
+		p.state.Hid.Wheel = p.state.Hid.Mouse && p.wheel
 		reply(nil)
 	case protocol.TypePastePrepare:
 		text, _ := message["text"].(string)

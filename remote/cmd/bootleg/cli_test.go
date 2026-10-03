@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -59,6 +60,10 @@ func TestParseArgs(t *testing.T) {
 		{"key", "a", "--repeat", "0"},
 		{"key", "a", "--repeat", "101"},
 		{"key", "a", "--interval", "1ms"},
+		{"scroll", "0"},
+		{"scroll", "101"},
+		{"scroll", "-101"},
+		{"scroll", "up"},
 		{"mount", "x", "--lun", "8"},
 		{"mount", "x", "--mode", "floppy"},
 		{"pair", "12345", "--host", "192.168.49.1:8080"},
@@ -307,6 +312,43 @@ func TestCLIStatusImagesMountOverHotspot(t *testing.T) {
 	code, stdout, _ = phone.run(t, "", "status", "--json")
 	if code != exitOK || !strings.Contains(stdout, `"imageId": "img-debian"`) {
 		t.Fatalf("status --json %d %s", code, stdout)
+	}
+}
+
+func TestCLIScroll(t *testing.T) {
+	phone := startPhone(t, transport.TransportHotspot)
+	phone.phone.read(func(p *fakePhone) { p.wheel = true })
+	if code, _, stderr := phone.run(t, "", "scroll", "3"); code != exitDevice || !strings.Contains(stderr, "mouse is off") {
+		t.Fatalf("scroll with the mouse off: %d %s", code, stderr)
+	}
+	if code, _, stderr := phone.run(t, "", "hid", "on"); code != exitOK {
+		t.Fatalf("hid on: %d %s", code, stderr)
+	}
+	if code, _, stderr := phone.run(t, "", "scroll", "-12"); code != exitOK {
+		t.Fatalf("scroll: %d %s", code, stderr)
+	}
+	if code, _, stderr := phone.run(t, "", "scroll", "2", "--horizontal"); code != exitOK {
+		t.Fatalf("scroll --horizontal: %d %s", code, stderr)
+	}
+	var wheel, pan []int8
+	for _, data := range phone.frames() {
+		frame, err := protocol.DecodeFrame(data)
+		if err != nil || frame.Op != protocol.OpScroll {
+			t.Fatalf("frame %x: %v", data, err)
+		}
+		if frame.Wheel != 0 {
+			wheel = append(wheel, frame.Wheel)
+		}
+		if frame.Pan != 0 {
+			pan = append(pan, frame.Pan)
+		}
+	}
+	if fmt.Sprint(wheel) != "[-5 -5 -2]" || fmt.Sprint(pan) != "[2]" {
+		t.Fatalf("wheel %v pan %v", wheel, pan)
+	}
+	phone.phone.read(func(p *fakePhone) { p.wheel, p.state.Hid.Wheel = false, false })
+	if code, _, stderr := phone.run(t, "", "scroll", "1"); code != exitDevice || !strings.Contains(stderr, "no scroll wheel") {
+		t.Fatalf("scroll without a wheel: %d %s", code, stderr)
 	}
 }
 

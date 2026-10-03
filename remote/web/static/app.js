@@ -14,6 +14,14 @@ const MOUSE_DELTA_MAX = 127;
 const LUN_COUNT_MAX = 8;
 const TAP_MOVE_PX_MAX = 4;
 const TAP_DURATION_MS_MAX = 250;
+// Wheel events: pixels per detent (browsers report ~100 px per notch), and
+// detents per line or page for the other delta modes. Two-finger touch drags
+// scroll one detent per TOUCH_SCROLL_PX_PER_DETENT of centroid travel.
+const WHEEL_PX_PER_DETENT = 100;
+const WHEEL_DETENTS_PER_LINE = 1 / 3;
+const WHEEL_DETENTS_PER_PAGE = 10;
+const TOUCH_SCROLL_PX_PER_DETENT = 20;
+const SCROLL_DETENTS_MAX = 127;
 // One WebSocket text message (protocol.MessageBytesMax), counted in UTF-8.
 const MESSAGE_BYTES_MAX = 64 * 1024;
 // paste.prepare text, in UTF-8 bytes.
@@ -24,7 +32,7 @@ const FUNCTION_KEY_COUNT_MAX = 24;
 // Close reasons after which reconnecting would only ask the phone for approval again.
 const CLOSE_REASONS_FINAL = new Set(["revoked", "expired", "denied", "unauthorized"]);
 
-const OP_KEY_DOWN = 1, OP_KEY_UP = 2, OP_MOUSE_MOVE = 3, OP_MOUSE_BUTTONS = 4, OP_RELEASE_ALL = 5;
+const OP_KEY_DOWN = 1, OP_KEY_UP = 2, OP_MOUSE_MOVE = 3, OP_MOUSE_BUTTONS = 4, OP_RELEASE_ALL = 5, OP_SCROLL = 6;
 const MODIFIER_USAGE_MIN = 0xe0;
 
 const BOOT_VENDORS = [
@@ -68,6 +76,12 @@ const app = {
   moveX: 0,
   moveY: 0,
   moveScheduled: false,
+  // Pending scroll in detents (fractional); wheel + is up, pan + is right.
+  scrollWheel: 0,
+  scrollPan: 0,
+  scrollScheduled: false,
+  // Touch pointers on the pad (id → {x, y}); two of them scroll.
+  touches: new Map(),
   pointerLocked: false,
   drag: null,
   // The pending lease.takeover_request: { requester, name, timer }.
@@ -357,8 +371,9 @@ function render() {
   $("lease-takeover").disabled = app.lease.holder === null || holdsLease() || app.lease.local;
   $("lease-release").disabled = !holdsLease();
   for (const element of document.querySelectorAll(".needs-lease")) element.disabled = !holdsLease();
+  const scrollHint = canScroll() ? " Scroll with the wheel or two fingers." : "";
   $("pad-hint").textContent = holdsLease()
-    ? (app.pointerLocked ? "Captured. Press Esc to let go of the mouse." : "Click here to capture keyboard and mouse.")
+    ? (app.pointerLocked ? "Captured. Press Esc to let go of the mouse." : "Click here to capture keyboard and mouse.") + scrollHint
     : "Take control to type or move the mouse.";
   renderState();
 }
@@ -507,7 +522,7 @@ function encodeFrame(op, first, second) {
   const epoch = app.lease.epoch & 0xffff;
   const head = [epoch >> 8, epoch & 0xff, op];
   if (op === OP_KEY_DOWN || op === OP_KEY_UP || op === OP_MOUSE_BUTTONS) head.push(first & 0xff);
-  if (op === OP_MOUSE_MOVE) head.push(first & 0xff, second & 0xff);
+  if (op === OP_MOUSE_MOVE || op === OP_SCROLL) head.push(first & 0xff, second & 0xff);
   return new Uint8Array(head);
 }
 
@@ -545,6 +560,7 @@ function releaseAll(why) {
   app.pressed.clear();
   app.buttons = 0;
   app.moveX = app.moveY = 0;
+  app.scrollWheel = app.scrollPan = 0;
   sendFrame(OP_RELEASE_ALL);
   if (why) log(`Released all keys (${why}).`);
 }
@@ -565,6 +581,39 @@ function queueMove(dx, dy) {
       sendFrame(OP_MOUSE_MOVE, stepX, stepY);
     }
   });
+}
+
+// The phone's mouse takes scroll frames only with its wheel layout (not the
+// "Compatible mouse" setting); older phones don't say, and get none.
+function canScroll() {
+  return holdsLease() && !!(app.state && app.state.hid && app.state.hid.wheel);
+}
+
+// Whole detents go out (clamped per frame); the fraction waits for more.
+function queueScroll(wheel, pan) {
+  if (!canScroll()) return;
+  // Bounded while waiting for the frame: at most one frame's worth plus the fraction.
+  const pendingMax = SCROLL_DETENTS_MAX + 1;
+  app.scrollWheel = Math.max(-pendingMax, Math.min(pendingMax, app.scrollWheel + wheel));
+  app.scrollPan = Math.max(-pendingMax, Math.min(pendingMax, app.scrollPan + pan));
+  if (app.scrollScheduled) return;
+  app.scrollScheduled = true;
+  requestAnimationFrame(() => {
+    app.scrollScheduled = false;
+    const stepWheel = Math.max(-SCROLL_DETENTS_MAX, Math.min(SCROLL_DETENTS_MAX, Math.trunc(app.scrollWheel)));
+    const stepPan = Math.max(-SCROLL_DETENTS_MAX, Math.min(SCROLL_DETENTS_MAX, Math.trunc(app.scrollPan)));
+    if (stepWheel === 0 && stepPan === 0) return;
+    // A burst beyond one frame's range is dropped, not queued.
+    app.scrollWheel = Math.max(-1, Math.min(1, app.scrollWheel - stepWheel));
+    app.scrollPan = Math.max(-1, Math.min(1, app.scrollPan - stepPan));
+    sendFrame(OP_SCROLL, stepWheel, stepPan);
+  });
+}
+
+function wheelDetents(event, delta) {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return delta * WHEEL_DETENTS_PER_LINE;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return delta * WHEEL_DETENTS_PER_PAGE;
+  return delta / WHEEL_PX_PER_DETENT;
 }
 
 function setButtons(buttons) {
@@ -662,26 +711,53 @@ function bindCapture() {
     if (app.pointerLocked) setButtons(app.buttons & ~buttonBit(event.button));
   });
 
-  // Drag fallback (touch, or no pointer lock): drag moves, a short tap clicks.
+  // Wheel (pointer locked or not): deltaY > 0 scrolls down, deltaX > 0 right.
+  pad.addEventListener("wheel", (event) => {
+    if (!holdsLease()) return;
+    event.preventDefault();
+    queueScroll(-wheelDetents(event, event.deltaY), wheelDetents(event, event.deltaX));
+  }, { passive: false });
+
+  // Drag fallback (touch, or no pointer lock): drag moves, a short tap clicks,
+  // two touch fingers scroll (fingers down scroll down, like the phone's pad).
   pad.addEventListener("pointerdown", (event) => {
     if (!holdsLease() || app.pointerLocked || (!app.pointerLockFailed && event.pointerType === "mouse")) return;
     pad.setPointerCapture(event.pointerId);
+    if (event.pointerType === "touch") app.touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (app.touches.size >= 2) {
+      app.drag = null; // a scroll is neither a move nor a click
+      return;
+    }
     app.drag = { id: event.pointerId, x: event.clientX, y: event.clientY, startX: event.clientX, startY: event.clientY, at: performance.now() };
   });
   pad.addEventListener("pointermove", (event) => {
+    const touch = app.touches.get(event.pointerId);
+    if (touch && app.touches.size === 2) {
+      // Each finger's move shifts the centroid by half of it.
+      const dx = (event.clientX - touch.x) / 2, dy = (event.clientY - touch.y) / 2;
+      queueScroll(-dy / TOUCH_SCROLL_PX_PER_DETENT, dx / TOUCH_SCROLL_PX_PER_DETENT);
+    }
+    if (touch) {
+      touch.x = event.clientX;
+      touch.y = event.clientY;
+    }
     if (!app.drag || event.pointerId !== app.drag.id) return;
     queueMove(event.clientX - app.drag.x, event.clientY - app.drag.y);
     app.drag.x = event.clientX;
     app.drag.y = event.clientY;
   });
   const endDrag = (event) => {
+    app.touches.delete(event.pointerId);
     if (!app.drag || event.pointerId !== app.drag.id) return;
     const moved = Math.hypot(event.clientX - app.drag.startX, event.clientY - app.drag.startY);
     if (moved <= TAP_MOVE_PX_MAX && performance.now() - app.drag.at <= TAP_DURATION_MS_MAX) clickButton(1);
     app.drag = null;
   };
   pad.addEventListener("pointerup", endDrag);
-  pad.addEventListener("pointercancel", (event) => { app.drag = null; });
+  pad.addEventListener("pointercancel", (event) => {
+    app.touches.delete(event.pointerId);
+    app.drag = null;
+  });
 
   window.addEventListener("blur", () => releaseAll());
   document.addEventListener("visibilitychange", () => {
