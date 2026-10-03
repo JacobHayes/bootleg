@@ -70,6 +70,14 @@ class Downloads(
         store.remove(fileName)
     }
 
+    /**
+     * Drops completed records whose image is no longer in the library. [libraryNames] is a fresh
+     * listing; a name missing from it is only forgotten once the file is really gone, so a listing
+     * taken just before a download finished can't forget it.
+     */
+    fun forgetDeletedImages(libraryNames: Set<String>): Set<String> =
+        store.forgetMissingImages { name -> name in libraryNames || StoragePaths.existsLive(engine.finalFile(name)) }
+
     private fun schedule(record: DownloadRecord): EnqueueResult {
         if (scheduler.schedule(record, wifiOnly())) return EnqueueResult.Started
         store.update(record.fileName) { it.copy(status = DownloadStatus.FAILED, error = "The system refused to schedule the download") }

@@ -80,7 +80,9 @@ forget_download() {
     tab Library
     ui tap Downloads
     sleep 0.8
-    if has_text "$1"; then tap_after "$1" "Remove from list"; fi
+    # A finished record says "Remove from list", a failed one "Remove"; deleting the image in the
+    # Library already drops a finished record.
+    if has_text "$1"; then tap_after "$1" "Remove from list" || tap_after "$1" Remove || true; fi
     tab Library
 }
 

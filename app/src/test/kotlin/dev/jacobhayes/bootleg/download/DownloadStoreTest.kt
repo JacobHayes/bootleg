@@ -31,6 +31,23 @@ class DownloadStoreTest {
     }
 
     @Test
+    fun `completed downloads whose image is gone are forgotten, others stay`() {
+        val file = File(dir, "downloads.json")
+        val store = DownloadStore(file)
+        store.put(record("deleted.iso").copy(status = DownloadStatus.COMPLETED))
+        store.put(record("kept.iso").copy(status = DownloadStatus.COMPLETED))
+        store.put(record("paused.iso").copy(status = DownloadStatus.PAUSED))
+        store.put(record("failed.iso").copy(status = DownloadStatus.FAILED))
+
+        val forgotten = store.forgetMissingImages { it == "kept.iso" }
+
+        assertEquals(setOf("deleted.iso"), forgotten)
+        assertEquals(setOf("kept.iso", "paused.iso", "failed.iso"), store.records.value.keys)
+        assertEquals(store.records.value.keys, DownloadStore(file).records.value.keys, "persisted")
+        assertEquals(emptySet<String>(), store.forgetMissingImages { it == "kept.iso" })
+    }
+
+    @Test
     fun `duplicate or missing slots in an old file are repaired on load`() {
         val file = File(dir, "downloads.json")
         file.writeText(

@@ -21,7 +21,9 @@ import dev.jacobhayes.bootleg.ui.drives.DrivesController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 /** Process-wide singletons (manual DI). */
@@ -62,7 +64,16 @@ class BootlegApp : Application() {
                 freeBytes = { dir -> StatFs(dir.path).availableBytes },
                 onImageAdded = { backend.refreshImages() },
             )
-        Downloads(store, engine, notifications, DownloadScheduler(this), wifiOnly = { prefs.wifiOnlyDownloads.value })
+        Downloads(store, engine, notifications, DownloadScheduler(this), wifiOnly = { prefs.wifiOnlyDownloads.value }).also { downloads ->
+            // The library changed (a delete, a refresh): completed records of images that are gone go too.
+            // drop(1) skips the empty placeholder before the first listing.
+            appScope.launch {
+                backend.images.drop(1).collect { images ->
+                    val names = images.map { it.path.substringAfterLast('/') }.toSet()
+                    withContext(Dispatchers.IO) { downloads.forgetDeletedImages(names) }
+                }
+            }
+        }
     }
 
     companion object {

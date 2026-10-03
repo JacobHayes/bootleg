@@ -57,6 +57,26 @@ class DownloadStore(
         }
     }
 
+    /**
+     * Forgets completed downloads whose image is gone from the library (deleted there or by hand), so
+     * the Catalog offers them again. [isPresent] answers for one file name; active, paused and failed
+     * records stay. Returns the forgotten names.
+     */
+    fun forgetMissingImages(isPresent: (fileName: String) -> Boolean): Set<String> =
+        synchronized(lock) {
+            val missing =
+                recordsFlow.value.values
+                    .filter { it.status == DownloadStatus.COMPLETED && !isPresent(it.fileName) }
+                    .map { it.fileName }
+                    .toSet()
+            if (missing.isNotEmpty()) {
+                val next = recordsFlow.value - missing
+                recordsFlow.value = next
+                persist(next)
+            }
+            missing
+        }
+
     private fun load(): Map<String, DownloadRecord> {
         if (!file.exists()) return emptyMap()
         val records =
