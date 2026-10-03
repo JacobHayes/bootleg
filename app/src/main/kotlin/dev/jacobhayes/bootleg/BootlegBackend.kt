@@ -6,6 +6,7 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetState
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.hid.HidEndpoint
 import dev.jacobhayes.bootleg.hid.HidRelayNotice
 import kotlinx.coroutines.flow.Flow
@@ -75,4 +76,13 @@ interface BootlegBackend {
 
     /** What the root relay says when it drops (or refuses) the HID fds on its own; the open HID session follows it. */
     val hidRelayNotices: Flow<HidRelayNotice>
+
+    /** Android's USB tethering: on, off, or null until Android has reported it. */
+    val usbTethering: StateFlow<Boolean?>
+
+    /** A tethering change is running. */
+    val usbTetheringBusy: StateFlow<Boolean>
+
+    /** Turns Android's USB tethering on or off (re-plugs USB; refused while a disk is exposed). */
+    suspend fun setUsbTethering(on: Boolean): TetherResult
 }

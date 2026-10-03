@@ -54,6 +54,31 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
   the inode. Unlink and rmdir with an fd open are safe in this kernel (since "usb: gadget: f_hid:
   fix f_hidg lifetime vs cdev" the function lives until its last close), but kernels without that
   fix free it on unlink, so Bootleg treats unlink and rmdir like a rebind.
+- USB tethering: there is no `cmd tethering`, and `cmd connectivity` has no tethering commands.
+  A root `app_process` (as the libsu root service is) can call `TetheringManager.startTethering`
+  / `stopTethering(TETHERING_USB)` and `registerTetheringEventCallback` by reflection: uid 0 passes
+  the `TETHER_PRIVILEGED` check, and hidden-API checks don't apply there. The callback answers
+  `onTetheringStarted` within ~5ms. The device uses NCM (`mUsbTetheringFunction: NCM`, interface
+  `ncm0`). The carrier config asks for entitlement checks but names no provisioning app, so
+  nothing is shown.
+- Starting it: the HAL unbinds ~1.3s after the call, links `function1 -> ncm.gs9` next to
+  `function0 -> ffs.adb` and rebinds ~0.6s later; `ncm0` is tethered ~1.2s after the call and the
+  host gets a DHCP lease (a `10.x.y.z/24`) ~2.7s after it. Stopping is the mirror image (≤ 1.2s;
+  the HAL rebinds with only `ffs.adb`). In both directions, and in a `svc usb setFunctions mtp`
+  while tethered, Bootleg's `mass_storage.bootleg` and `hid.bootleg_*` links stay linked through
+  the HAL's re-plug, and a Bootleg switch leaves the HAL's `ncm.gs9` link alone. `sys.usb.config`
+  stays `adb` throughout. Wireless ADB stays up; USB ADB drops for a few seconds.
+- With NCM + `mass_storage.bootleg` + both HID functions + ADB linked, the Mac sees all of them at
+  once (high speed): a network interface ("Pixel 6", `en8`) with a DHCP address and a working
+  route to the internet, the disk, and the keyboard and mouse. After a re-enumeration the Mac
+  takes 2–6s to bring the interface's address back.
+- macOS adds a "Pixel 6" network service the first time and orders it above Wi-Fi, so the Mac's
+  default route moves to the phone while tethered (and back when the interface goes away).
+- Tethering ends on a USB mode change (`svc usb setFunctions mtp`), Android's own switch, and
+  unplugging (Android resets the USB functions on disconnect). Airplane mode keeps it on with no
+  upstream until Wi-Fi returns. Android announces every change with the sticky
+  `android.net.conn.TETHER_STATE_CHANGED` broadcast (extra `tetherArray`: tethered interfaces),
+  which any app can receive.
 
 ## Modules
 
@@ -64,6 +89,8 @@ core/      pure Kotlin/JVM, no Android deps; everything that can be tested fast
   image/     MBR writer, image kind sniffing (ISO9660 / MBR / GPT / raw), sha256 utils
   hid/       report descriptors, keyboard/mouse encoders, keymaps (US), boot-key presets,
              text→keystrokes, sticky-modifier state machine
+  tether/    USB tethering policy (refuse while disks are exposed), the bounded on/off sequence,
+             restore and remembered-choice rules
 app/       Android app (Compose, Material 3)
   root/      RootService (libsu, daemon mode) with a typed AIDL API (below)
   service/   BootlegService (foreground, type connectedDevice), reconcile, notification,
@@ -189,7 +216,9 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
     every write, read and close, and a watch thread polls it every 50ms while anything is open.
     Gone means unbound and not yet rebound, so the fds are closed at once, which is safe; the
     HAL's rebind comes 350ms or more after an unbind, so a HAL-driven unbind/rebind (USB mode
-    change, tethering, a reset) normally just closes the session, which is told at once and reopens once USB has settled (below). Changed means rebound under an open fd, so closing it would panic:
+    change, tethering started outside Bootleg, a reset) normally just closes the session, which is
+    told at once and reopens once USB has settled (below). Changed means rebound under an open fd,
+    so closing it would panic:
     the fd is quarantined instead (kept open and logged). A quarantined fd is
     unrecoverable without a reboot (process exit closes it too), so while one exists the relay
     refuses opens and the holder scan reports it, which refuses every gadget change that would
@@ -273,6 +302,7 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
   - `grantSelfStorage()`
   - `hidOpen(kind, clientToken)`, `hidWrite(kind, report) → result`, `hidReadOutput(kind)`,
     `hidClose(kind)` (`kind` is `keyboard` or `mouse`)
+  - `setUsbTethering(on) → TetherResult`, `usbTethered()`
   - later: `setRemotePowerProfile(on)`
 
   Image paths (`/sdcard/...` is mapped to `/data/media/0/...`) must be normalized (no `.`, `..` or
@@ -449,6 +479,101 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   cancelling move, `scroll` one detent up and back); there is no arbitrary typing from adb.
   `MOUSE_LAYOUT` flips the Settings switch through the same path as the UI.
 
+## USB tethering
+
+Bootleg doesn't run its own network stack: it asks Android to start or stop USB tethering, and
+Android links its NCM function, runs DHCP/NAT/IPv6 and picks the upstream (no picker). Carrier
+entitlement checks stay on (`exemptFromEntitlementCheck` is never set).
+
+- **Root side** (`IBootlegRoot.setUsbTethering(on)`, under the gadget lock so no apply, eject or
+  reconcile of ours overlaps the HAL's re-plug). `UsbTetherController` (core, fake clock in tests)
+  runs the sequence against a `TetherPort`: the root service's `TetheringManager`, by reflection,
+  with one event callback registered for the root process's life. Until that callback has
+  reported once (≤ 2s), the state is unknown and every call fails closed.
+  1. Gate: a transition marker left by a root process that died mid-change is waited out (below).
+  2. Read the live gadget (a read error fails the call). `TetherPolicy` decides: already in that
+     state → `Unchanged` (no re-plug, allowed with disks exposed); any LUN with media (`file` set,
+     linked or not) → `Refused` naming those LUNs ("Eject every disk first: turning USB
+     tethering on or off re-plugs USB"). HID may stay on; it re-enumerates.
+  3. Close HID: the HAL's rebind poisons every hidg fd open across it (see HID fds and gadget
+     changes), and Bootleg can't time it. The root call runs inside the same fence as a controller
+     call: `closeAll()` releases and closes the relay's fds and refuses opens until the root call
+     returns, then the holder scan covers every linked and owned hid function; any holder fails
+     the call (`Failed`, naming it) before Android is asked.
+  4. Write the marker (`/data/adb/bootleg/tether-transition.json`: requested state and
+     `elapsedRealtime`), then request it. A start waits ≤ 2s for `onTetheringStarted` /
+     `onTetheringFailed(error)` (a fresh callback per attempt, so a late answer only reaches an
+     abandoned attempt); a failure is `Failed` with the error's name (entitlement, unsupported,
+     ...). One retry, only for `TETHER_ERROR_SERVICE_UNAVAIL` and `TETHER_ERROR_INTERNAL_ERROR`.
+     No answer withdraws the request with a stop, and its marker is *unverified*: the start may
+     still be queued, so nothing proves it is over until the marker's full window has passed.
+  5. Wait (≤ 5s, 100ms polls of the callback's snapshot) until a USB interface is tethered (on) or
+     none is (off). Android reports the interface before the HAL has finished, so:
+  6. Wait (≤ 5s, 100ms polls) for the HAL's switch to finish: an `ncm.*`/`rndis.*` link present
+     (on) or absent (off) in `configs/b.1`, and the UDC bound for 1s without a drop.
+  7. Clear the marker (or, if the switch didn't settle, rewrite it unverified) and `reconcile()`
+     (HAL quiet, stable bound, then re-link anything of ours the HAL dropped). Its result rides
+     along in `TetherResult.Changed`; tethering changed even if the reconcile needs attention.
+  8. Whatever happened, a marker still left (switch not settled, a start or stop Android never
+     finished) is waited out before the call returns, so the fence on HID opens lasts until the
+     HAL can no longer re-plug for this request.
+
+  A start that never comes up (no computer attached, ...) is stopped again and waited out (steps
+  5–6 for off) before `Failed` returns; the marker is rewritten for the stop before it is issued.
+  Each start/stop costs one HAL re-plug (≈ 0.6s unbound); a call takes ~3–5s. Worst case ≈ 60s:
+  marker gate 10s, holder scan 2s, start 2 × 2s, interface 5s, switch 5s, reconcile's own bounds
+  (≈ 20s), then a left marker's window (≤ 10s; a failed start's withdrawal is bounded the same
+  way). The reconcile is the controller's, called while the root call already holds the gadget
+  lock.
+- **Transition marker** (`requestedOn`, `startedAtMs` in `elapsedRealtime`, `verified`). It
+  matters when the root process dies mid-change, or after a start Android never answered: the
+  next `apply`, `reinsert`, `reconcile`, `bootlegOff`, adoption at root start or tethering call first waits, at most until 10s after the
+  marker was written. A verified marker is done early once Android reports the requested state and
+  the HAL's switch has settled; an unverified one (no answer, or an unreadable file, which counts
+  as unverified and written now) always waits the full window. Then it is deleted. A marker from
+  an earlier boot has either a future `startedAtMs` (deleted unread) or a window that has passed
+  (deleted after one check); at worst it costs one bounded wait. So disks are never exported into
+  a re-plug of the HAL's. Waiting out a marker inside its window closes the relay first, and
+  `hidOpen` fails while a marker is inside its window, so a new root process opens no hidg fd
+  into the re-plug a dead one left pending.
+- **Observation** (app, no polling): `TetherObserver` registers for the sticky
+  `TETHER_STATE_CHANGED` broadcast in the app process (`tetherArray`: tethered interfaces; on when
+  one matches `rndis\d+`/`ncm\d+`/`usb\d+`) and publishes `tether: StateFlow<Boolean?>`, null until
+  the first broadcast (the remote's `State.tether` is absent meanwhile). A root call's result is
+  published at once (root's callback is the authority), and broadcasts update it after that.
+  Root decides from its own callback; the app's value drives display and the remembered choice.
+- **Remembered choice** (app preferences, all reads and writes on the main thread): a Bootleg
+  request (app, web UI, CLI) that returns `Changed` or `Unchanged` sets it to the returned state,
+  whether or not the requesting remote session is still there. An *external* stop (Android's
+  switch, unplug, a USB mode change) clears it, as a host eject does for a disk: a broadcast going
+  from on to off while no Bootleg request is in flight and before `ACTION_SHUTDOWN`, confirmed
+  10s later (no broadcast since saying on, still no request in flight) by root (`usbTethered()`
+  off) and by the live gadget (the HAL's `ncm.*`/`rndis.*` function unlinked), so a stale
+  broadcast can't clear a choice a later request set. Every re-enumeration of Bootleg's drops and
+  re-adds `ncm0` (back after ~4s with a Windows 7 host) without stopping tethering: root's callback
+  may say off meanwhile, but the HAL's link stays, so it never clears the choice. The first broadcast after the process starts (the sticky
+  one) only initializes, so a boot's initial "off" never clears it. A stop while the app process
+  isn't running, or an off that Android announces before `ACTION_SHUTDOWN`, goes unseen or
+  ignored respectively: the next reboot may then turn tethering back on, or not.
+- **Restore after reboot** (same opt-in as the disks, real reboots only via `BOOT_COUNT`):
+  `BootlegService` on `ACTION_RESTORE`, before registering for `USB_STATE`, calls
+  `setUsbTethering(true)` when the choice is on, then applies the Settings mouse layout if the
+  journal's HID differs (that apply exports the journal's disks, so it comes after tethering). Nothing in Bootleg exports disks that early (no
+  reconcile has run, Remote isn't started at boot); only a user acting within those seconds
+  could, and then root refuses the toggle and tethering is not restored (logged). The call's own
+  reconcile re-exports the journal's slots and HID, so a restore costs two re-plugs (the HAL's for
+  NCM, then ours for disks and HID) and tethering never toggles with disks exposed. The
+  `USB_STATE` reconcile that follows restores the disks in every other case (`Unchanged`,
+  `Failed` after the withdrawal settled, `Refused`).
+- **HID during the re-plug:** the relay is closed from before the request until the call returns
+  (step 3), so the host loses the keyboard and mouse for the whole call (~3–5s), not just the
+  ~1s re-plug. `HidSession` sees its writes fail and reopens with its usual backoff once the
+  fence lifts; input meanwhile is dropped, never replayed late.
+- **Surfaces:** a "USB tethering" card on Drives (switch, state, the refusal reason while disks
+  are exposed, and a note that the re-plug briefly drops the keyboard and mouse). The notification
+  (shown while disks are exported) and the Quick Settings tile subtitle mention it when it's on.
+  Debug hooks `TETHER_ON`, `TETHER_OFF`, `TETHER_STATE`.
+
 ## Remote (phase 3)
 
 tsnet runs in the app, with no VPN slot. Kotlin supplies the interface list via
@@ -599,6 +724,9 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   - `slots.apply{slots:[{lun, imageId, mode}], ifRev}`, `slot.eject{lun, force}`,
     `slot.reinsert{lun}`
   - `hid.set{keyboard, mouse}`
+  - `tether.set{on}`: refused with `disks_exposed` by root, from the live LUNs under the gadget
+    lock; 60s deadline. Clients always warn that turning it off may cut the remote (they can't
+    tell whether it reaches the phone over that USB link).
   - `bootkey.run{vendor, action}`, `bootkey.cancel`
   - `paste.prepare{text}` → `{planId, unsupported, durationMs}`. Then `paste.run{planId}`, which
     is bound to the plan and the epoch, and `paste.cancel`. At most 4 plans per session, each
@@ -687,7 +815,7 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
 
 ### CLI (`remote/cmd/bootleg`)
 - **Connection:** uses the Mac's own Tailscale. Offline, it takes `--host` plus a 0600 token file.
-- **Commands:** `status`, `images`, `mount`, `eject`, `hid on|off`, `type <text>|-`,
+- **Commands:** `status`, `images`, `mount`, `eject`, `hid on|off`, `tether on|off|status`, `type <text>|-`,
   `key <chord> [--repeat --interval]`, `bootkey`, `lease take|takeover|release`, `pair <code>`.
 - **`kbd`:** decoded text and key taps only, since terminals don't report key-up. It restores
   the terminal and sends release-all on signals and errors.
@@ -779,6 +907,7 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
 | hidg holder scan | ≤ 4096 processes, ≤ 262144 fds, 2s (incomplete counts as held) |
 | Quarantined hidg fds | ≤ 1 per function (the first blocks HID opens and hid rebinds until reboot) |
 | WebSocket message | ≤ 64 KiB |
+| Tethering | start answer 2s (2 attempts, transient errors only), interface 5s, HAL switch 5s, marker 10s; whole call ≈ 60s worst case, remote `tether.set` deadline 60s |
 
 ## Verification notes
 

@@ -9,6 +9,7 @@ import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
+import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.storage.StoragePaths
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -154,6 +155,20 @@ class DrivesController(
             }
         }
 
+    /** Turns Android's USB tethering on or off; the root side refuses while a disk is exposed. */
+    fun setUsbTethering(on: Boolean) {
+        if (backend.usbTetheringBusy.value) return
+        message.value = null
+        scope.launch {
+            message.value =
+                try {
+                    describe(backend.setUsbTethering(on))
+                } catch (error: Exception) {
+                    "USB tethering failed: ${error.message ?: error::class.simpleName}"
+                }
+        }
+    }
+
     fun dismissForceEjectOffer() {
         forceEjectOffer.value = null
     }
@@ -234,6 +249,20 @@ class DrivesController(
             require(!writableExportedTwice) { "a writable image can't be exported in another slot too" }
             return Desired(slots = specs, hid = journal.desired.hid)
         }
+
+        fun describe(result: TetherResult): String =
+            when (result) {
+                is TetherResult.Changed -> {
+                    val change = if (result.active) "USB tethering on" else "USB tethering off"
+                    when (val reconcile = result.reconcile) {
+                        is ApplyResult.Applied -> change
+                        else -> "$change. Drives: ${describe(reconcile)}"
+                    }
+                }
+                is TetherResult.Unchanged -> if (result.active) "USB tethering is already on" else "USB tethering is already off"
+                is TetherResult.Refused -> result.reason
+                is TetherResult.Failed -> "USB tethering: ${result.reason}"
+            }
 
         fun describe(result: ApplyResult?): String? =
             when (result) {

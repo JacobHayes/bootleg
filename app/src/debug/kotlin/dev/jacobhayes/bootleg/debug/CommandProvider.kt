@@ -153,6 +153,15 @@ class CommandProvider : ContentProvider() {
                                     put("link", sent.link.toString())
                                 }.toString()
                             }
+                            // USB tethering (L4 check:device:tether): the same path as the Drives switch.
+                            "TETHER_ON" -> BootlegJson.encodeToString(backend.setUsbTethering(true))
+                            "TETHER_OFF" -> BootlegJson.encodeToString(backend.setUsbTethering(false))
+                            "TETHER_STATE" ->
+                                buildJsonObject {
+                                    put("tethered", backend.usbTethered())
+                                    put("observed", backend.usbTethering.value)
+                                    put("choice", app.prefs.usbTetherChoice.value)
+                                }.toString()
                             // Remote (L4 check:device:remote). Approve/revoke here stand in for the in-app buttons.
                             "REMOTE_ON" -> {
                                 withContext(Dispatchers.Main) { app.remote.setEnabled(true) }

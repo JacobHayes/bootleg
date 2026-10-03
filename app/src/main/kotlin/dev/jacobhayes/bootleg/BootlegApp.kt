@@ -36,7 +36,7 @@ class BootlegApp : Application() {
         if (KeepAwake.hasLeftover(this)) appScope.launch { runCatching { remote.keepAwake.restoreLeftover() } }
     }
 
-    val systemBackend: BootlegBackendImpl by lazy { BootlegBackendImpl(this, appScope) }
+    val systemBackend: BootlegBackendImpl by lazy { BootlegBackendImpl(this, appScope, prefs) }
 
     /** The one place the UI gets the system side from. */
     val backend: BootlegBackend get() = systemBackend

@@ -12,6 +12,7 @@ import dev.jacobhayes.bootleg.R
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
 import dev.jacobhayes.bootleg.service.ejectAllWithFeedback
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /** Quick Settings tile: active while media is exported. Tap ejects everything, or opens the app when idle. */
@@ -25,7 +26,8 @@ class BootlegTileService : TileService() {
         listening =
             app.appScope.launch {
                 runCatching { app.systemBackend.refreshGadget() }
-                app.systemBackend.gadgetState.collect { render(it) }
+                combine(app.systemBackend.gadgetState, app.systemBackend.usbTethering) { state, tethering -> state to tethering }
+                    .collect { (state, tethering) -> render(state, tethering == true) }
             }
     }
 
@@ -51,17 +53,21 @@ class BootlegTileService : TileService() {
         }
     }
 
-    private fun render(state: GadgetState?) {
+    private fun render(
+        state: GadgetState?,
+        tethering: Boolean,
+    ) {
         val tile = qsTile ?: return
         val loadedCount = state?.luns?.values?.count { it.file.isNotEmpty() } ?: 0
         tile.state = if (loadedCount > 0) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
         tile.label = getString(R.string.tile_label)
-        tile.subtitle =
+        val drives =
             if (loadedCount > 0) {
                 resources.getQuantityString(R.plurals.notification_exported, loadedCount, loadedCount)
             } else {
                 getString(R.string.tile_subtitle_inactive)
             }
+        tile.subtitle = if (tethering) getString(R.string.tile_subtitle_tethering, drives) else drives
         tile.updateTile()
     }
 

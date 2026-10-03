@@ -16,6 +16,7 @@ import dev.jacobhayes.bootleg.BootlegApp
 import dev.jacobhayes.bootleg.MainActivity
 import dev.jacobhayes.bootleg.R
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
+import dev.jacobhayes.bootleg.core.tether.TetherChoice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,7 +52,17 @@ class BootlegService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startForeground(NOTIFICATION_ID, buildNotification(null), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        startForeground(NOTIFICATION_ID, buildNotification(null, tethering = false), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+    }
+
+    /** The journal holds the mouse layout of the last apply; the restore follows the setting. */
+    private suspend fun restoreMouseLayout() {
+        runCatching {
+            backend.refreshGadget()
+            val app = BootlegApp.from(this@BootlegService)
+            val hid = backend.journal.value.desired.hid
+            if (hid.mouse && hid.mouseLayout != app.prefs.mouseLayout.value) app.hid.setSpec(hid)
+        }.onFailure { Log.w(TAG, "applying the mouse layout setting failed", it) }
     }
 
     override fun onStartCommand(
@@ -63,6 +74,15 @@ class BootlegService : Service() {
         // the backend pokes this service after each gadget call.
         when (intent?.action) {
             ACTION_EJECT_ALL -> scope.launch { ejectAllWithFeedback(this@BootlegService, backend) }
+            ACTION_RESTORE ->
+                scope.launch {
+                    // Tethering first, while no disk is exposed yet; its reconcile (and the USB_STATE one after it)
+                    // brings back the journal's disks and HID.
+                    restoreUsbTethering()
+                    // Then the mouse layout: its apply exports the journal's disks, after which tethering is refused.
+                    restoreMouseLayout()
+                    watchUsbState()
+                }
             ACTION_FORGET ->
                 scope.launch {
                     // After a reboot without opt-in restore: drop the journal before any reconcile can re-export it.
@@ -74,30 +94,29 @@ class BootlegService : Service() {
                     }.onFailure { Log.w(TAG, "clearing stale exports failed", it) }
                     watchUsbState()
                 }
-            ACTION_RESTORE ->
-                scope.launch {
-                    // The journal holds the mouse layout of the last apply; the restore follows the setting.
-                    runCatching {
-                        backend.refreshGadget()
-                        val app = BootlegApp.from(this@BootlegService)
-                        val hid = backend.journal.value.desired.hid
-                        if (hid.mouse && hid.mouseLayout != app.prefs.mouseLayout.value) app.hid.setSpec(hid)
-                    }.onFailure { Log.w(TAG, "applying the mouse layout setting failed", it) }
-                    watchUsbState()
-                }
             else -> watchUsbState()
         }
         if (!watching) {
             watching = true
             scope.launch {
-                backend.gadgetState.combine(backend.journal) { state, _ -> state }.collect { state ->
-                    getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, buildNotification(state))
-                    if (reconciledOnce && !backend.hasExports) stopSelf()
-                }
+                combine(backend.gadgetState, backend.journal, backend.usbTethering) { state, _, tethering -> state to tethering }
+                    .collect { (state, tethering) ->
+                        getSystemService(
+                            NotificationManager::class.java,
+                        ).notify(NOTIFICATION_ID, buildNotification(state, tethering == true))
+                        if (reconciledOnce && !backend.hasExports) stopSelf()
+                    }
             }
             scope.launch { pollHostEjects() }
         }
         return START_STICKY
+    }
+
+    private suspend fun restoreUsbTethering() {
+        val prefs = BootlegApp.from(this).prefs
+        if (!TetherChoice.restoreOnBoot(prefs.restoreAfterReboot.value, prefs.usbTetherChoice.value)) return
+        val result = backend.setUsbTethering(true)
+        Log.i(TAG, "restoring USB tethering: $result")
     }
 
     private fun watchUsbState() {
@@ -153,7 +172,10 @@ class BootlegService : Service() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private fun buildNotification(state: GadgetState?): Notification {
+    private fun buildNotification(
+        state: GadgetState?,
+        tethering: Boolean,
+    ): Notification {
         val loaded =
             state
                 ?.luns
@@ -168,8 +190,8 @@ class BootlegService : Service() {
             } else {
                 resources.getQuantityString(R.plurals.notification_exported, loaded.size, loaded.size)
             }
-        val text =
-            loaded.entries.joinToString("\n") { (lun, lunState) ->
+        val slotLines =
+            loaded.entries.map { (lun, lunState) ->
                 val mode =
                     when {
                         lunState.cdrom -> "CD"
@@ -178,6 +200,7 @@ class BootlegService : Service() {
                     }
                 "Slot ${lun + 1} · ${lunState.file.substringAfterLast('/')} ($mode)"
             }
+        val text = (slotLines + listOfNotNull(getString(R.string.notification_tethering).takeIf { tethering })).joinToString("\n")
         val open =
             PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val ejectAll =

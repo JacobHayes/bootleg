@@ -384,6 +384,30 @@ class HidRelayTest {
     }
 
     @Test
+    fun `a tethering change closes before the HAL's re-plug and allows opens as soon as it returns`() {
+        // UsbTetherController: closeAll, then the HAL unbinds, relinks NCM and rebinds while the relay is
+        // fenced, and the root call returns (endGadgetChange) only once the switch has settled.
+        val watched = watchedRelay()
+        val client = token("app")
+        watched.open(HidKind.KEYBOARD, client)
+        watched.open(HidKind.MOUSE, client)
+        watched.closeAllForGadgetChange()
+        assertTrue(opened.all { it.releasedAndClosed })
+        gadgetBound = false
+        poll(HidRelay.WATCH_INTERVAL_MS * 4)
+        assertThrows<IllegalStateException> { watched.open(HidKind.KEYBOARD, client) }
+        gadgetBound = true
+        poll(HidRelay.WATCH_INTERVAL_MS * 4)
+        assertEquals(2, opened.size, "nothing opened across the re-plug")
+
+        watched.endGadgetChange()
+        // No fd was lost to someone else's rebind, so there is no settle wait on top: reopen at once.
+        assertEquals("reopenable(app)", notifier.sent.last())
+        watched.open(HidKind.KEYBOARD, client)
+        assertEquals(0, watched.quarantinedCount)
+    }
+
+    @Test
     fun `a client refused an open during a gadget change is told when it ends`() {
         relay.closeAllForGadgetChange()
         val client = token("app")

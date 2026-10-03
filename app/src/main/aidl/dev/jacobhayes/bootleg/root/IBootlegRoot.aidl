@@ -36,4 +36,9 @@ interface IBootlegRoot {
     // Remote keep-awake knobs: Settings.Global stay_on_while_plugged_in (0-7), Wi-Fi forced
     // low-latency mode, and (wakeScreen) a KEYCODE_WAKEUP, which turns the screen on but never unlocks.
     void setKeepAwake(int stayOnWhilePluggedIn, boolean lowLatency, boolean wakeScreen);
+    // Android's USB tethering on or off (re-plugs USB; refused while a disk is exposed).
+    // Returns JSON TetherResult. Holds the gadget lock for the whole change.
+    String setUsbTethering(boolean on);
+    // Whether Android reports a USB interface tethered.
+    boolean usbTethered();
 }

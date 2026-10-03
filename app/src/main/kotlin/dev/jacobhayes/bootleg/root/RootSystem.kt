@@ -11,6 +11,8 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.JournalStore
 import dev.jacobhayes.bootleg.core.gadget.UsbProps
+import dev.jacobhayes.bootleg.core.tether.TetherTransition
+import dev.jacobhayes.bootleg.core.tether.TetherTransitionStore
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.reflect.Method
@@ -101,27 +103,68 @@ class FileJournalStore(
             .getOrElse { error("journal at $file is unreadable: ${it.message}") }
     }
 
-    override fun save(journal: Journal) {
-        val directory = checkNotNull(file.parentFile)
-        if (!directory.exists()) check(directory.mkdirs()) { "cannot create $directory" }
-        Os.chmod(directory.path, DIRECTORY_MODE)
-        val temporary = File(directory, "${file.name}.tmp")
-        FileOutputStream(temporary).use { stream ->
-            stream.write(BootlegJson.encodeToString(journal).toByteArray())
-            stream.fd.sync()
-        }
-        Os.rename(temporary.path, file.path)
-        // The rename lives in the directory entry; without this a power loss can bring back the old journal.
-        val directoryDescriptor = Os.open(directory.path, OsConstants.O_RDONLY or OsConstants.O_CLOEXEC, 0)
-        try {
-            Os.fsync(directoryDescriptor)
-        } finally {
-            Os.close(directoryDescriptor)
-        }
+    override fun save(journal: Journal) = writeAtomically(file, BootlegJson.encodeToString(journal).toByteArray())
+}
+
+/**
+ * Writes [bytes] to [file] with write-temp, fsync, rename and a directory fsync, so a crash never
+ * leaves a torn file and a power loss can't bring the old one back. The directory is made 0700.
+ */
+fun writeAtomically(
+    file: File,
+    bytes: ByteArray,
+) {
+    val directory = checkNotNull(file.parentFile)
+    if (!directory.exists()) check(directory.mkdirs()) { "cannot create $directory" }
+    Os.chmod(directory.path, ROOT_STATE_DIRECTORY_MODE)
+    val temporary = File(directory, "${file.name}.tmp")
+    FileOutputStream(temporary).use { stream ->
+        stream.write(bytes)
+        stream.fd.sync()
+    }
+    Os.rename(temporary.path, file.path)
+    // The rename lives in the directory entry; without this a power loss can bring back the old file.
+    fsyncDirectory(directory)
+}
+
+private fun fsyncDirectory(directory: File) {
+    val directoryDescriptor = Os.open(directory.path, OsConstants.O_RDONLY or OsConstants.O_CLOEXEC, 0)
+    try {
+        Os.fsync(directoryDescriptor)
+    } finally {
+        Os.close(directoryDescriptor)
+    }
+}
+
+private const val ROOT_STATE_DIRECTORY_MODE = 0b111_000_000 // 0700
+
+/**
+ * The tethering transition marker next to the journal. An unreadable marker counts as unverified
+ * and written now, so the gate waits its full window instead of trusting it.
+ */
+class FileTetherTransitionStore(
+    private val file: File = File("/data/adb/bootleg/tether-transition.json"),
+    private val clock: Clock,
+) : TetherTransitionStore {
+    override fun load(): TetherTransition? {
+        if (!file.exists()) return null
+        return runCatching { BootlegJson.decodeFromString<TetherTransition>(file.readText()) }
+            .getOrElse {
+                Log.w(TAG, "tethering marker at $file is unreadable; waiting it out", it)
+                TetherTransition(requestedOn = false, startedAtMs = clock.nowMs(), verified = false)
+            }
+    }
+
+    override fun save(transition: TetherTransition) = writeAtomically(file, BootlegJson.encodeToString(transition).toByteArray())
+
+    override fun clear() {
+        if (!file.exists()) return
+        if (!file.delete() && file.exists()) error("cannot delete $file")
+        fsyncDirectory(checkNotNull(file.parentFile))
     }
 
     private companion object {
-        const val DIRECTORY_MODE = 0b111_000_000 // 0700
+        const val TAG = "BootlegTether"
     }
 }
 

@@ -11,6 +11,8 @@ import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.LunState
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.tether.TetherPolicy
+import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.hid.HidEndpoint
 import dev.jacobhayes.bootleg.hid.HidRelayNotice
 import dev.jacobhayes.bootleg.storage.StoragePaths
@@ -33,6 +35,7 @@ class FakeBootlegBackend(
     rootStatus: RootStatus = RootStatus.Granted,
     initialJournal: Journal = Journal(),
     private val latencyMs: Long = 0,
+    initialUsbTethering: Boolean? = false,
 ) : BootlegBackend {
     private val rootFlow = MutableStateFlow(rootStatus)
     private val journalFlow = MutableStateFlow(initialJournal)
@@ -43,6 +46,22 @@ class FakeBootlegBackend(
     override val gadgetState: StateFlow<GadgetState?> = gadgetFlow.asStateFlow()
     override val journal: StateFlow<Journal> = journalFlow.asStateFlow()
     override val images: StateFlow<List<ImageFile>> = imagesFlow.asStateFlow()
+
+    private val tetheringFlow = MutableStateFlow<Boolean?>(initialUsbTethering)
+    override val usbTethering: StateFlow<Boolean?> = tetheringFlow.asStateFlow()
+    override val usbTetheringBusy: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
+
+    /** Same rule as the root side: refused while a LUN holds media. */
+    override suspend fun setUsbTethering(on: Boolean): TetherResult {
+        delay(latencyMs)
+        val active = tetheringFlow.value == true
+        if (on == active) return TetherResult.Unchanged(active)
+        val exposed = gadgetFlow.value?.let(TetherPolicy::exposedLuns).orEmpty()
+        if (exposed.isNotEmpty()) return TetherResult.Refused(active, exposed, TetherPolicy.DISKS_EXPOSED_REASON)
+        tetheringFlow.value = on
+        val state = checkNotNull(gadgetFlow.value)
+        return TetherResult.Changed(on, ApplyResult.Applied(state, reenumerated = false), switchSettled = true)
+    }
 
     override suspend fun refreshImages() = delay(latencyMs)
 

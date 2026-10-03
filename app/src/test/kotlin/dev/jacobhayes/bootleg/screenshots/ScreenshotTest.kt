@@ -94,6 +94,12 @@ class ScreenshotTest {
     }
 
     @Test
+    fun drivesTethering() {
+        val backend = FakeBootlegBackend(initialImages = FakeBootlegBackend.demoImages, initialUsbTethering = true)
+        capture("drives_tethering") { DrivesScreen(backend, DrivesController(backend, MainScope()), onBrowseFile = {}) }
+    }
+
+    @Test
     fun drivesEmpty() {
         val backend = FakeBootlegBackend()
         capture("drives_empty") { DrivesScreen(backend, DrivesController(backend, MainScope()), onBrowseFile = {}) }

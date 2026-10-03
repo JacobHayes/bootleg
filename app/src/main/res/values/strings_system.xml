@@ -10,4 +10,6 @@
     <string name="eject_all_failed">Eject failed: %1$s</string>
     <string name="tile_label">Bootleg</string>
     <string name="tile_subtitle_inactive">No disks</string>
+    <string name="notification_tethering">USB tethering on</string>
+    <string name="tile_subtitle_tethering">%1$s · tethering</string>
 </resources>

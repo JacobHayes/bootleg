@@ -17,6 +17,7 @@ class Prefs(
     private val restoreFlow = MutableStateFlow(preferences.getBoolean(KEY_RESTORE_AFTER_REBOOT, false))
     private val remoteEnabledFlow = MutableStateFlow(preferences.getBoolean(KEY_REMOTE_ENABLED, false))
     private val mouseLayoutFlow = MutableStateFlow(mouseLayoutOf(preferences))
+    private val usbTetherChoiceFlow = MutableStateFlow(preferences.getBoolean(KEY_USB_TETHER_CHOICE, false))
 
     val wifiOnlyDownloads: StateFlow<Boolean> = wifiOnlyFlow.asStateFlow()
     val restoreAfterReboot: StateFlow<Boolean> = restoreFlow.asStateFlow()
@@ -30,6 +31,15 @@ class Prefs(
     fun setMouseLayout(layout: MouseLayout) {
         preferences.edit().putBoolean(KEY_COMPATIBLE_MOUSE, layout == MouseLayout.BOOT).apply()
         mouseLayoutFlow.value = layout
+    }
+
+    /** USB tethering as last chosen through Bootleg (see `TetherChoice`); restore after reboot turns it back on. */
+    val usbTetherChoice: StateFlow<Boolean> = usbTetherChoiceFlow.asStateFlow()
+
+    fun setUsbTetherChoice(on: Boolean) {
+        if (usbTetherChoiceFlow.value == on) return
+        preferences.edit().putBoolean(KEY_USB_TETHER_CHOICE, on).apply()
+        usbTetherChoiceFlow.value = on
     }
 
     fun setWifiOnlyDownloads(enabled: Boolean) {
@@ -58,6 +68,7 @@ class Prefs(
         const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
         const val KEY_REMOTE_ENABLED = "remote_enabled"
         const val KEY_COMPATIBLE_MOUSE = "compatible_mouse"
+        const val KEY_USB_TETHER_CHOICE = "usb_tether_choice"
 
         /** Read by the boot path too, which has no [Prefs] instance. */
         fun mouseLayoutOf(preferences: SharedPreferences): MouseLayout =

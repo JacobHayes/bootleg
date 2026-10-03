@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Eject
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Lan
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Usb
 import androidx.compose.material3.Button
@@ -24,10 +25,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -40,11 +43,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.ImageFile
 import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
+import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.ui.common.ConfirmDialog
 import dev.jacobhayes.bootleg.ui.common.EmptyState
 import dev.jacobhayes.bootleg.ui.common.NoticeCard
@@ -61,6 +66,9 @@ fun DrivesScreen(
     val root by backend.rootStatus.collectAsState()
     val journal by backend.journal.collectAsState()
     val images by backend.images.collectAsState()
+    val gadget by backend.gadgetState.collectAsState()
+    val tethering by backend.usbTethering.collectAsState()
+    val tetheringBusy by backend.usbTetheringBusy.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     var picker by remember { mutableStateOf<SlotPickerTarget?>(null) }
     var confirmEjectAll by remember { mutableStateOf(false) }
@@ -88,6 +96,14 @@ fun DrivesScreen(
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
             RootBanner(root)
+            TetherCard(
+                tethering = tethering,
+                busy = tetheringBusy,
+                disksExposed = gadget?.let(TetherPolicy::exposedLuns).orEmpty().isNotEmpty(),
+                rootGranted = root is RootStatus.Granted,
+                onToggle = controller::setUsbTethering,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+            )
             if (state.slots.isEmpty()) {
                 EmptyState(
                     icon = Icons.Outlined.Usb,
@@ -204,6 +220,46 @@ private fun SlotList(
 private const val EJECT_HINT =
     "Eject drives on the computer first. macOS keeps an attached disk in use until you eject it there, " +
         "so Eject here is refused until then (Force eject still works)."
+
+/**
+ * Android's USB tethering next to the drives: it shares the USB connection with them, and switching
+ * it re-plugs USB, so it can't change while a disk is exposed.
+ */
+@Composable
+private fun TetherCard(
+    tethering: Boolean?,
+    busy: Boolean,
+    disksExposed: Boolean,
+    rootGranted: Boolean,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val status =
+        when {
+            busy -> "Reconnecting USB…"
+            tethering == null -> "Checking…"
+            disksExposed -> "Eject every disk to turn it ${if (tethering) "off" else "on"}: switching re-plugs USB"
+            tethering -> "On · the computer shares this phone's internet"
+            else -> "Off · switching re-plugs USB (keyboard and mouse drop for a second)"
+        }
+    OutlinedCard(modifier.fillMaxWidth()) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Lan, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("USB tethering", style = MaterialTheme.typography.titleMedium)
+                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.width(12.dp))
+            Switch(
+                checked = tethering == true,
+                onCheckedChange = onToggle,
+                enabled = rootGranted && !busy && tethering != null && !disksExposed,
+                modifier = Modifier.testTag("usb-tethering-switch"),
+            )
+        }
+    }
+}
 
 @Composable
 private fun RootChip(root: RootStatus) {

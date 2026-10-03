@@ -12,6 +12,7 @@ import com.topjohnwu.superuser.ipc.RootService
 import dev.jacobhayes.bootleg.BlankImageFormat
 import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.ImageFile
+import dev.jacobhayes.bootleg.Prefs
 import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.boot.BootGeneration
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
@@ -21,6 +22,8 @@ import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.tether.TetherPolicy
+import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.hid.HidEndpoint
 import dev.jacobhayes.bootleg.hid.HidRelayNotice
 import dev.jacobhayes.bootleg.hid.RootHidEndpoint
@@ -30,6 +33,7 @@ import dev.jacobhayes.bootleg.root.IBootlegRoot
 import dev.jacobhayes.bootleg.root.IHidRelayClient
 import dev.jacobhayes.bootleg.root.ImagePaths
 import dev.jacobhayes.bootleg.root.RootImage
+import dev.jacobhayes.bootleg.tether.UsbTethering
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +55,7 @@ import kotlinx.coroutines.withTimeout
 class BootlegBackendImpl(
     private val context: Context,
     private val scope: CoroutineScope,
+    prefs: Prefs,
 ) : BootlegBackend {
     private val rootStatusFlow = MutableStateFlow<RootStatus>(RootStatus.Unknown)
     private val gadgetStateFlow = MutableStateFlow<GadgetState?>(null)
@@ -61,6 +66,22 @@ class BootlegBackendImpl(
     override val gadgetState: StateFlow<GadgetState?> = gadgetStateFlow.asStateFlow()
     override val journal: StateFlow<Journal> = journalFlow.asStateFlow()
     override val images: StateFlow<List<ImageFile>> = imagesFlow.asStateFlow()
+
+    private val tethering =
+        UsbTethering(
+            context = context,
+            prefs = prefs,
+            scope = scope,
+            rootSet = { on -> userTetherCall(on) },
+            rootTethered = { call { it.usbTethered() } },
+            tetherFunctionLinked = {
+                refreshGadget()
+                TetherPolicy.tetherFunctionLinked(checkNotNull(gadgetStateFlow.value) { "no gadget state after a refresh" })
+            },
+        ).also { it.start() }
+
+    override val usbTethering: StateFlow<Boolean?> = tethering.state
+    override val usbTetheringBusy: StateFlow<Boolean> = tethering.busy
 
     private val bindMutex = Mutex()
 
@@ -118,6 +139,20 @@ class BootlegBackendImpl(
         val root = root()
         withContext(Dispatchers.IO) { root.hidOpen(kind.wireName, hidClientToken) }
         return RootHidEndpoint(root, kind)
+    }
+
+    override suspend fun setUsbTethering(on: Boolean): TetherResult = tethering.set(on)
+
+    /** Root's own view (its TetheringManager callback), not the broadcast-fed [usbTethering]. */
+    suspend fun usbTethered(): Boolean = call { it.usbTethered() }
+
+    /** Like a gadget call: the root side reconciles after the HAL's re-plug, so the journal belongs to this boot. */
+    private suspend fun userTetherCall(on: Boolean): TetherResult {
+        withContext(Dispatchers.IO) { BootGeneration.markJournalCurrent(context) }
+        val result = call { BootlegJson.decodeFromString<TetherResult>(it.setUsbTethering(on)) }
+        runCatchingNonCancel { refreshGadget() }
+        if (hasExports) BootlegService.start(context)
+        return result
     }
 
     suspend fun reconcile(): ApplyResult = gadgetCall { it.reconcile() }
