@@ -91,5 +91,8 @@ check "gadget clean" wait_until 10 gadget_clean
 step "delete through the UI"
 for image in "$EXFAT" "$EXT4" "$FAT" "$RAW"; do
     delete_from_library "$image"
-    check "$image deleted" bash -c "! adb shell ls /sdcard/bootleg/$image >/dev/null 2>&1"
+    # The store is checked as root: the app's /sdcard (FUSE) view can keep a stale entry after a
+    # root delete (findings O10), which is reported but doesn't fail this flow.
+    check "$image deleted" bash -c "[[ -z \$(adb shell \"su -c 'ls $STORE/$image 2>/dev/null'\") ]]"
+    adb shell ls "/sdcard/bootleg/$image" >/dev/null 2>&1 && log "  WARN  $image still resolves through /sdcard (stale FUSE entry, O10)"
 done
