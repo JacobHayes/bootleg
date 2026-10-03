@@ -53,7 +53,6 @@ object HidFunctionSpec {
     const val KEYBOARD_PROTOCOL = 1
     const val KEYBOARD_REPORT_LENGTH_BYTES = 8
     const val MOUSE_PROTOCOL = 2
-    const val MOUSE_REPORT_LENGTH_BYTES = 3
 }
 
 /**
@@ -344,12 +343,13 @@ class GadgetPlanner(
         function: String,
         ops: MutableList<Op>,
     ) {
+        val mouseLayout = MouseLayout.ofFunction(function)
         val (protocol, reportLengthBytes, descriptor) =
-            when (function) {
-                GadgetNames.HID_KEYBOARD_FUNCTION ->
+            when {
+                function == GadgetNames.HID_KEYBOARD_FUNCTION ->
                     Triple(HidFunctionSpec.KEYBOARD_PROTOCOL, HidFunctionSpec.KEYBOARD_REPORT_LENGTH_BYTES, hidDescriptors.keyboard())
-                GadgetNames.HID_MOUSE_FUNCTION ->
-                    Triple(HidFunctionSpec.MOUSE_PROTOCOL, HidFunctionSpec.MOUSE_REPORT_LENGTH_BYTES, hidDescriptors.mouse())
+                mouseLayout != null ->
+                    Triple(HidFunctionSpec.MOUSE_PROTOCOL, mouseLayout.reportLengthBytes, hidDescriptors.mouse(mouseLayout))
                 else -> return
             }
         require(descriptor.isNotEmpty()) { "$function: empty HID report descriptor" }

@@ -39,6 +39,7 @@ import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.hid.MouseButton
 import dev.jacobhayes.bootleg.hid.HidController
 import dev.jacobhayes.bootleg.hid.HidLinkState
@@ -116,7 +117,11 @@ fun ControlScreen(
                 return@Column
             }
             job?.let { JobProgress(it, onCancel = hid::cancelJob) }
-            Touchpad(onActions = hid::touchpad, modifier = Modifier.weight(1f).fillMaxWidth())
+            Touchpad(
+                onActions = hid::touchpad,
+                scrolling = spec.mouseLayout == MouseLayout.WHEEL,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { hid.click(MouseButton.LEFT) }, modifier = Modifier.weight(1f)) { Text("Left click") }
                 OutlinedButton(onClick = { hid.click(MouseButton.RIGHT) }, modifier = Modifier.weight(1f)) { Text("Right click") }
@@ -165,7 +170,7 @@ private fun statusText(
     val exposed =
         gadget != null &&
             gadget.udc.isNotEmpty() &&
-            gadget.configLinks.values.any { it == GadgetNames.HID_KEYBOARD_FUNCTION || it == GadgetNames.HID_MOUSE_FUNCTION }
+            gadget.configLinks.values.any { it == GadgetNames.HID_KEYBOARD_FUNCTION || MouseLayout.ofFunction(it) != null }
     if (!exposed) return "Not exposed on USB yet"
     return when (link) {
         HidLinkState.Stopped, HidLinkState.Opening -> "Exposed on USB · connecting…"

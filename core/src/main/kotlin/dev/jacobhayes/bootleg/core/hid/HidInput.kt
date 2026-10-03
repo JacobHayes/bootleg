@@ -88,7 +88,7 @@ class KeyboardInput {
     }
 }
 
-/** Mouse button state plus touchpad actions to boot mouse reports. */
+/** Mouse button state plus touchpad actions to mouse reports. */
 class MouseInput {
     var buttonBits: Int = 0
         private set
@@ -99,7 +99,14 @@ class MouseInput {
             is TouchpadAction.Click -> click(action.button)
             is TouchpadAction.Press -> press(action.button)
             is TouchpadAction.Release -> release(action.button)
+            is TouchpadAction.Scroll -> scroll(action.wheel, action.pan)
         }
+
+    /** A scroll report keeps the held buttons; scrolling has no state of its own to release. */
+    fun scroll(
+        wheel: Int,
+        pan: Int,
+    ): List<MouseReport> = if (wheel == 0 && pan == 0) emptyList() else listOf(MouseReport.scroll(buttonBits, wheel, pan))
 
     fun click(button: MouseButton): List<MouseReport> = listOf(MouseReport(buttonBits or button.bit), MouseReport(buttonBits))
 

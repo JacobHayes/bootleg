@@ -6,7 +6,6 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import android.system.StructPollfd
-import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.HidLimits
 
 /**
@@ -15,13 +14,18 @@ import dev.jacobhayes.bootleg.core.hid.HidLimits
  * [dev.jacobhayes.bootleg.root.HidRelay].
  */
 class FdHidEndpoint(
-    private val kind: HidKind,
+    /** The function's `report_length`; every write is exactly this long. */
+    val reportLengthBytes: Int,
     private val descriptor: ParcelFileDescriptor,
 ) : HidEndpoint {
+    init {
+        require(reportLengthBytes in 1..REPORT_LENGTH_BYTES_MAX) { "bad report length: $reportLengthBytes" }
+    }
+
     private val readBuffer = ByteArray(OUTPUT_REPORT_SIZE_BYTES_MAX)
 
     override fun write(report: ByteArray): HidWriteResult {
-        require(report.size == kind.reportSizeBytes) { "$kind report must be ${kind.reportSizeBytes} bytes" }
+        require(report.size == reportLengthBytes) { "report must be $reportLengthBytes bytes, got ${report.size}" }
         return try {
             // f_hid takes a report in one write or not at all.
             val writtenBytes = Os.write(descriptor.fileDescriptor, report, 0, report.size)
@@ -75,5 +79,8 @@ class FdHidEndpoint(
 
         /** The keyboard's LED report is one byte; f_hid never hands back more than the report length. */
         const val OUTPUT_REPORT_SIZE_BYTES_MAX = 64
+
+        /** Bootleg's reports are at most 8 bytes; anything far beyond is a bug. */
+        const val REPORT_LENGTH_BYTES_MAX = 64
     }
 }

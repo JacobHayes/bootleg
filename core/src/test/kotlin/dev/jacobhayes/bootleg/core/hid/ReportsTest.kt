@@ -1,5 +1,6 @@
 package dev.jacobhayes.bootleg.core.hid
 
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.element
 import io.kotest.property.arbitrary.int
@@ -60,6 +61,11 @@ class KeyboardReportTest {
         assertThrows<IllegalArgumentException> { KeyboardReport(0, listOf(KeyUsage.ERROR_ROLL_OVER)) }
         assertThrows<IllegalArgumentException> { KeyboardReport(0, listOf(KeyUsage.ERROR_ROLL_OVER, KeyUsage.A)) }
         assertThrows<IllegalArgumentException> { KeyboardReport.pressing(0, listOf(KeyUsage.ERROR_ROLL_OVER)) }
+        // abs(Int.MIN_VALUE) is negative: the range checks must not wave it through.
+        assertThrows<IllegalArgumentException> { MouseReport(deltaX = Int.MIN_VALUE) }
+        assertThrows<IllegalArgumentException> { MouseReport(deltaY = Int.MIN_VALUE) }
+        assertThrows<IllegalArgumentException> { MouseReport(wheel = Int.MIN_VALUE) }
+        assertThrows<IllegalArgumentException> { MouseReport(pan = Int.MIN_VALUE) }
     }
 
     @Test
@@ -98,9 +104,44 @@ class MouseReportTest {
     @Test
     fun `encodes buttons and signed deltas`() {
         val report = MouseReport(MouseButton.bitsOf(listOf(MouseButton.LEFT, MouseButton.MIDDLE)), -1, 127)
-        assertArrayEquals(byteArrayOf(0x05, 0xFF.toByte(), 0x7F), report.encode())
+        assertArrayEquals(byteArrayOf(0x05, 0xFF.toByte(), 0x7F, 0, 0), report.encode())
+        assertArrayEquals(byteArrayOf(0x05, 0xFF.toByte(), 0x7F), report.encodeFor(MouseLayout.BOOT))
         assertEquals(report, MouseReport.decode(report.encode()))
+        assertEquals(report, MouseReport.decode(report.encodeFor(MouseLayout.BOOT)))
     }
+
+    @Test
+    fun `scroll goes in bytes 3 and 4 and keeps the held buttons`() {
+        val report = MouseReport.scroll(MouseButton.LEFT.bit, wheel = -3, pan = 2)
+        assertArrayEquals(byteArrayOf(0x01, 0, 0, 0xFD.toByte(), 0x02), report.encode())
+        assertTrue(report.isScroll)
+        assertEquals(MouseReport(0, wheel = 127, pan = -127), MouseReport.scroll(0, 1000, -1000))
+        assertThrows<IllegalArgumentException> { MouseReport(0, wheel = 128) }
+        assertThrows<IllegalArgumentException> { MouseReport(0, pan = -128) }
+        assertThrows<IllegalArgumentException> { MouseReport.forLayout(ByteArray(3), MouseLayout.BOOT) }
+    }
+
+    @Test
+    fun `bytes 0 to 2 of every wheel report are the boot report (HID 1_11 B_2) (property)`() =
+        runBlocking<Unit> {
+            checkAll(
+                Arb.int(0..7),
+                Arb.int(-127..127),
+                Arb.int(-127..127),
+                Arb.int(-127..127),
+                Arb.int(-127..127),
+            ) { buttons, x, y, wheel, pan ->
+                val wheelReport = MouseReport(buttons, x, y, wheel, pan)
+                val bootOnly = MouseReport(buttons, x, y)
+                val bytes = wheelReport.encode()
+                assertEquals(MouseLayout.WHEEL.reportLengthBytes, bytes.size)
+                // A boot-protocol host reads only bytes 0..2: identical to the 3-byte boot mouse.
+                assertArrayEquals(bootOnly.encodeFor(MouseLayout.BOOT), bytes.copyOf(3))
+                assertArrayEquals(bytes.copyOf(3), MouseReport.forLayout(bytes, MouseLayout.BOOT))
+                assertArrayEquals(bytes, MouseReport.forLayout(bytes, MouseLayout.WHEEL))
+                assertEquals(wheelReport, MouseReport.decode(bytes))
+            }
+        }
 
     @Test
     fun `out of range reports are rejected and clamped reports are not`() {

@@ -43,7 +43,7 @@ class HidRelay internal constructor(
     constructor() : this(
         { kind ->
             val node = HidNodes.open(kind)
-            FdRelayEndpoint(FdHidEndpoint(kind, node.descriptor), node.sysfsPath, node.sysfsInode)
+            FdRelayEndpoint(FdHidEndpoint(node.reportLengthBytes, node.descriptor), node.sysfsPath, node.sysfsInode)
         },
         BinderDeathLink,
         { message -> Log.w(TAG, message) },
@@ -67,7 +67,10 @@ class HidRelay internal constructor(
 
     /** An open `/dev/hidgN` as the relay uses it; a fake in JVM tests. */
     interface RelayEndpoint {
-        /** Nonblocking writes within the 50ms report deadline. */
+        /** The function's `report_length`: the leading part of each app report this function takes. */
+        val reportLengthBytes: Int
+
+        /** Nonblocking writes within the 50ms report deadline; [report] is exactly [reportLengthBytes]. */
         fun writeWithin(report: ByteArray): HidWriteResult
 
         fun readOutputReport(): ByteArray?
@@ -196,7 +199,7 @@ class HidRelay internal constructor(
     ): HidWriteResult {
         require(report.size == kind.reportSizeBytes) { "$kind report must be ${kind.reportSizeBytes} bytes, got ${report.size}" }
         // The notice can't race the caller's reopen: opens are refused until the settle ends.
-        return locked { current(kind)?.writeWithin(report) ?: HidWriteResult.DISCONNECTED }
+        return locked { current(kind)?.let { it.writeWithin(fit(report, it)) } ?: HidWriteResult.DISCONNECTED }
     }
 
     fun readOutput(kind: HidKind): ByteArray = locked { current(kind)?.readOutputReport() ?: ByteArray(0) }
@@ -338,7 +341,7 @@ class HidRelay internal constructor(
     ) {
         when (endpoint.binding()) {
             Binding.CURRENT -> {
-                runCatching { endpoint.writeWithin(kind.releaseAllReport) }
+                runCatching { endpoint.writeWithin(fit(kind.releaseAllReport, endpoint)) }
                 runCatching { endpoint.close() }
             }
             // Unbound and not rebound yet: the last close releases the cdev cleanly.
@@ -350,6 +353,19 @@ class HidRelay internal constructor(
                 warn("$kind hidg fd was open across a rebind by someone else; keeping it open, since closing it would panic the kernel")
             }
         }
+    }
+
+    /**
+     * The part of an app report [endpoint] takes. App mouse reports use the wheel layout; the
+     * compatible mouse takes their first 3 bytes, which are the boot report (HID 1.11 B.2).
+     */
+    private fun fit(
+        report: ByteArray,
+        endpoint: RelayEndpoint,
+    ): ByteArray {
+        val lengthBytes = endpoint.reportLengthBytes
+        check(lengthBytes in 1..report.size) { "endpoint takes $lengthBytes bytes of a ${report.size}-byte report" }
+        return if (lengthBytes == report.size) report else report.copyOf(lengthBytes)
     }
 
     private fun detachClient() {
@@ -365,6 +381,8 @@ class HidRelay internal constructor(
         private val sysfsPath: String,
         private val sysfsInode: Long,
     ) : RelayEndpoint {
+        override val reportLengthBytes: Int get() = endpoint.reportLengthBytes
+
         override fun writeWithin(report: ByteArray) = endpoint.writeWithin(report)
 
         override fun readOutputReport() = endpoint.readOutputReport()

@@ -1,16 +1,50 @@
 package dev.jacobhayes.bootleg.core.hid
 
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 
-/** One of Bootleg's two HID functions; [wireName] is what crosses the root AIDL boundary. */
+/**
+ * One of Bootleg's two HID kinds; [wireName] is what crosses the root AIDL boundary. The mouse has
+ * one function per [MouseLayout]; [functionNames] lists every function that may serve the kind.
+ * [reportSizeBytes] is the size of the reports the app builds (the mouse's wheel layout); root
+ * writes only the live function's `report_length` of them.
+ */
 enum class HidKind(
     val wireName: String,
-    val functionName: String,
+    val functionNames: List<String>,
     val reportSizeBytes: Int,
 ) {
-    KEYBOARD("keyboard", GadgetNames.HID_KEYBOARD_FUNCTION, HidLimits.KEYBOARD_REPORT_SIZE_BYTES),
-    MOUSE("mouse", GadgetNames.HID_MOUSE_FUNCTION, HidLimits.MOUSE_REPORT_SIZE_BYTES),
+    KEYBOARD("keyboard", listOf(GadgetNames.HID_KEYBOARD_FUNCTION), HidLimits.KEYBOARD_REPORT_SIZE_BYTES),
+    MOUSE("mouse", MouseLayout.entries.map { it.functionName }, HidLimits.MOUSE_REPORT_SIZE_BYTES),
     ;
+
+    /** `report_length` [functionName] must have: the keyboard's, or the mouse layout's. */
+    fun reportLengthBytesOf(functionName: String): Int {
+        require(functionName in functionNames) { "$functionName is not a $wireName function" }
+        return when (this) {
+            KEYBOARD -> HidLimits.KEYBOARD_REPORT_SIZE_BYTES
+            MOUSE -> checkNotNull(MouseLayout.ofFunction(functionName)).reportLengthBytes
+        }
+    }
+
+    /**
+     * The function to open: the one of [functionNames] linked into the config, else the only one that
+     * exists. Two linked, or two unlinked with none linked, is a half-finished switch: refuse (the
+     * session retries with backoff).
+     */
+    fun resolveFunction(
+        existing: Set<String>,
+        linked: Set<String>,
+    ): String {
+        val present = functionNames.filter { it in existing }
+        check(present.isNotEmpty()) { "no $wireName function exists; enable keyboard and mouse first" }
+        val linkedPresent = present.filter { it in linked }
+        return when {
+            linkedPresent.size == 1 -> linkedPresent.single()
+            linkedPresent.isEmpty() && present.size == 1 -> present.single()
+            else -> error("ambiguous $wireName functions (existing $present, linked $linkedPresent)")
+        }
+    }
 
     /** The report that releases every key or button this function can hold. */
     val releaseAllReport: ByteArray

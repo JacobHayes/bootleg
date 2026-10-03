@@ -1,9 +1,14 @@
 package dev.jacobhayes.bootleg.core.hid
 
 import dev.jacobhayes.bootleg.core.gadget.HidDescriptorProvider
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 
 /**
  * Boot-protocol report descriptors (HID 1.11 appendix B.1 / B.2), no report IDs.
+ *
+ * The wheel mouse is B.2 with Wheel and AC Pan bytes appended after X and Y. B.2 allows a boot
+ * device to send more than the 3 boot bytes; a boot-protocol host reads bytes 0..2 only, so the same
+ * report serves BIOS and report-protocol hosts and nothing depends on SET_PROTOCOL.
  *
  * Deviation from B.1: the keyboard key array covers usages 0x00..0xFF (logical max 255) rather
  * than 0x00..0x65, so report-protocol hosts accept F13–F24, Intl/Lang and media usages. BIOS hosts
@@ -52,7 +57,7 @@ object HidDescriptors : HidDescriptorProvider {
             }
         }
 
-    override fun mouse(): ByteArray =
+    override fun mouse(layout: MouseLayout): ByteArray =
         descriptor {
             usagePage(USAGE_PAGE_GENERIC_DESKTOP)
             usage(USAGE_MOUSE)
@@ -80,6 +85,23 @@ object HidDescriptors : HidDescriptorProvider {
                     reportSize(8)
                     reportCount(2)
                     input(DATA_VARIABLE_RELATIVE)
+                    if (layout == MouseLayout.WHEEL) {
+                        // Byte 3: vertical wheel, detents (+ = away from the user, scroll up).
+                        usage(USAGE_WHEEL)
+                        logicalMinimum(-HidLimits.MOUSE_DELTA_MAX)
+                        logicalMaximum(HidLimits.MOUSE_DELTA_MAX)
+                        reportSize(8)
+                        reportCount(1)
+                        input(DATA_VARIABLE_RELATIVE)
+                        // Byte 4: horizontal scroll (+ = right).
+                        usagePage(USAGE_PAGE_CONSUMER)
+                        usage(USAGE_AC_PAN)
+                        logicalMinimum(-HidLimits.MOUSE_DELTA_MAX)
+                        logicalMaximum(HidLimits.MOUSE_DELTA_MAX)
+                        reportSize(8)
+                        reportCount(1)
+                        input(DATA_VARIABLE_RELATIVE)
+                    }
                 }
             }
         }
@@ -88,6 +110,9 @@ object HidDescriptors : HidDescriptorProvider {
     private const val USAGE_PAGE_KEYBOARD = 0x07
     private const val USAGE_PAGE_LEDS = 0x08
     private const val USAGE_PAGE_BUTTON = 0x09
+    private const val USAGE_PAGE_CONSUMER = 0x0C
+    private const val USAGE_WHEEL = 0x38
+    private const val USAGE_AC_PAN = 0x0238
     private const val USAGE_POINTER = 0x01
     private const val USAGE_MOUSE = 0x02
     private const val USAGE_KEYBOARD = 0x06

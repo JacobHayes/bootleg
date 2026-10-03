@@ -62,7 +62,7 @@ data class GadgetTarget(
             buildList {
                 if (luns.isNotEmpty()) add(GadgetNames.MASS_STORAGE_FUNCTION)
                 if (hid.keyboard) add(GadgetNames.HID_KEYBOARD_FUNCTION)
-                if (hid.mouse) add(GadgetNames.HID_MOUSE_FUNCTION)
+                if (hid.mouse) add(hid.mouseLayout.functionName)
             }
 
     companion object {

@@ -13,7 +13,7 @@ import org.junit.jupiter.api.assertThrows
 class HidNodeGuardTest {
     private val udc = FakeConfigFs.PIXEL_UDC
     private val keyboard = GadgetNames.HID_KEYBOARD_FUNCTION
-    private val mouse = GadgetNames.HID_MOUSE_FUNCTION
+    private val mouse = GadgetNames.HID_WHEEL_MOUSE_FUNCTION
     private val hid = HidSpec(keyboard = true, mouse = true)
     private val disk = SlotSpec(0, img(1), LunMode.DISK_RO)
 
@@ -93,16 +93,17 @@ class HidNodeGuardTest {
     }
 
     @Test
-    fun `interleaved HID on, HID off and HAL relinks never close an fd across a rebind`() {
+    fun `interleaved HID on, HID off, mouse layout swaps and HAL relinks never close an fd across a rebind`() {
         for (seed in 0L until INTERLEAVING_SEED_COUNT) {
             val random = kotlin.random.Random(seed)
             val rig = GadgetRig(seed)
             val controller = rig.controller()
             repeat(INTERLEAVING_STEP_COUNT) { step ->
                 val context = "seed $seed step $step"
-                when (random.nextInt(4)) {
+                when (random.nextInt(5)) {
                     0 -> controller.apply(Desired(listOf(disk), hid))
                     1 -> controller.apply(Desired(listOf(disk)))
+                    4 -> controller.apply(Desired(listOf(disk), hid.copy(mouseLayout = MouseLayout.BOOT)))
                     2 -> rig.hal.setFunctions(listOf("adb", "ptp,adb", "mtp,adb").random(random))
                     else -> {
                         rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)
@@ -138,6 +139,23 @@ class HidNodeGuardTest {
         rig.assertNoHazards()
         rig.hidNodes.reopen()
         assertEquals(2, rig.hidNodes.relayOpenCount(), "the session reopens once the call is over")
+    }
+
+    @Test
+    fun `swapping the mouse layout with the session open closes the relay first and removes the old function`() {
+        val rig = GadgetRig()
+        val controller = rig.hidOnAndOpen()
+        for (layout in listOf(MouseLayout.BOOT, MouseLayout.WHEEL)) {
+            val swapped = Desired(listOf(disk), hid.copy(mouseLayout = layout))
+            assertTrue(assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(swapped)).reenumerated, "$layout")
+            rig.assertNoHazards()
+            assertEquals(0, rig.hidNodes.relayOpenCount(), "$layout: closed for the swap")
+            val linked = rig.state().configLinks.values
+            assertTrue(layout.functionName in linked, "$layout linked")
+            MouseLayout.entries.filter { it != layout }.forEach { assertFalse(it.functionName in linked, "$it unlinked") }
+            rig.hidNodes.reopen()
+            assertEquals(2, rig.hidNodes.relayOpenCount(), "$layout: the session reopens on the new function")
+        }
     }
 
     @Test

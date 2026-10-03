@@ -430,14 +430,15 @@ class FakeHidNodes(
 
     companion object {
         const val RELAY = "relay"
-        val RELAY_FUNCTIONS = listOf(GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_MOUSE_FUNCTION)
+        val RELAY_FUNCTIONS = listOf(GadgetNames.HID_KEYBOARD_FUNCTION) + MouseLayout.entries.map { it.functionName }
     }
 }
 
 object FakeHidDescriptors : HidDescriptorProvider {
     override fun keyboard(): ByteArray = byteArrayOf(0x05, 0x01, 0x09, 0x06, 0xA1.toByte(), 0x01, 0xC0.toByte())
 
-    override fun mouse(): ByteArray = byteArrayOf(0x05, 0x01, 0x09, 0x02, 0xA1.toByte(), 0x01, 0xC0.toByte())
+    override fun mouse(layout: MouseLayout): ByteArray =
+        byteArrayOf(0x05, 0x01, 0x09, 0x02, 0xA1.toByte(), 0x01, layout.reportLengthBytes.toByte(), 0xC0.toByte())
 }
 
 /**

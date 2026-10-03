@@ -2,6 +2,7 @@ package dev.jacobhayes.bootleg
 
 import android.content.Context
 import android.content.SharedPreferences
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,12 +16,21 @@ class Prefs(
     private val wifiOnlyFlow = MutableStateFlow(preferences.getBoolean(KEY_WIFI_ONLY, false))
     private val restoreFlow = MutableStateFlow(preferences.getBoolean(KEY_RESTORE_AFTER_REBOOT, false))
     private val remoteEnabledFlow = MutableStateFlow(preferences.getBoolean(KEY_REMOTE_ENABLED, false))
+    private val mouseLayoutFlow = MutableStateFlow(mouseLayoutOf(preferences))
 
     val wifiOnlyDownloads: StateFlow<Boolean> = wifiOnlyFlow.asStateFlow()
     val restoreAfterReboot: StateFlow<Boolean> = restoreFlow.asStateFlow()
 
     /** Remote control is on (off by default; never turned on at boot). */
     val remoteEnabled: StateFlow<Boolean> = remoteEnabledFlow.asStateFlow()
+
+    /** The mouse layout HID uses: the scroll wheel unless "Compatible mouse (no wheel)" is on. */
+    val mouseLayout: StateFlow<MouseLayout> = mouseLayoutFlow.asStateFlow()
+
+    fun setMouseLayout(layout: MouseLayout) {
+        preferences.edit().putBoolean(KEY_COMPATIBLE_MOUSE, layout == MouseLayout.BOOT).apply()
+        mouseLayoutFlow.value = layout
+    }
 
     fun setWifiOnlyDownloads(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_WIFI_ONLY, enabled).apply()
@@ -47,5 +57,10 @@ class Prefs(
         const val KEY_WIFI_ONLY = "wifi_only_downloads"
         const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
         const val KEY_REMOTE_ENABLED = "remote_enabled"
+        const val KEY_COMPATIBLE_MOUSE = "compatible_mouse"
+
+        /** Read by the boot path too, which has no [Prefs] instance. */
+        fun mouseLayoutOf(preferences: SharedPreferences): MouseLayout =
+            if (preferences.getBoolean(KEY_COMPATIBLE_MOUSE, false)) MouseLayout.BOOT else MouseLayout.WHEEL
     }
 }

@@ -13,6 +13,7 @@ import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.JournalStore
 import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
 import dev.jacobhayes.bootleg.core.gadget.UsbProps
 
@@ -62,10 +63,13 @@ fun canonicalizeDesired(
  * can't be expressed (an empty LUN has no backing path to put in a slot).
  */
 fun adoptableDesired(state: GadgetState): Desired? {
+    // A linked mouse function's name says its layout; with both linked (a crash mid-swap) keep the wheel.
+    val mouseLayouts = MouseLayout.entries.filter { it.functionName in state.configLinks }
     val hid =
         HidSpec(
             keyboard = GadgetNames.HID_KEYBOARD_FUNCTION in state.configLinks,
-            mouse = GadgetNames.HID_MOUSE_FUNCTION in state.configLinks,
+            mouse = mouseLayouts.isNotEmpty(),
+            mouseLayout = mouseLayouts.firstOrNull() ?: MouseLayout.WHEEL,
         )
     val luns = if (GadgetNames.MASS_STORAGE_FUNCTION in state.configLinks) state.luns else emptyMap()
     if (luns.keys.sorted() != luns.keys.indices.toList() || luns.values.any { it.file.isEmpty() }) return null

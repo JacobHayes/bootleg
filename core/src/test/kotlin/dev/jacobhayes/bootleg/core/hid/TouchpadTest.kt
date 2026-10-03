@@ -37,6 +37,9 @@ class TouchpadTest {
                 { TouchpadTuning(tapTimeoutMs = Long.MAX_VALUE, holdToDragMs = Long.MAX_VALUE) },
                 { TouchpadTuning(holdToDragMs = TouchpadTuning.HOLD_TO_DRAG_MS_MAX + 1) },
                 { TouchpadTuning(tapTimeoutMs = 0) },
+                { TouchpadTuning(scrollDpPerDetent = 0f) },
+                { TouchpadTuning(scrollDpPerDetent = Float.NaN) },
+                { TouchpadTuning(scrollDpPerDetent = TouchpadTuning.SCROLL_DP_PER_DETENT_MAX + 1f) },
             )
         invalid.forEachIndexed { index, build -> assertThrows<IllegalArgumentException>("case $index") { build() } }
         // The maxima themselves are accepted.
@@ -47,6 +50,7 @@ class TouchpadTest {
             countsPerDp = TouchpadTuning.COUNTS_PER_DP_MAX,
             accelerationGainMax = TouchpadTuning.ACCELERATION_GAIN_MAX,
             fastSpeedDpPerMs = TouchpadTuning.FAST_SPEED_DP_PER_MS_MAX,
+            scrollDpPerDetent = TouchpadTuning.SCROLL_DP_PER_DETENT_MAX,
         )
     }
 
@@ -74,14 +78,74 @@ class TouchpadTest {
         assertEquals(listOf(TouchpadAction.Click(MouseButton.RIGHT)), pad.up(1, 110))
     }
 
+    private fun scrolls(actions: List<TouchpadAction>) = actions.filterIsInstance<TouchpadAction.Scroll>()
+
     @Test
-    fun `two-finger movement neither moves nor clicks (no wheel)`() {
+    fun `two fingers dragged down scroll down by their centroid, without moving or clicking`() {
         val pad = TouchpadGestures(tuning)
         pad.down(1, 100f, 100f, 0)
         pad.down(2, 160f, 100f, 10)
-        assertEquals(emptyList<TouchpadAction>(), pad.move(1, 100f, 160f, 50) + pad.move(2, 160f, 160f, 50))
-        assertEquals(emptyList<TouchpadAction>(), pad.up(1, 80) + pad.up(2, 90))
+        val actions =
+            (1..6).flatMap { step ->
+                pad.move(1, 100f, 100f + step * 10f, step * 16L) +
+                    pad.move(2, 160f, 100f + step * 10f, step * 16L)
+            }
+        assertEquals(emptyList<TouchpadAction.Move>(), moves(actions))
+        val scrolled = scrolls(actions)
+        assertTrue(scrolled.isNotEmpty())
+        // Centroid moved 60dp down; the part inside the tap slop doesn't scroll. Down is negative wheel.
+        val wheel = scrolled.sumOf { it.wheel }
+        assertTrue(wheel < 0 && wheel >= -60 / tuning.scrollDpPerDetent.toInt(), "wheel $wheel")
+        assertTrue(scrolled.all { it.pan == 0 })
+        assertEquals(emptyList<TouchpadAction>(), pad.up(1, 120) + pad.up(2, 130))
     }
+
+    @Test
+    fun `two fingers dragged right pan right, and small wobbles never scroll`() {
+        val pad = TouchpadGestures(tuning)
+        pad.down(1, 0f, 0f, 0)
+        pad.down(2, 0f, 50f, 0)
+        assertEquals(emptyList<TouchpadAction>(), pad.move(1, 3f, 2f, 20) + pad.move(2, 3f, 52f, 20))
+        val actions =
+            (1..10).flatMap { step ->
+                pad.move(1, step * 20f, 0f, 20L + step * 16) + pad.move(2, step * 20f, 50f, 20L + step * 16)
+            }
+        val scrolled = scrolls(actions)
+        assertTrue(scrolled.sumOf { it.pan } > 0)
+        assertTrue(scrolled.all { it.wheel == 0 })
+        // A two-finger gesture that scrolled is not a right click.
+        assertEquals(emptyList<TouchpadAction>(), pad.up(1, 300) + pad.up(2, 300))
+    }
+
+    @Test
+    fun `a second finger during a hold-drag moves the pointer instead of scrolling`() {
+        val pad = TouchpadGestures(tuning)
+        pad.down(1, 50f, 50f, 0)
+        assertEquals(listOf(TouchpadAction.Press(MouseButton.LEFT)), pad.tick(tuning.holdToDragMs))
+        pad.down(2, 100f, 50f, tuning.holdToDragMs + 10)
+        val actions = pad.move(1, 50f, 90f, tuning.holdToDragMs + 30) + pad.move(2, 100f, 90f, tuning.holdToDragMs + 30)
+        assertEquals(emptyList<TouchpadAction.Scroll>(), scrolls(actions))
+        assertTrue(moves(actions).isNotEmpty())
+    }
+
+    @Test
+    fun `scroll keeps sub-detent remainders and clamps each report (property)`() =
+        runBlocking<Unit> {
+            checkAll(Arb.list(Arb.float(-30f, 30f).filter { it.isFinite() }, 1..50)) { deltas ->
+                val accumulator = ScrollAccumulator(tuning.scrollDpPerDetent)
+                val total = deltas.sumOf { accumulator.apply(0f, it)?.wheel?.toDouble() ?: 0.0 }
+                // Detents sent equal the travel rounded toward zero, within one detent of float error.
+                val expected = -deltas.sumOf { it.toDouble() } / tuning.scrollDpPerDetent
+                assertTrue(abs(total - expected) < 1.0 + 1e-3, "sent $total for $expected")
+            }
+            val accumulator = ScrollAccumulator(1f)
+            assertEquals(
+                TouchpadAction.Scroll(-HidLimits.MOUSE_SCROLL_MAX, HidLimits.MOUSE_SCROLL_MAX),
+                accumulator.apply(10_000f, 10_000f),
+            )
+            // The excess was dropped, not carried.
+            assertEquals(null, accumulator.apply(0f, 0f))
+        }
 
     @Test
     fun `drag beyond slop moves without clicking`() {
@@ -176,5 +240,8 @@ class TouchpadTest {
         assertEquals(listOf(MouseReport(3), MouseReport(1)), mouse.apply(TouchpadAction.Click(MouseButton.RIGHT)))
         assertEquals(listOf(MouseReport(0)), mouse.apply(TouchpadAction.Release(MouseButton.LEFT)))
         assertEquals(emptyList<MouseReport>(), mouse.apply(TouchpadAction.Release(MouseButton.LEFT)))
+        mouse.apply(TouchpadAction.Press(MouseButton.LEFT))
+        assertEquals(listOf(MouseReport(1, wheel = -2, pan = 1)), mouse.apply(TouchpadAction.Scroll(-2, 1)))
+        assertEquals(1, mouse.buttonBits)
     }
 }

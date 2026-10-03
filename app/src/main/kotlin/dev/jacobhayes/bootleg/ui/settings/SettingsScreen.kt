@@ -11,6 +11,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Mouse
 import androidx.compose.material.icons.outlined.RestartAlt
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,14 +32,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import dev.jacobhayes.bootleg.BuildConfig
 import dev.jacobhayes.bootleg.Prefs
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 
 private const val REPOSITORY_URL = "https://github.com/JacobHayes/bootleg"
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(prefs: Prefs) {
+fun SettingsScreen(
+    prefs: Prefs,
+    onMouseLayoutChanged: () -> Unit = {},
+) {
     val wifiOnly by prefs.wifiOnlyDownloads.collectAsState()
     val restore by prefs.restoreAfterReboot.collectAsState()
+    val mouseLayout by prefs.mouseLayout.collectAsState()
     val context = LocalContext.current
 
     Scaffold(topBar = { TopAppBar(title = { Text("Settings") }) }) { padding ->
@@ -59,6 +65,20 @@ fun SettingsScreen(prefs: Prefs) {
                 body = "Expose the last set of drives again when the phone starts. Drives ejected by the computer stay ejected.",
                 checked = restore,
                 onChange = prefs::setRestoreAfterReboot,
+            )
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionHeader("Keyboard & mouse")
+            SwitchRow(
+                icon = Icons.Outlined.Mouse,
+                title = "Compatible mouse (no wheel)",
+                body =
+                    "Use a plain 3-button mouse without scrolling, for computers whose firmware " +
+                        "mishandles the scroll wheel. Changing it while the mouse is on reconnects USB.",
+                checked = mouseLayout == MouseLayout.BOOT,
+                onChange = { compatible ->
+                    prefs.setMouseLayout(if (compatible) MouseLayout.BOOT else MouseLayout.WHEEL)
+                    onMouseLayoutChanged()
+                },
             )
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionHeader("About")

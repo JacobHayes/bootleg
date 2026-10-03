@@ -171,7 +171,7 @@ class GadgetPlannerTest {
     fun `HID attributes and descriptor are written before the link`() {
         val ops = planner.plan(read(FakeConfigFs.pixel()), Desired(hid = HidSpec(keyboard = true, mouse = true))).ops
         val keyboard = "functions/hid.bootleg_kbd"
-        val mouse = "functions/hid.bootleg_mouse"
+        val mouse = "functions/hid.bootleg_mouse_wheel"
         assertEquals(
             listOf(
                 Op.Mkdir(keyboard),
@@ -182,11 +182,11 @@ class GadgetPlannerTest {
                 Op.WriteBytes("$keyboard/report_desc", FakeHidDescriptors.keyboard()),
                 Op.Write("$mouse/subclass", "1"),
                 Op.Write("$mouse/protocol", "2"),
-                Op.Write("$mouse/report_length", "3"),
-                Op.WriteBytes("$mouse/report_desc", FakeHidDescriptors.mouse()),
+                Op.Write("$mouse/report_length", "5"),
+                Op.WriteBytes("$mouse/report_desc", FakeHidDescriptors.mouse(MouseLayout.WHEEL)),
                 Op.Unbind,
                 Op.Symlink(keyboard, "configs/b.1/hid.bootleg_kbd"),
-                Op.Symlink(mouse, "configs/b.1/hid.bootleg_mouse"),
+                Op.Symlink(mouse, "configs/b.1/hid.bootleg_mouse_wheel"),
                 Op.Bind(udc),
             ),
             ops,
@@ -217,6 +217,63 @@ class GadgetPlannerTest {
         )
         execute(fs, plan)
         assertEquals(FakeConfigFs.PIXEL_FOREIGN_FUNCTIONS.toSet(), read(fs).functions)
+    }
+
+    @Test
+    fun `changing the mouse layout swaps the mouse function in one switch and leaves the keyboard linked`() {
+        for ((from, to) in listOf(MouseLayout.WHEEL to MouseLayout.BOOT, MouseLayout.BOOT to MouseLayout.WHEEL)) {
+            val drives = listOf(SlotSpec(0, img(1), LunMode.DISK_RO))
+            val fs = gadgetWith(Desired(drives, HidSpec(keyboard = true, mouse = true, mouseLayout = from)))
+            val target = Desired(drives, HidSpec(keyboard = true, mouse = true, mouseLayout = to))
+            val plan = planner.plan(read(fs), target)
+            val stage = plan.stages.single()
+            val oldFunction = "functions/${from.functionName}"
+            val newFunction = "functions/${to.functionName}"
+            assertEquals(
+                listOf(
+                    Op.Mkdir(newFunction),
+                    Op.Write("$newFunction/subclass", "1"),
+                    Op.Write("$newFunction/protocol", "2"),
+                    Op.Write("$newFunction/report_length", to.reportLengthBytes.toString()),
+                    Op.WriteBytes("$newFunction/report_desc", FakeHidDescriptors.mouse(to)),
+                ),
+                stage.prepare,
+            )
+            assertEquals(
+                Switch(
+                    unlinks = listOf(Op.Unlink("configs/b.1/${from.functionName}")),
+                    links = listOf(Op.Symlink(newFunction, "configs/b.1/${to.functionName}")),
+                    bind = Op.Bind(udc),
+                ),
+                stage.switch,
+            )
+            assertEquals(listOf(Op.Rmdir(oldFunction)), stage.cleanup)
+            // The keyboard and the drives are never touched.
+            assertTrue(plan.ops.flatMap(GadgetPaths::touchedPaths).none { it.contains("bootleg_kbd") || it.contains("mass_storage") })
+            execute(fs, plan)
+            val after = read(fs)
+            assertEquals(to.functionName, after.configLinks[to.functionName])
+            assertFalse(from.functionName in after.functions)
+            assertEquals(Plan.EMPTY, planner.plan(after, target))
+        }
+    }
+
+    @Test
+    fun `an old linked boot mouse is replaced by the wheel mouse once the wheel layout is wanted`() {
+        // What an earlier version left linked: hid.bootleg_mouse with the 3-byte layout.
+        val fs = gadgetWith(Desired(hid = HidSpec(keyboard = true, mouse = true, mouseLayout = MouseLayout.BOOT)))
+        val plan = planner.plan(read(fs), Desired(hid = HidSpec(keyboard = true, mouse = true)))
+        execute(fs, plan)
+        assertEquals(
+            setOf(GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_WHEEL_MOUSE_FUNCTION),
+            read(fs)
+                .functions
+                .filter {
+                    "bootleg" in
+                        it
+                }.toSet(),
+        )
+        assertEquals("5", fs.read("functions/${GadgetNames.HID_WHEEL_MOUSE_FUNCTION}/report_length").trim())
     }
 
     @Test
@@ -374,5 +431,8 @@ fun randomDesired(
     // A read-only reuse of a path already exported writable is still a writable duplicate.
     val writable = slots.filter { it.mode == LunMode.DISK_RW }.map { it.backingPath }.toSet()
     val fixed = slots.map { if (it.mode != LunMode.DISK_RW && it.backingPath in writable) it.copy(backingPath = iso(9)) else it }
-    return Desired(fixed, HidSpec(keyboard = random.nextBoolean(), mouse = random.nextInt(3) == 0))
+    return Desired(
+        fixed,
+        HidSpec(keyboard = random.nextBoolean(), mouse = random.nextInt(3) == 0, mouseLayout = MouseLayout.entries.random(random)),
+    )
 }

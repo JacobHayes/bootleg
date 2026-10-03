@@ -48,7 +48,11 @@ class BootlegApp : Application() {
 
     val catalog by lazy { CatalogRepository(catalogScrapers(), catalogHttp, File(filesDir, "catalog-cache.json")) }
     val drives by lazy { DrivesController(backend, appScope) }
-    val hid by lazy { HidController(backend, appScope).also { registerActivityLifecycleCallbacks(it.backgroundWatcher) } }
+    val hid by lazy {
+        HidController(backend, appScope, mouseLayout = { prefs.mouseLayout.value }).also {
+            registerActivityLifecycleCallbacks(it.backgroundWatcher)
+        }
+    }
     val remote by lazy { RemoteManager(this, systemBackend, hid, prefs, appScope) }
     val fileTasks by lazy { FileTasks(contentResolver, appScope, storeDir) { backend.refreshImages() } }
 

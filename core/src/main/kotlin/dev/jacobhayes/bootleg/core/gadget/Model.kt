@@ -18,6 +18,7 @@ object GadgetNames {
     const val MASS_STORAGE_FUNCTION = "mass_storage.bootleg"
     const val HID_KEYBOARD_FUNCTION = "hid.bootleg_kbd"
     const val HID_MOUSE_FUNCTION = "hid.bootleg_mouse"
+    const val HID_WHEEL_MOUSE_FUNCTION = "hid.bootleg_mouse_wheel"
     const val OWNED_MARKER = "bootleg"
 }
 
@@ -32,10 +33,32 @@ data class SlotSpec(
     val mode: LunMode,
 )
 
+/**
+ * The mouse function's report layout. Each layout lives in its own function, so switching layouts is
+ * a function swap (configfs refuses HID attribute writes while a function is linked).
+ */
+@Serializable
+enum class MouseLayout(
+    val functionName: String,
+    val reportLengthBytes: Int,
+) {
+    /** Boot mouse plus Wheel and AC Pan bytes appended (HID 1.11 B.2): boot hosts read bytes 0..2 only. */
+    WHEEL(GadgetNames.HID_WHEEL_MOUSE_FUNCTION, 5),
+
+    /** The plain 3-byte boot mouse, for firmware that mishandles a longer boot report. */
+    BOOT(GadgetNames.HID_MOUSE_FUNCTION, 3),
+    ;
+
+    companion object {
+        fun ofFunction(functionName: String): MouseLayout? = entries.firstOrNull { it.functionName == functionName }
+    }
+}
+
 @Serializable
 data class HidSpec(
     val keyboard: Boolean = false,
     val mouse: Boolean = false,
+    val mouseLayout: MouseLayout = MouseLayout.WHEEL,
 )
 
 /** What the user wants exposed. LUNs must be dense: 0 until slots.size. */
@@ -251,9 +274,9 @@ interface GadgetController {
     fun bootlegOff(): ApplyResult
 }
 
-/** HID report descriptors written to each `report_desc` of the `hid.bootleg_kbd` / `hid.bootleg_mouse` functions. Implemented in core/hid. */
+/** HID report descriptors written to each `report_desc` of Bootleg's keyboard and mouse functions. Implemented in core/hid. */
 interface HidDescriptorProvider {
     fun keyboard(): ByteArray
 
-    fun mouse(): ByteArray
+    fun mouse(layout: MouseLayout): ByteArray
 }

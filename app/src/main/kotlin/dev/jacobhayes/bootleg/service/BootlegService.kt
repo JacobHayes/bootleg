@@ -74,6 +74,17 @@ class BootlegService : Service() {
                     }.onFailure { Log.w(TAG, "clearing stale exports failed", it) }
                     watchUsbState()
                 }
+            ACTION_RESTORE ->
+                scope.launch {
+                    // The journal holds the mouse layout of the last apply; the restore follows the setting.
+                    runCatching {
+                        backend.refreshGadget()
+                        val app = BootlegApp.from(this@BootlegService)
+                        val hid = backend.journal.value.desired.hid
+                        if (hid.mouse && hid.mouseLayout != app.prefs.mouseLayout.value) app.hid.setSpec(hid)
+                    }.onFailure { Log.w(TAG, "applying the mouse layout setting failed", it) }
+                    watchUsbState()
+                }
             else -> watchUsbState()
         }
         if (!watching) {

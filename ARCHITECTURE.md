@@ -82,7 +82,8 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
 ## USB gadget
 
 - **Ownership.** Bootleg owns only names containing `bootleg`: `functions/mass_storage.bootleg`,
-  `functions/hid.bootleg_kbd`, `functions/hid.bootleg_mouse`, and same-named links in
+  `functions/hid.bootleg_kbd`, `functions/hid.bootleg_mouse_wheel` or `functions/hid.bootleg_mouse`
+  (see HID), and same-named links in
   `configs/b.1`. It never writes any other path except `UDC` (unbind/rebind). It does not
   snapshot or restore foreign state.
 - **Planner** (pure): `plan(current, desired) -> Plan`, a list of stages built from Ops (`Unbind`,
@@ -390,8 +391,35 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   needed. Keyboard LEDs (output report) are read. The descriptor is HID 1.11 appendix B.1 except
   that the key array spans usages 0x00–0xFF (B.1 stops at 0x65), so report-protocol hosts accept
   F13–F24 (used by the L4 harmless-input test), Intl/Lang and media keys.
-- Mouse: v1 uses a 3-byte boot mouse (buttons, dx, dy), subclass 1 / protocol 2. Scroll wheel is
-  deferred until `SET_PROTOCOL` handling is proven.
+- Mouse: two layouts, both subclass 1 / protocol 2 with no report ID, each in its own function so
+  a layout change is an ordinary function swap:
+  - **Wheel** (default, `hid.bootleg_mouse_wheel`): 5-byte report (buttons, X, Y, Wheel = Generic
+    Desktop 0x38, AC Pan = Consumer 0x0238; all int8 -127..127). HID 1.11 appendix B.2 lets a boot
+    device append data after the 3 boot bytes, and a boot-protocol host (BIOS, boot menus) reads
+    only bytes 0–2. f_hid (6.1, also android14-6.1) answers `SET_PROTOCOL` itself, keeps the value
+    in the kernel (`GET_PROTOCOL` reads it back) and never tells userspace, so Bootleg can't know
+    the mode and doesn't need to: the same report serves both, with no negotiation and no delay.
+    `report_length` 5 also sets the IN endpoint's wMaxPacketSize; a write longer than
+    `report_length` is truncated by the kernel.
+  - **Compatible** (Settings "Compatible mouse (no wheel)", `hid.bootleg_mouse`): the 3-byte boot
+    mouse (buttons, X, Y), for firmware that mishandles a longer boot report.
+
+  Reports are built in the 5-byte wheel layout everywhere; root learns the live layout at
+  `hidOpen` (the linked mouse function, or the only one if none is linked; two candidates and
+  nothing to choose by is refused and retried; its `report_length` must match the layout) and
+  writes the first `report_length` bytes, which is exactly the boot report for the compatible
+  layout. A stale or mismatched layout therefore never writes a malformed report. The keyboard's
+  descriptor and link never change with the setting, but the whole composite device re-enumerates.
+
+  Changing the setting while the mouse is on re-applies HID through `HidController.setSpec`
+  (session closed with release-all, one switch: the new function is built unlinked, the old link
+  replaced by the new one, the old function removed in cleanup; one re-enumeration, same as
+  turning HID on), then reopens the session; no session opens while the change is applied. The
+  swap needs a third f_hid instance for a moment (the kernel has 4 HID minors, shared with other
+  apps' `hid.*` functions); if none is free the prepare fails, the old layout stays and the app
+  says so. While HID is off only the preference changes. The
+  journal records the layout with the HID spec; the restore after reboot applies the setting's
+  layout if the journal's differs. Remote `hid.set` keeps the current layout.
 - Nonblocking writes with a 50ms deadline, a bounded queue (256), and release-all on
   overflow, disconnect, or controller change.
 - `HidSession` (app) owns both relay endpoints and writes from one coroutine. A report the host doesn't take
@@ -403,9 +431,18 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   (see HID fds and gadget changes). Release-all also happens on stop, on app background and on queue overflow, and resets the
   on-screen modifier and button state. Keyboard LED output reports are polled while idle.
 - Input mapping is pure (`core/hid`): `TouchpadGestures` (drag moves with acceleration, tap = left,
-  two-finger tap = right, hold = drag with the left button; no wheel yet, so no scroll gesture),
+  two-finger tap = right, hold = drag with the left button, two-finger drag scrolls),
   `KeyboardInput` on `StickyModifiers` (held and locked modifiers go to the host at once; a
   latched one only with the next key, so a latched Win never opens the Start menu alone).
+- Scrolling: one wheel unit is one detent (no Resolution Multiplier, so no high-resolution
+  scrolling). A drag with two fingers down turns into detents at a fixed dp per detent, carrying
+  the fractional remainder (reset when a gesture starts); each report is clamped to ±127 and any
+  excess is dropped, never queued. Scrolling suppresses the two-finger tap (right click); a second
+  finger joining a hold-drag doesn't scroll (the drag keeps moving the pointer), and scroll
+  reports carry the held button bits. The direction is a traditional wheel
+  (fingers down scroll down, fingers right scroll right); the host's natural-scrolling setting
+  applies on top. Scroll has no held state, so release-all is unchanged. With the compatible
+  layout the app and the remote controller drop scroll input.
 - Paste-as-typing sends one report every 8ms (~60 characters a second). Boot-key plans re-send a
   held key every 200ms, so a host that resets USB while booting still sees it.
 - Debug builds expose only fixed harmless sequences to adb (`HID_SEND`: `f24`, `shift`, `mouse`

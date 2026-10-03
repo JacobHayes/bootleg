@@ -1,5 +1,6 @@
 package dev.jacobhayes.bootleg.core.hid
 
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -107,19 +108,31 @@ enum class MouseButton(
     }
 }
 
-/** One 3-byte boot mouse input report: button bits, relative X, relative Y (screen-down is +Y). */
+/**
+ * One mouse input report: button bits, relative X, relative Y (screen-down is +Y), then the
+ * wheel (+ = scroll up) and AC Pan (+ = scroll right) in detents. [encode] gives the 5-byte wheel
+ * layout; its first 3 bytes are the boot report ([encodeFor] with [MouseLayout.BOOT]).
+ */
 data class MouseReport(
     val buttonBits: Int = 0,
     val deltaX: Int = 0,
     val deltaY: Int = 0,
+    val wheel: Int = 0,
+    val pan: Int = 0,
 ) {
     init {
         require(buttonBits in 0..MouseButton.ALL_BITS) { "button bits out of range: $buttonBits" }
-        require(abs(deltaX) <= HidLimits.MOUSE_DELTA_MAX) { "deltaX out of range: $deltaX" }
-        require(abs(deltaY) <= HidLimits.MOUSE_DELTA_MAX) { "deltaY out of range: $deltaY" }
+        require(deltaX in -HidLimits.MOUSE_DELTA_MAX..HidLimits.MOUSE_DELTA_MAX) { "deltaX out of range: $deltaX" }
+        require(deltaY in -HidLimits.MOUSE_DELTA_MAX..HidLimits.MOUSE_DELTA_MAX) { "deltaY out of range: $deltaY" }
+        require(wheel in -HidLimits.MOUSE_SCROLL_MAX..HidLimits.MOUSE_SCROLL_MAX) { "wheel out of range: $wheel" }
+        require(pan in -HidLimits.MOUSE_SCROLL_MAX..HidLimits.MOUSE_SCROLL_MAX) { "pan out of range: $pan" }
     }
 
-    fun encode(): ByteArray = byteArrayOf(buttonBits.toByte(), deltaX.toByte(), deltaY.toByte())
+    val isScroll: Boolean get() = wheel != 0 || pan != 0
+
+    fun encode(): ByteArray = byteArrayOf(buttonBits.toByte(), deltaX.toByte(), deltaY.toByte(), wheel.toByte(), pan.toByte())
+
+    fun encodeFor(layout: MouseLayout): ByteArray = forLayout(encode(), layout)
 
     companion object {
         fun clamped(
@@ -128,9 +141,37 @@ data class MouseReport(
             deltaY: Int,
         ): MouseReport = MouseReport(buttonBits, clampDelta(deltaX), clampDelta(deltaY))
 
+        /** A scroll-only report holding [buttonBits]; each axis is clamped to int8 detents. */
+        fun scroll(
+            buttonBits: Int,
+            wheel: Int,
+            pan: Int,
+        ): MouseReport = MouseReport(buttonBits, wheel = clampScroll(wheel), pan = clampScroll(pan))
+
+        /**
+         * The bytes a function with [layout] takes from a wheel-layout [report]: its first
+         * `reportLengthBytes`. The layouts share bytes 0..2 (HID 1.11 B.2), so this is exactly the
+         * boot report for [MouseLayout.BOOT].
+         */
+        fun forLayout(
+            report: ByteArray,
+            layout: MouseLayout,
+        ): ByteArray {
+            require(report.size == HidLimits.MOUSE_REPORT_SIZE_BYTES) {
+                "mouse report must be ${HidLimits.MOUSE_REPORT_SIZE_BYTES} bytes, got ${report.size}"
+            }
+            check(layout.reportLengthBytes in HidLimits.MOUSE_BOOT_REPORT_SIZE_BYTES..HidLimits.MOUSE_REPORT_SIZE_BYTES)
+            return report.copyOf(layout.reportLengthBytes)
+        }
+
+        /** Inverse of [encode]; a 3-byte boot report decodes with no scroll. */
         fun decode(report: ByteArray): MouseReport {
-            require(report.size == HidLimits.MOUSE_REPORT_SIZE_BYTES) { "mouse report must be 3 bytes, got ${report.size}" }
-            return MouseReport(report[0].toInt() and 0xFF, report[1].toInt(), report[2].toInt())
+            require(report.size == HidLimits.MOUSE_REPORT_SIZE_BYTES || report.size == HidLimits.MOUSE_BOOT_REPORT_SIZE_BYTES) {
+                "mouse report must be ${HidLimits.MOUSE_REPORT_SIZE_BYTES} or ${HidLimits.MOUSE_BOOT_REPORT_SIZE_BYTES} bytes, got ${report.size}"
+            }
+            val wheel = if (report.size > 3) report[3].toInt() else 0
+            val pan = if (report.size > 4) report[4].toInt() else 0
+            return MouseReport(report[0].toInt() and 0xFF, report[1].toInt(), report[2].toInt(), wheel, pan)
         }
 
         /**
@@ -160,6 +201,8 @@ data class MouseReport(
         }
 
         private fun clampDelta(delta: Int): Int = delta.coerceIn(-HidLimits.MOUSE_DELTA_MAX, HidLimits.MOUSE_DELTA_MAX)
+
+        private fun clampScroll(detents: Int): Int = detents.coerceIn(-HidLimits.MOUSE_SCROLL_MAX, HidLimits.MOUSE_SCROLL_MAX)
 
         private fun stepsFor(delta: Int): Int = (abs(delta) + HidLimits.MOUSE_DELTA_MAX - 1) / HidLimits.MOUSE_DELTA_MAX
 

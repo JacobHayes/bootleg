@@ -153,7 +153,8 @@ class FakeBootlegBackend(
         val hidFunctions =
             listOfNotNull(
                 GadgetNames.HID_KEYBOARD_FUNCTION.takeIf { journal.desired.hid.keyboard },
-                GadgetNames.HID_MOUSE_FUNCTION.takeIf { journal.desired.hid.mouse },
+                journal.desired.hid.mouseLayout.functionName
+                    .takeIf { journal.desired.hid.mouse },
             )
         val functions = (if (luns.isEmpty()) setOf("ffs.adb") else setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION)) + hidFunctions
         return GadgetState(udc = FAKE_UDC, functions = functions, configLinks = hidFunctions.associateWith { it }, luns = luns)

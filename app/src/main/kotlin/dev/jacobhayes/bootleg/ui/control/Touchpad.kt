@@ -35,10 +35,14 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** Relative touchpad: drag moves, tap clicks, two-finger tap right-clicks, touch-and-hold drags. */
+/**
+ * Relative touchpad: drag moves, tap clicks, two-finger tap right-clicks, two-finger drag scrolls
+ * ([scrolling] only says whether the hint offers it), touch-and-hold drags.
+ */
 @Composable
 fun Touchpad(
     onActions: (List<TouchpadAction>) -> Unit,
+    scrolling: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val tuning = remember { TouchpadTuning() }
@@ -105,7 +109,11 @@ fun Touchpad(
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    "Two-finger tap to right-click · Touch and hold to drag\nNo scrolling yet: use PgUp/PgDn or the arrows",
+                    if (scrolling) {
+                        "Two-finger tap to right-click · Two-finger drag to scroll\nTouch and hold to drag"
+                    } else {
+                        "Two-finger tap to right-click · Touch and hold to drag\nCompatible mouse: no scrolling (use PgUp/PgDn)"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.outline,
                     textAlign = TextAlign.Center,

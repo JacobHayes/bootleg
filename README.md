@@ -15,7 +15,7 @@ whatever computer it's plugged into. You can also drive it from another computer
 - **Blank images.** Create raw, FAT32, exFAT or ext4 disk images to use as writable drives or as
   install targets.
 - **Keyboard and mouse.** A BIOS-compatible keyboard and mouse:
-  - a touchpad;
+  - a touchpad, with a scroll wheel (two-finger drag), or a plain boot mouse for picky firmware;
   - sticky Ctrl, Alt (Option), Cmd (Win) and Shift;
   - F1–F24;
   - boot-menu key presets for each vendor;

@@ -6,6 +6,7 @@ import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
+import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.KeyUsage
 import kotlinx.coroutines.CompletableDeferred
@@ -101,6 +102,31 @@ class HidControllerTest {
                 withTimeout(OPEN_SETTLE_MS * 20) {
                     controller.link.first { it == HidLinkState.Failed("restart the phone", restartRequired = true) }
                 }
+            } finally {
+                backend.applied.complete(Unit)
+                controller.setSpec(HidSpec())
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun `no session opens while a mouse layout swap runs, and one opens after it`() {
+        runBlocking<Unit> {
+            val backend = GatedBackend()
+            val scope = CoroutineScope(main)
+            val controller = HidController(backend, scope) { MouseLayout.BOOT }
+            try {
+                val swap = scope.launch { controller.applyMouseLayout() }
+                backend.applying.await()
+                controller.connect()
+                controller.remotePort.send(HidKind.MOUSE, ByteArray(HidKind.MOUSE.reportSizeBytes))
+                delay(OPEN_SETTLE_MS)
+                assertEquals(0, backend.opens.get(), "opened during the swap")
+
+                backend.applied.complete(Unit)
+                swap.join()
+                withTimeout(OPEN_SETTLE_MS * 20) { while (backend.opens.get() == 0) delay(10) }
             } finally {
                 backend.applied.complete(Unit)
                 controller.setSpec(HidSpec())

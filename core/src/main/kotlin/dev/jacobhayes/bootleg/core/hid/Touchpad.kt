@@ -1,5 +1,6 @@
 package dev.jacobhayes.bootleg.core.hid
 
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -17,6 +18,8 @@ data class TouchpadTuning(
     /** Gain at and above [fastSpeedDpPerMs]; it ramps linearly from 1 at rest. */
     val accelerationGainMax: Float = 3.0f,
     val fastSpeedDpPerMs: Float = 1.5f,
+    /** Two-finger travel per scroll detent (one wheel unit; hosts scroll about 3 lines per detent). */
+    val scrollDpPerDetent: Float = 20f,
 ) {
     init {
         // Finite and capped: an infinite or huge value would overflow mouse counts or make taps/drags impossible.
@@ -31,6 +34,9 @@ data class TouchpadTuning(
         require(
             fastSpeedDpPerMs.isFinite() && fastSpeedDpPerMs > 0f && fastSpeedDpPerMs <= FAST_SPEED_DP_PER_MS_MAX,
         ) { "bad fast speed: $this" }
+        require(
+            scrollDpPerDetent.isFinite() && scrollDpPerDetent >= SCROLL_DP_PER_DETENT_MIN && scrollDpPerDetent <= SCROLL_DP_PER_DETENT_MAX,
+        ) { "bad scroll distance: $this" }
     }
 
     companion object {
@@ -40,6 +46,8 @@ data class TouchpadTuning(
         const val COUNTS_PER_DP_MAX = 20f
         const val ACCELERATION_GAIN_MAX = 20f
         const val FAST_SPEED_DP_PER_MS_MAX = 100f
+        const val SCROLL_DP_PER_DETENT_MIN = 1f
+        const val SCROLL_DP_PER_DETENT_MAX = 500f
     }
 }
 
@@ -60,6 +68,54 @@ sealed interface TouchpadAction {
     data class Release(
         val button: MouseButton,
     ) : TouchpadAction
+
+    /** Whole detents: [wheel] > 0 scrolls up, [pan] > 0 scrolls right. Never both zero. */
+    data class Scroll(
+        val wheel: Int,
+        val pan: Int,
+    ) : TouchpadAction {
+        init {
+            require(wheel != 0 || pan != 0) { "empty scroll" }
+        }
+    }
+}
+
+/**
+ * Two-finger travel to scroll detents, carrying the fractional remainder between events. Like a
+ * traditional wheel: fingers moving down scroll down (negative wheel), right scrolls right; the host's
+ * natural-scrolling setting applies on top.
+ */
+class ScrollAccumulator(
+    private val dpPerDetent: Float,
+) {
+    private var remainderWheel = 0f
+    private var remainderPan = 0f
+
+    init {
+        require(dpPerDetent.isFinite() && dpPerDetent > 0f) { "bad dp per detent: $dpPerDetent" }
+    }
+
+    /** Whole detents for a finger movement; the excess beyond one report's range is dropped, not carried. */
+    fun apply(
+        deltaXDp: Float,
+        deltaYDp: Float,
+    ): TouchpadAction.Scroll? {
+        require(deltaXDp.isFinite() && deltaYDp.isFinite()) { "non-finite delta" }
+        val exactWheel = -deltaYDp / dpPerDetent + remainderWheel
+        val exactPan = deltaXDp / dpPerDetent + remainderPan
+        val wheel = exactWheel.toInt()
+        val pan = exactPan.toInt()
+        remainderWheel = exactWheel - wheel
+        remainderPan = exactPan - pan
+        check(abs(remainderWheel) < 1f && abs(remainderPan) < 1f)
+        val limit = HidLimits.MOUSE_SCROLL_MAX
+        return if (wheel == 0 && pan == 0) null else TouchpadAction.Scroll(wheel.coerceIn(-limit, limit), pan.coerceIn(-limit, limit))
+    }
+
+    fun reset() {
+        remainderWheel = 0f
+        remainderPan = 0f
+    }
 }
 
 /** Relative-motion acceleration with sub-count remainders carried between events. */
@@ -100,9 +156,10 @@ class PointerAcceleration(
 
 /**
  * Touchpad gestures: one-finger drag moves the pointer, a tap clicks left, a two-finger tap
- * clicks right, and touch-and-hold presses the left button until the finger lifts (drag).
- * Two-finger movement does nothing (the boot mouse has no wheel). Feed it pointer events and
- * call [tick] while a finger is down so a hold is noticed without movement.
+ * clicks right, two-finger movement scrolls (by the fingers' centroid, once beyond the tap slop,
+ * so it never also right-clicks), and touch-and-hold presses the left button until the finger
+ * lifts (drag; a second finger joining a drag doesn't scroll). Feed it pointer events and call
+ * [tick] while a finger is down so a hold is noticed without movement.
  */
 class TouchpadGestures(
     private val tuning: TouchpadTuning = TouchpadTuning(),
@@ -116,6 +173,7 @@ class TouchpadGestures(
     )
 
     private val acceleration = PointerAcceleration(tuning)
+    private val scroll = ScrollAccumulator(tuning.scrollDpPerDetent)
     private val pointers = LinkedHashMap<Long, Pointer>()
     private var gestureStartMs = 0L
     private var pointerCountMax = 0
@@ -137,6 +195,7 @@ class TouchpadGestures(
             pointerCountMax = 0
             movedBeyondSlop = false
             acceleration.reset()
+            scroll.reset()
         }
         if (pointers.size >= TRACKED_POINTER_COUNT_MAX) return emptyList()
         pointers[pointerId] = Pointer(xDp, yDp, xDp, yDp, timeMs)
@@ -154,12 +213,16 @@ class TouchpadGestures(
         if (hypot(xDp - pointer.startX, yDp - pointer.startY) > tuning.tapSlopDp) movedBeyondSlop = true
         val isPrimary = pointers.keys.first() == pointerId
         val drives = isPrimary && (dragging || (pointerCountMax == 1 && movedBeyondSlop))
+        val scrolls = !dragging && pointers.size == TRACKED_POINTER_COUNT_MAX && movedBeyondSlop
         val actions =
-            if (drives) {
-                val (countsX, countsY) = acceleration.apply(xDp - pointer.lastX, yDp - pointer.lastY, timeMs - pointer.lastMs)
-                if (countsX != 0 || countsY != 0) listOf(TouchpadAction.Move(countsX, countsY)) else emptyList()
-            } else {
-                emptyList()
+            when {
+                drives -> {
+                    val (countsX, countsY) = acceleration.apply(xDp - pointer.lastX, yDp - pointer.lastY, timeMs - pointer.lastMs)
+                    if (countsX != 0 || countsY != 0) listOf(TouchpadAction.Move(countsX, countsY)) else emptyList()
+                }
+                // Each finger's move shifts the centroid by half of it.
+                scrolls -> listOfNotNull(scroll.apply((xDp - pointer.lastX) / 2, (yDp - pointer.lastY) / 2))
+                else -> emptyList()
             }
         pointer.lastX = xDp
         pointer.lastY = yDp
@@ -198,7 +261,7 @@ class TouchpadGestures(
     }
 
     private companion object {
-        /** Only the first two fingers matter (right-click); the rest are ignored. */
+        /** Only the first two fingers matter (right-click, scroll); the rest are ignored. */
         const val TRACKED_POINTER_COUNT_MAX = 2
     }
 }

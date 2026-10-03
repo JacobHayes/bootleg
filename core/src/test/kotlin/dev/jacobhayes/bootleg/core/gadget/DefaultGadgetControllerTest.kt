@@ -445,7 +445,7 @@ class DefaultGadgetControllerTest {
         controller.apply(twoDisks)
         // Something else removes our link (and the kernel unbinds), then rebinds.
         rig.fs.asActor("other") {
-            rig.fs.unlink("configs/b.1/hid.bootleg_mouse")
+            rig.fs.unlink("configs/b.1/hid.bootleg_mouse_wheel")
             rig.fs.write("UDC", udc)
         }
         val startMs = rig.clock.nowMs
@@ -461,7 +461,7 @@ class DefaultGadgetControllerTest {
         val controller = rig.controller()
         controller.apply(twoDisks)
         rig.fs.asActor("other") {
-            rig.fs.unlink("configs/b.1/hid.bootleg_mouse")
+            rig.fs.unlink("configs/b.1/hid.bootleg_mouse_wheel")
             rig.fs.write("UDC", udc)
         }
         // Every link attempt fails from now on.
