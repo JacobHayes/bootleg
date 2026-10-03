@@ -11,6 +11,10 @@ import dev.jacobhayes.bootleg.service.BootlegService
  * in, and otherwise clears the stale journal so a later reconcile doesn't re-export media nobody
  * asked for. The work can't happen here: the root binder arrives by broadcast, which Android
  * won't deliver to this process while this receiver is still running.
+ *
+ * The images live on credential-encrypted storage (`/data/media/0`), readable only after the user
+ * unlocks. BOOT_COMPLETED reaches components that aren't direct-boot aware only after that unlock,
+ * so restore never runs against locked storage; `BootManifestTest` keeps the app that way.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(
