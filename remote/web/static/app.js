@@ -89,6 +89,10 @@ const app = {
   // The pending lease.takeover_request: { requester, name, timer }.
   takeover: null,
   initialized: false,
+  // The last catalog.list reply, the downloads push and the catalog push's rev.
+  catalog: null,
+  downloads: [],
+  catalogRev: 0,
 };
 
 const utf8 = new TextEncoder();
@@ -198,10 +202,15 @@ function handleMessage(message) {
   } else if (message.t === "welcome") {
     app.sessionId = message.sessionId;
     app.auth = message.auth;
-    if (app.auth === "approved") refreshState();
+    if (app.auth === "approved") { refreshState(); listCatalog(); }
   } else if (message.t === "auth") {
     app.auth = message.auth;
-    if (app.auth === "approved") refreshState();
+    if (app.auth === "approved") { refreshState(); listCatalog(); }
+  } else if (message.t === "downloads") {
+    onDownloads(Array.isArray(message.downloads) ? message.downloads : []);
+  } else if (message.t === "catalog") {
+    if (message.catalogRev !== app.catalogRev) listCatalog();
+    app.catalogRev = message.catalogRev;
   } else if (message.t === "state") {
     app.state = message;
   } else if (message.t === undefined && message.id !== undefined && app.pending.has(message.id)) {
@@ -383,6 +392,121 @@ function render() {
     ? (app.pointerLocked ? "Captured. Press Esc to let go of the mouse." : "Click here to capture keyboard and mouse.") + scrollHint
     : "Take control to type or move the mouse.";
   renderState();
+  renderCatalog();
+}
+
+// ---- Catalog and downloads ------------------------------------------------
+
+const ENTRY_STATE_LABELS = {
+  available: "", queued: "Queued", running: "Downloading", paused: "Paused", verifying: "Verifying",
+  completed: "Downloaded", failed: "Failed", downloaded: "In library",
+};
+
+function listCatalog() {
+  const fields = { arch: $("catalog-arch").value, category: $("catalog-category").value };
+  request("catalog.list", fields, false)
+    .then((reply) => {
+      app.catalog = reply;
+      app.catalogRev = reply.catalogRev;
+      render();
+    })
+    .catch((error) => log(`Catalog: ${error.message}`));
+}
+
+// A download that finished changes its entry's state: ask for the list again.
+function onDownloads(downloads) {
+  const before = new Map(app.downloads.map((download) => [download.entryId, download.status]));
+  app.downloads = downloads;
+  const finished = downloads.some((download) => download.status === "completed" && before.get(download.entryId) !== "completed");
+  const removed = [...before.keys()].some((entryId) => !downloads.some((download) => download.entryId === entryId));
+  if (finished || removed) listCatalog();
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let value = bytes, unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function describeDownload(download) {
+  if (download.status === "running" && download.totalBytes > 0) {
+    return `${Math.floor((download.downloadedBytes * 100) / download.totalBytes)}% of ${formatBytes(download.totalBytes)}`;
+  }
+  if (download.status === "completed") return download.verified ? "SHA-256 verified" : "Downloaded (no published checksum)";
+  const label = ENTRY_STATE_LABELS[download.status] || download.status;
+  return download.error ? `${label}: ${download.error}` : label;
+}
+
+function isActive(status) { return status === "queued" || status === "running" || status === "verifying"; }
+
+function entryRow(text, stateText, download, actions) {
+  const row = document.createElement("div");
+  row.className = "entry";
+  const what = document.createElement("span");
+  what.className = "what";
+  what.textContent = text;
+  const state = document.createElement("span");
+  state.className = "state";
+  state.textContent = stateText;
+  row.append(what, state);
+  if (download && download.status === "running" && download.totalBytes > 0) {
+    const bar = document.createElement("progress");
+    bar.max = download.totalBytes;
+    bar.value = Math.min(download.downloadedBytes, download.totalBytes);
+    row.append(bar);
+  }
+  for (const action of actions) {
+    action.disabled = !holdsLease();
+    row.append(action);
+  }
+  return row;
+}
+
+function cancelButton(download) {
+  return button("Cancel", () => act(`Cancel ${download.fileName}`, "download.cancel", { entryId: download.entryId }));
+}
+
+function renderCatalog() {
+  const downloadsById = new Map(app.downloads.map((download) => [download.entryId, download]));
+  // Downloads still in progress or stopped; finished ones show in the catalog as in the library.
+  const unfinished = app.downloads.filter((download) => download.status !== "completed");
+  $("downloads").replaceChildren(...unfinished.map((download) =>
+    entryRow(download.title || download.fileName, describeDownload(download), download, [cancelButton(download)])));
+
+  const catalog = app.catalog;
+  const status = [];
+  if (!catalog) status.push("Loading…");
+  else {
+    if (catalog.refreshing) status.push("Refreshing from the distros…");
+    if (catalog.truncated) status.push("More entries than fit; pick another category.");
+  }
+  $("catalog-status").textContent = status.join(" ");
+  if (!catalog) return;
+  const verifiedNames = new Set(((app.state || {}).images || []).filter((image) => image.verified).map((image) => image.name));
+  const children = [];
+  for (const distro of catalog.distros || []) {
+    const heading = document.createElement("h3");
+    heading.textContent = distro.error ? `${distro.name} (last good list: ${distro.error})` : distro.name;
+    children.push(heading);
+    for (const entry of distro.entries || []) {
+      const download = downloadsById.get(entry.entryId);
+      const state = download && download.status !== "completed" ? download.status : entry.state;
+      const text = [entry.version, entry.variant, formatBytes(entry.sizeBytes), entry.fileName].filter(Boolean).join(" · ");
+      let stateText = download && download.status !== "completed" ? describeDownload(download) : (ENTRY_STATE_LABELS[state] ?? state);
+      if (state === "downloaded" && verifiedNames.has(entry.fileName)) stateText = "In library, SHA-256 verified";
+      const actions = [];
+      if (isActive(state)) {
+        actions.push(cancelButton({ entryId: entry.entryId, fileName: entry.fileName }));
+      } else if (state !== "downloaded" && state !== "completed") {
+        const label = state === "paused" || state === "failed" ? "Resume" : "Download";
+        actions.push(button(label, () => act(`Download ${entry.fileName}`, "download.start", { entryId: entry.entryId })));
+      }
+      children.push(entryRow(text, stateText, download, actions));
+    }
+  }
+  $("catalog").replaceChildren(...children);
 }
 
 function renderState() {
@@ -853,6 +977,9 @@ function bindControls() {
     const warning = "Turn USB tethering off? If this page reaches the phone over that USB link, it disconnects.";
     if (window.confirm(warning)) setTether(false);
   });
+  $("catalog-category").addEventListener("change", listCatalog);
+  $("catalog-arch").addEventListener("change", listCatalog);
+
   $("hid-apply").addEventListener("click", () =>
     act("Keyboard & mouse", "hid.set", { keyboard: $("hid-keyboard").checked, mouse: $("hid-mouse").checked }));
 

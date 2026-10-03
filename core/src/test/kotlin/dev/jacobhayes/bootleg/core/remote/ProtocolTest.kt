@@ -6,6 +6,7 @@ import io.kotest.property.arbitrary.element
 import io.kotest.property.arbitrary.int
 import io.kotest.property.checkAll
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.jupiter.api.Assertions.assertArrayEquals
@@ -227,6 +228,19 @@ class ProtocolTest {
         assertEquals(
             goStrings("Auth"),
             AuthStatus.entries.map { ProtocolJson.json.encodeToString(AuthStatus.serializer(), it).trim('"') }.toSet(),
+        )
+
+        fun <T> wire(
+            serializer: KSerializer<T>,
+            values: List<T>,
+        ): Set<String> = values.map { ProtocolJson.json.encodeToString(serializer, it).trim('"') }.toSet()
+        assertEquals(goStrings("Arch"), wire(WireArch.serializer(), WireArch.entries))
+        assertEquals(goStrings("Category"), wire(WireCategory.serializer(), WireCategory.entries))
+        assertEquals(goStrings("Download"), wire(WireDownloadStatus.serializer(), WireDownloadStatus.entries))
+        assertEquals(goStrings("Start"), wire(DownloadStartResultKind.serializer(), DownloadStartResultKind.entries))
+        assertEquals(
+            wire(WireEntryState.serializer(), WireEntryState.entries),
+            goStrings("Download") + goStrings("Entry"),
         )
         // Kotlin's error codes that Go also names must be spelled the same.
         val goErrors = goStrings("Error")

@@ -40,6 +40,11 @@ func dispatch(ctx context.Context, call *invocation) error {
 			timeout = defaultTimeout + time.Duration(call.repeat)*call.interval
 		case "type":
 			timeout = defaultTimeout // extended once the plan's duration is known
+		case "download":
+			timeout = defaultTimeout
+			if call.follow {
+				timeout = downloadFollowTimeout
+			}
 		default:
 			timeout = defaultTimeout
 		}
@@ -92,6 +97,12 @@ func dispatch(ctx context.Context, call *invocation) error {
 			return withLease(ctx, call, c, func() error { return scrollCommand(ctx, call, c) })
 		case "bootkey":
 			return withLease(ctx, call, c, func() error { return bootkeyCommand(ctx, call, c) })
+		case "catalog":
+			return catalogCommand(ctx, call, c)
+		case "download":
+			return downloadCommand(ctx, call, c)
+		case "downloads":
+			return downloadsCommand(ctx, call, c)
 		case "lease":
 			_, err := c.mutate(ctx, protocol.TypeLeaseRelease, nil)
 			return err

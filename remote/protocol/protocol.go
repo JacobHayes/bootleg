@@ -60,10 +60,17 @@ const (
 	TypePastePrepare       = "paste.prepare"
 	TypePasteRun           = "paste.run"
 	TypePasteCancel        = "paste.cancel"
+	// Catalog downloads: listing needs approval only; start and cancel are mutations.
+	TypeCatalogList    = "catalog.list"
+	TypeDownloadStart  = "download.start"
+	TypeDownloadCancel = "download.cancel"
 	// Pushes from the phone.
 	TypeState = "state"
 	TypeLease = "lease"
 	TypeAuth  = "auth"
+	// Every download with progress; the catalog changed (list it again).
+	TypeDownloads = "downloads"
+	TypeCatalog   = "catalog"
 	// To the holder: someone asks for the lease, or withdrew the request.
 	TypeLeaseTakeoverRequest   = "lease.takeover_request"
 	TypeLeaseTakeoverCancelled = "lease.takeover_cancelled"
@@ -100,7 +107,41 @@ const (
 	ErrorDevice        = "device"
 	ErrorDisksExposed  = "disks_exposed"
 	ErrorTimeout       = "timeout"
+
+	ErrorTooManyDownloads = "too_many_downloads"
+	ErrorStorageLow       = "storage_low"
 )
+
+// Catalog architectures and categories (catalog.list filters).
+const (
+	ArchX86_64 = "x86_64"
+	ArchArm64  = "arm64"
+
+	CategoryDesktop = "desktop"
+	CategoryServer  = "server"
+	CategoryRescue  = "rescue"
+)
+
+// Download statuses (Download.status and, with "available" and
+// "downloaded", Entry.state) and download.start results.
+const (
+	DownloadQueued    = "queued"
+	DownloadRunning   = "running"
+	DownloadPaused    = "paused"
+	DownloadVerifying = "verifying"
+	DownloadCompleted = "completed"
+	DownloadFailed    = "failed"
+
+	EntryAvailable  = "available"
+	EntryDownloaded = "downloaded"
+
+	StartStarted    = "started"
+	StartActive     = "active"
+	StartDownloaded = "downloaded"
+)
+
+// EntryIDLength is the length of an opaque catalog entryId (hex).
+const EntryIDLength = 16
 
 // Slot modes on the wire (core LunMode).
 const (
@@ -280,6 +321,57 @@ type Image struct {
 	SizeBytes int64  `json:"sizeBytes,omitempty"`
 	// DefaultMode is the mode slots.apply uses when a slot names none.
 	DefaultMode string `json:"defaultMode,omitempty"`
+	// Verified: the image matched the distro's published SHA-256.
+	Verified bool `json:"verified,omitempty"`
+}
+
+// Catalog is the catalog.list result.
+type Catalog struct {
+	CatalogRev int64           `json:"catalogRev"`
+	Refreshing bool            `json:"refreshing"`
+	Truncated  bool            `json:"truncated"`
+	Distros    []CatalogDistro `json:"distros"`
+}
+
+// CatalogDistro is one distro of a catalog.list result.
+type CatalogDistro struct {
+	DistroID    string         `json:"distroId"`
+	Name        string         `json:"name"`
+	Category    string         `json:"category"`
+	FetchedAtMs int64          `json:"fetchedAtMs,omitempty"`
+	Error       string         `json:"error,omitempty"`
+	Entries     []CatalogEntry `json:"entries"`
+}
+
+// CatalogEntry is one downloadable release, named by EntryID.
+type CatalogEntry struct {
+	EntryID        string `json:"entryId"`
+	Version        string `json:"version"`
+	Variant        string `json:"variant,omitempty"`
+	Arch           string `json:"arch"`
+	FileName       string `json:"fileName"`
+	SizeBytes      int64  `json:"sizeBytes,omitempty"`
+	SupportedUntil string `json:"supportedUntil,omitempty"`
+	State          string `json:"state"`
+}
+
+// Download is one entry of the downloads push.
+type Download struct {
+	EntryID         string `json:"entryId"`
+	FileName        string `json:"fileName"`
+	Title           string `json:"title"`
+	Status          string `json:"status"`
+	DownloadedBytes int64  `json:"downloadedBytes"`
+	TotalBytes      int64  `json:"totalBytes,omitempty"`
+	Verified        bool   `json:"verified,omitempty"`
+	Error           string `json:"error,omitempty"`
+}
+
+// DownloadStart is the download.start result.
+type DownloadStart struct {
+	EntryID  string `json:"entryId"`
+	FileName string `json:"fileName"`
+	Result   string `json:"result"`
 }
 
 // Slot is one entry of state.slots.

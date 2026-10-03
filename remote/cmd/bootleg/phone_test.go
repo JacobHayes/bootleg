@@ -39,6 +39,13 @@ type fakePhone struct {
 	// holdJobs keeps paste.run and bootkey.run unanswered (until cancelled).
 	holdJobs      bool
 	tetherWarning string
+	// catalog and downloads back catalog.list, download.* and the
+	// downloads push.
+	catalog   []protocol.CatalogDistro
+	downloads []protocol.Download
+	// forgetStarts answers download.start but records nothing (a cancel
+	// that beat the first downloads push).
+	forgetStarts bool
 }
 
 type pendingTakeover struct {
@@ -63,7 +70,56 @@ func newFakePhone() *fakePhone {
 			},
 			Slots: []protocol.Slot{},
 		},
+		catalog: []protocol.CatalogDistro{
+			{DistroID: "netboot", Name: "netboot.xyz", Category: protocol.CategoryRescue, Entries: []protocol.CatalogEntry{
+				{EntryID: "aaaaaaaaaaaaaaaa", Version: "2.0", Arch: protocol.ArchX86_64, FileName: "netboot.xyz.iso", SizeBytes: 2 << 20, State: protocol.EntryAvailable},
+				{EntryID: "bbbbbbbbbbbbbbbb", Version: "2.0", Arch: protocol.ArchArm64, FileName: "netboot.xyz-arm64.iso", State: protocol.EntryAvailable},
+			}},
+			{DistroID: "gparted", Name: "GParted Live", Category: protocol.CategoryRescue, Entries: []protocol.CatalogEntry{
+				{EntryID: "cccccccccccccccc", Version: "1.7", Arch: protocol.ArchX86_64, FileName: "gparted.iso", SizeBytes: 600 << 20, State: protocol.EntryAvailable},
+			}},
+			{DistroID: "debian", Name: "Debian", Category: protocol.CategoryDesktop, Entries: []protocol.CatalogEntry{
+				{EntryID: "dddddddddddddddd", Version: "13", Arch: protocol.ArchX86_64, FileName: "debian.iso", State: protocol.EntryDownloaded},
+			}},
+		},
+		downloads: []protocol.Download{},
 	}
+}
+
+// broadcastDownloads sends the downloads push to every session (locked).
+func (p *fakePhone) broadcastDownloads() {
+	for id := range p.sessions {
+		p.send(id, map[string]any{"t": protocol.TypeDownloads, "downloads": p.downloads})
+	}
+}
+
+// setDownload replaces (or with remove, drops) the download for entryID
+// and pushes the list.
+func (p *fakePhone) setDownload(entryID string, change func(*protocol.Download), remove bool) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	for index := range p.downloads {
+		if p.downloads[index].EntryID == entryID {
+			if remove {
+				p.downloads = append(p.downloads[:index], p.downloads[index+1:]...)
+			} else {
+				change(&p.downloads[index])
+			}
+			break
+		}
+	}
+	p.broadcastDownloads()
+}
+
+func (p *fakePhone) catalogEntry(entryID string) (protocol.CatalogEntry, bool) {
+	for _, distro := range p.catalog {
+		for _, entry := range distro.Entries {
+			if entry.EntryID == entryID {
+				return entry, true
+			}
+		}
+	}
+	return protocol.CatalogEntry{}, false
 }
 
 func (p *fakePhone) lease() protocol.Lease {
@@ -126,6 +182,28 @@ func (p *fakePhone) Command(id int64, raw string) {
 			auth = protocol.AuthApproved
 		}
 		p.send(id, protocol.Welcome{T: protocol.TypeWelcome, V: protocol.Version, SessionID: id, Auth: auth, StateRev: p.state.Rev, Lease: p.lease()})
+		if p.approve {
+			p.send(id, map[string]any{"t": protocol.TypeDownloads, "downloads": p.downloads})
+		}
+		return
+	case protocol.TypeCatalogList:
+		arch, _ := message["arch"].(string)
+		category, _ := message["category"].(string)
+		distros := []protocol.CatalogDistro{}
+		for _, distro := range p.catalog {
+			if category != "" && distro.Category != category {
+				continue
+			}
+			filtered := distro
+			filtered.Entries = nil
+			for _, entry := range distro.Entries {
+				if entry.Arch == arch {
+					filtered.Entries = append(filtered.Entries, entry)
+				}
+			}
+			distros = append(distros, filtered)
+		}
+		reply(map[string]any{"catalogRev": 1, "refreshing": false, "truncated": false, "distros": distros})
 		return
 	case protocol.TypeStateGet:
 		state := p.state
@@ -240,6 +318,41 @@ func (p *fakePhone) Command(id int64, raw string) {
 		if !p.holdJobs {
 			reply(nil)
 		}
+	case protocol.TypeDownloadStart:
+		entryID, _ := message["entryId"].(string)
+		entry, ok := p.catalogEntry(entryID)
+		if !ok {
+			fail(protocol.ErrorNotFound)
+			return
+		}
+		result := protocol.StartStarted
+		switch {
+		case entry.State == protocol.EntryDownloaded:
+			result = protocol.StartDownloaded
+		default:
+			for _, download := range p.downloads {
+				if download.EntryID == entryID {
+					result = protocol.StartActive
+				}
+			}
+		}
+		if result == protocol.StartStarted && !p.forgetStarts {
+			p.downloads = append(p.downloads, protocol.Download{EntryID: entryID, FileName: entry.FileName, Title: entry.FileName, Status: protocol.DownloadQueued, TotalBytes: entry.SizeBytes})
+		}
+		reply(map[string]any{"entryId": entryID, "fileName": entry.FileName, "result": result})
+		p.broadcastDownloads()
+	case protocol.TypeDownloadCancel:
+		entryID, _ := message["entryId"].(string)
+		cancelled := false
+		for index, download := range p.downloads {
+			if download.EntryID == entryID && download.Status != protocol.DownloadCompleted {
+				p.downloads = append(p.downloads[:index], p.downloads[index+1:]...)
+				cancelled = true
+				break
+			}
+		}
+		reply(map[string]any{"cancelled": cancelled})
+		p.broadcastDownloads()
 	default:
 		reply(nil)
 	}

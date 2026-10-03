@@ -17,6 +17,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/JacobHayes/bootleg/remote/protocol"
 )
 
 const (
@@ -62,6 +64,14 @@ Commands:
   lease take|takeover|release    take the controller lease and hold it until Ctrl-C
   pair <code>                    pair over the offline hotspot (needs --host)
   kbd                            interactive keyboard; Ctrl-] then ? for help
+  catalog [--arch A] [--category C]
+                                 list the phone's distro catalog (default
+                                 x86_64, every category) with each entry's state
+  download <entry> [--follow]    download a catalog entry (entryId or exact file
+                                 name) into the phone's library; --follow waits
+                                 until it is verified (exit 5 if it fails)
+  download --cancel <entry>      cancel a download and delete its partial file
+  downloads                      list the phone's downloads with progress
 
 When another session asks for control (its --takeover), kbd and lease
 take/takeover print "<name> asks for control. Allow? [y/N]" on stderr: in kbd
@@ -75,7 +85,11 @@ Flags:
   --timeout D     overall deadline for the command
   --takeover      ask the current lease holder to hand over control
   --wait          wait for approval on the phone instead of failing
-  --json          machine-readable output (status, images)
+  --json          machine-readable output (status, images, catalog, downloads)
+  --arch A        catalog architecture: x86_64 or arm64
+  --category C    catalog category: desktop, server or rescue
+  --follow        download: wait for it to finish, printing progress
+  --cancel        download: cancel it instead
 
 Exit codes: 0 ok, 2 usage, 3 auth or pending, 4 lease, 5 device, 6 timeout.
 `
@@ -95,6 +109,10 @@ type options struct {
 	keyboard   bool
 	mouse      bool
 	horizontal bool
+	arch       string
+	category   string
+	follow     bool
+	cancel     bool
 }
 
 type invocation struct {
@@ -153,6 +171,10 @@ func newFlagSet(target *options) *flag.FlagSet {
 	set.BoolVar(&target.keyboard, "keyboard", false, "")
 	set.BoolVar(&target.mouse, "mouse", false, "")
 	set.BoolVar(&target.horizontal, "horizontal", false, "")
+	set.StringVar(&target.arch, "arch", protocol.ArchX86_64, "")
+	set.StringVar(&target.category, "category", "", "")
+	set.BoolVar(&target.follow, "follow", false, "")
+	set.BoolVar(&target.cancel, "cancel", false, "")
 	return set
 }
 
@@ -210,6 +232,7 @@ func parseArgs(args []string) (*invocation, error) {
 var commandArgCounts = map[string][2]int{ // min, max positional args
 	"status": {0, 0}, "images": {0, 0}, "mount": {1, 1}, "eject": {1, 1}, "reinsert": {1, 1},
 	"hid": {1, 1}, "tether": {1, 1}, "type": {1, 1}, "key": {1, 1}, "scroll": {1, 1}, "bootkey": {1, 2}, "lease": {1, 1}, "pair": {1, 1}, "kbd": {0, 0},
+	"catalog": {0, 0}, "download": {1, 1}, "downloads": {0, 0},
 }
 
 func validate(parsed *invocation) error {
@@ -236,6 +259,22 @@ func validate(parsed *invocation) error {
 		if _, err := wireMode(parsed.mode); err != nil {
 			return err
 		}
+	}
+	arch, err := wireArch(parsed.arch)
+	if err != nil {
+		return err
+	}
+	parsed.arch = arch
+	if parsed.category != "" {
+		if parsed.category, err = wireCategory(parsed.category); err != nil {
+			return err
+		}
+	}
+	if parsed.follow && parsed.cancel {
+		return errors.New("--follow and --cancel don't go together")
+	}
+	if (parsed.follow || parsed.cancel) && parsed.command != "download" {
+		return errors.New("--follow and --cancel are for download")
 	}
 	switch parsed.command {
 	case "hid":

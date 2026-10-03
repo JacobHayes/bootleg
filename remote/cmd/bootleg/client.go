@@ -110,16 +110,22 @@ type client struct {
 	conn    *websocket.Conn
 	welcome protocol.Welcome
 
-	mutex    sync.Mutex
-	nextID   int64
-	waiting  map[int64]chan protocol.Response
-	lease    protocol.Lease
-	auth     string
-	state    json.RawMessage
-	changed  chan struct{} // pulsed on every message
-	closed   chan struct{}
-	closeErr error
-	helloErr error
+	mutex   sync.Mutex
+	nextID  int64
+	waiting map[int64]chan protocol.Response
+	lease   protocol.Lease
+	auth    string
+	state   json.RawMessage
+	// downloads is the latest downloads push (nil until the first);
+	// catalogRefreshing and catalogRev come from catalog pushes.
+	downloads          []protocol.Download
+	downloadsTruncated bool
+	catalogRefreshing  bool
+	catalogRev         int64
+	changed            chan struct{} // pulsed on every message
+	closed             chan struct{}
+	closeErr           error
+	helloErr           error
 
 	onPush func(messageType string, raw []byte)
 	// takeovers receives takeover requests and withdrawals once a
@@ -246,6 +252,25 @@ func (c *client) handle(data []byte) {
 		c.auth = head.Auth
 	case protocol.TypeState:
 		c.state = append(json.RawMessage(nil), data...)
+	case protocol.TypeDownloads:
+		var push struct {
+			Downloads []protocol.Download `json:"downloads"`
+			Truncated bool                `json:"truncated"`
+		}
+		if json.Unmarshal(data, &push) == nil {
+			if push.Downloads == nil {
+				push.Downloads = []protocol.Download{}
+			}
+			c.downloads, c.downloadsTruncated = push.Downloads, push.Truncated
+		}
+	case protocol.TypeCatalog:
+		var push struct {
+			CatalogRev int64 `json:"catalogRev"`
+			Refreshing bool  `json:"refreshing"`
+		}
+		if json.Unmarshal(data, &push) == nil {
+			c.catalogRev, c.catalogRefreshing = push.CatalogRev, push.Refreshing
+		}
 	}
 	if head.State != nil {
 		c.state = append(json.RawMessage(nil), head.State...)
@@ -433,6 +458,29 @@ func (c *client) currentAuth() string {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 	return c.auth
+}
+
+// currentDownloads is the latest downloads push; ok is false before the
+// first one arrives.
+func (c *client) currentDownloads() (downloads []protocol.Download, ok bool) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.downloads, c.downloads != nil
+}
+
+// currentDownloadsTruncated: the latest downloads push left some (finished or
+// paused) downloads out.
+func (c *client) currentDownloadsTruncated() bool {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.downloadsTruncated
+}
+
+// catalogState is what the latest catalog push said.
+func (c *client) catalogState() (rev int64, refreshing bool) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.catalogRev, c.catalogRefreshing
 }
 
 func (c *client) holdsLease() bool {

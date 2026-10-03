@@ -63,6 +63,25 @@
     </form>
   </section>
 
+  <section class="card" id="catalog-card">
+    <h2>Catalog</h2>
+    <p class="muted">Downloads land in the phone's library, SHA-256 checked, then show up under Disks.</p>
+    <div class="row wrap">
+      <select id="catalog-category" aria-label="Category">
+        <option value="desktop">Desktop</option>
+        <option value="server">Server</option>
+        <option value="rescue">Rescue</option>
+      </select>
+      <select id="catalog-arch" aria-label="Architecture">
+        <option value="x86_64">x86_64</option>
+        <option value="arm64">arm64</option>
+      </select>
+      <span id="catalog-status" class="muted"></span>
+    </div>
+    <div id="downloads" class="downloads" aria-label="Downloads"></div>
+    <div id="catalog" class="catalog" aria-label="Catalog entries"></div>
+  </section>
+
   <section class="card">
     <h2>USB tethering</h2>
     <div class="row wrap">
