@@ -106,6 +106,8 @@ fun DownloadsScreen(
             body = "The partly downloaded ${record.fileName} is deleted.",
             confirmLabel = "Cancel download",
             destructive = true,
+            // "Cancel" next to "Cancel download" reads as the same action.
+            dismissLabel = "Keep downloading",
             onConfirm = { downloads.cancel(record.fileName) },
             onDismiss = { pendingCancel = null },
         )
