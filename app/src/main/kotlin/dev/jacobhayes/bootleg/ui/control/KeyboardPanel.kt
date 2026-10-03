@@ -18,12 +18,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Clear
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,6 +32,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +41,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -126,11 +129,8 @@ fun KeyboardPanel(
         KeyRow {
             navigationKeys.forEach { KeyButton(it.label, it.description) { hid.tapKey(it.usage) } }
         }
-        KeyRow {
-            shortcuts.forEach { KeyButton(it.label, it.label, emphasized = true) { hid.chord(it.modifiers, it.key) } }
-            functionKeys.forEach { KeyButton(it.label, it.description) { hid.tapKey(it.usage) } }
-            MoreFunctionKeys(hid)
-        }
+        FunctionKeyPad(hid)
+        ShortcutRow(hid)
         TypingField(hid)
     }
 }
@@ -147,30 +147,101 @@ private fun KeyRow(content: @Composable () -> Unit) {
 private fun KeyButton(
     label: String,
     description: String,
-    emphasized: Boolean = false,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(10.dp),
-        color = if (emphasized) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
-        contentColor = if (emphasized) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.height(44.dp).defaultMinSize(minWidth = 48.dp).semantics { contentDescription = description },
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = modifier.height(44.dp).defaultMinSize(minWidth = 48.dp).semantics { contentDescription = description },
     ) {
-        Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
-            Text(label, style = MaterialTheme.typography.labelLarge)
+        Box(Modifier.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }
 }
 
+/**
+ * F1–F12 or F13–F24 as a fixed grid, every key on screen: nothing here scrolls, so reaching a key
+ * never means swiping across others (the shortcuts sit in their own row below).
+ */
 @Composable
-private fun MoreFunctionKeys(hid: HidController) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        KeyButton("F13–F24", "More function keys") { expanded = true }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            extraFunctionKeys.forEach { key ->
-                DropdownMenuItem(text = { Text(key.label) }, onClick = { hid.tapKey(key.usage) })
+private fun FunctionKeyPad(hid: HidController) {
+    var upper by rememberSaveable { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SegmentedButton(
+                selected = !upper,
+                onClick = { upper = false },
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                modifier = Modifier.semantics { contentDescription = "Function keys F1 to F12" },
+            ) { Text("F1–F12") }
+            SegmentedButton(
+                selected = upper,
+                onClick = { upper = true },
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                modifier = Modifier.semantics { contentDescription = "More function keys" },
+            ) { Text("F13–F24") }
+        }
+        val keys = if (upper) extraFunctionKeys else functionKeys
+        keys.chunked(FUNCTION_KEYS_PER_ROW).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                row.forEach { key -> KeyButton(key.label, key.description, Modifier.weight(1f)) { hid.tapKey(key.usage) } }
+            }
+        }
+    }
+}
+
+private const val FUNCTION_KEYS_PER_ROW = 6
+
+/**
+ * Key combinations (Ctrl+Alt+Del can reboot the computer) in their own row, sent only on touch and
+ * hold, so a stray tap or a scroll that starts on one sends nothing.
+ */
+@Composable
+private fun ShortcutRow(hid: HidController) {
+    val haptics = LocalHapticFeedback.current
+    var hint by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            "Shortcuts · touch and hold to send",
+            style = MaterialTheme.typography.labelMedium,
+            color = if (hint) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            shortcuts.forEach { shortcut ->
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    modifier =
+                        Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .semantics {
+                                role = Role.Button
+                                contentDescription = shortcut.label
+                                onLongClick(label = "Send ${shortcut.label}") {
+                                    hid.chord(shortcut.modifiers, shortcut.key)
+                                    true
+                                }
+                            }.pointerInput(shortcut) {
+                                detectTapGestures(
+                                    onLongPress = {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        hint = false
+                                        hid.chord(shortcut.modifiers, shortcut.key)
+                                    },
+                                    onTap = { hint = true },
+                                )
+                            },
+                ) {
+                    Box(Modifier.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(shortcut.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
+                }
             }
         }
     }

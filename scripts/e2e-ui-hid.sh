@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # E2E (UI) flow 4: Control tab. Turn on Keyboard & mouse -> the Mac enumerates a keyboard and a
-# mouse; open the F13–F24 overflow and tap F24; tap the Shift chip (latched) then F24 (Shift+F24);
+# mouse; switch the function keys to F13–F24 and tap F24; tap the Shift chip (latched) then F24 (Shift+F24);
 # open the boot-key sheet and check its presets render (no key is run); turn it off -> both gone.
 #
 # Harmless input only: the script taps nothing but the enable switch, the Shift chip, the F13–F24
-# button, F24 and boot-key vendor chips (selection only). It never touches the touchpad, the typing
+# toggle, F24 and boot-key vendor chips (selection only). It never touches the touchpad, the typing
 # field, the click buttons or a boot-key action.
 # Usage: scripts/e2e-ui-hid.sh
 FLOW=hid
@@ -32,9 +32,8 @@ check "Mac enumerates keyboard + mouse" wait_until "$ENUMERATE_WAIT_S" host_has_
 check "status leaves Reconnecting USB…" wait_until 15 not_text "Reconnecting USB…"
 shot enabled
 
-# send_f24: taps F13–F24 -> F24 if the overflow button is on screen. It sits at the end of a
-# horizontally scrolled key row; scrolling that row means swiping across keys (Ctrl+Alt+Del,
-# F1...), which this flow never does, so an off-screen button is reported, not reached.
+# send_f24: selects the F13–F24 page of the function-key grid ("More function keys"; selecting it
+# again is a no-op) and taps F24. Nothing in the key panel scrolls; a missing toggle is reported.
 send_f24() {
     has_text "More function keys" || return 1
     ui tap "More function keys"
