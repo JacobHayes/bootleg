@@ -66,12 +66,4 @@ class BootKeyActionsTest {
         assertEquals("Mash Esc", BootKeyActions.label(BootKey.Tap(KeyUsage.ESCAPE)))
         assertEquals("Hold Option", BootKeyActions.label(BootKey.Hold(Modifier.LEFT_ALT)))
     }
-
-    @Test
-    fun `text edits become backspaces plus typed suffix`() {
-        assertEquals(TextEdit(0, "abc"), TextEdit.between("", "abc"))
-        assertEquals(TextEdit(1, ""), TextEdit.between("abc", "ab"))
-        assertEquals(TextEdit(2, "Xbc"), TextEdit.between("abc", "aXbc"))
-        assertEquals(TextEdit(1, "lo"), TextEdit.between("helo", "hello"))
-    }
 }

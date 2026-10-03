@@ -3,9 +3,12 @@ package dev.jacobhayes.bootleg.ui
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDownload
@@ -33,6 +36,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import dev.jacobhayes.bootleg.BootlegApp
 import dev.jacobhayes.bootleg.ui.catalog.CatalogScreen
+import dev.jacobhayes.bootleg.ui.control.ControlPane
 import dev.jacobhayes.bootleg.ui.control.ControlScreen
 import dev.jacobhayes.bootleg.ui.downloads.DownloadsScreen
 import dev.jacobhayes.bootleg.ui.drives.DrivesScreen
@@ -58,6 +62,7 @@ enum class Tab(
     val inNavBar: Boolean get() = navParent == null
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BootlegRoot(
     app: BootlegApp,
@@ -71,22 +76,30 @@ fun BootlegRoot(
     // Each tab keeps its rememberSaveable state (Catalog category, expanded cards, scroll) while another is shown.
     val tabStates = rememberSaveableStateHolder()
 
+    // Control owns its typing layout: the IME inset is applied here, once, and the navigation bar
+    // steps aside while Control's IME is up so the typing field sits directly above it.
+    val control = selectedTab == Tab.CONTROL
+    val controlIme = control && WindowInsets.isImeVisible
+
     Scaffold(
+        modifier = if (control) Modifier.imePadding() else Modifier,
         bottomBar = {
-            NavigationBar {
-                Tab.entries.filter { it.inNavBar }.forEach { tab ->
-                    val badgeCount =
-                        when (tab) {
-                            Tab.LIBRARY -> activeDownloads
-                            Tab.REMOTE -> remoteState.pendingCount
-                            else -> 0
-                        }
-                    NavigationBarItem(
-                        selected = tab == (selectedTab.navParent ?: selectedTab),
-                        onClick = { onSelectTab(tab) },
-                        icon = { TabIcon(tab, badgeCount) },
-                        label = { Text(tab.label) },
-                    )
+            if (!controlIme) {
+                NavigationBar {
+                    Tab.entries.filter { it.inNavBar }.forEach { tab ->
+                        val badgeCount =
+                            when (tab) {
+                                Tab.LIBRARY -> activeDownloads
+                                Tab.REMOTE -> remoteState.pendingCount
+                                else -> 0
+                            }
+                        NavigationBarItem(
+                            selected = tab == (selectedTab.navParent ?: selectedTab),
+                            onClick = { onSelectTab(tab) },
+                            icon = { TabIcon(tab, badgeCount) },
+                            label = { Text(tab.label) },
+                        )
+                    }
                 }
             }
         },
@@ -113,7 +126,12 @@ private fun TabContent(
                 app.remote.setLocalCapture(true)
                 onPauseOrDispose { app.remote.setLocalCapture(false) }
             }
-            ControlScreen(app.backend, app.hid)
+            ControlScreen(
+                app.backend,
+                app.hid,
+                initialPane = ControlPane.entries.firstOrNull { it.name == app.prefs.controlPane } ?: ControlPane.KEYS,
+                onPaneSelected = { app.prefs.controlPane = it.name },
+            )
         }
         Tab.LIBRARY ->
             LibraryScreen(

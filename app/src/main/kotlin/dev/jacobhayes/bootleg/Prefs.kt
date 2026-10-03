@@ -57,6 +57,11 @@ class Prefs(
         remoteEnabledFlow.value = enabled
     }
 
+    /** The Control pane last selected (its enum name), so Control reopens on it after a restart; null until one is picked. */
+    var controlPane: String?
+        get() = preferences.getString(KEY_CONTROL_PANE, null)
+        set(value) = preferences.edit().putString(KEY_CONTROL_PANE, value).apply()
+
     var notificationPermissionAsked: Boolean
         get() = preferences.getBoolean(KEY_NOTIFICATIONS_ASKED, false)
         set(value) = preferences.edit().putBoolean(KEY_NOTIFICATIONS_ASKED, value).apply()
@@ -69,6 +74,7 @@ class Prefs(
         const val KEY_REMOTE_ENABLED = "remote_enabled"
         const val KEY_COMPATIBLE_MOUSE = "compatible_mouse"
         const val KEY_USB_TETHER_CHOICE = "usb_tether_choice"
+        const val KEY_CONTROL_PANE = "control_pane"
 
         /** Read by the boot path too, which has no [Prefs] instance. */
         fun mouseLayoutOf(preferences: SharedPreferences): MouseLayout =

@@ -11,7 +11,6 @@ import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.hid.BootKey
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.HidTestSequence
-import dev.jacobhayes.bootleg.core.hid.KeyStroke
 import dev.jacobhayes.bootleg.core.hid.KeyUsage
 import dev.jacobhayes.bootleg.core.hid.KeyboardInput
 import dev.jacobhayes.bootleg.core.hid.KeyboardLeds
@@ -23,6 +22,9 @@ import dev.jacobhayes.bootleg.core.hid.MouseInput
 import dev.jacobhayes.bootleg.core.hid.MouseReport
 import dev.jacobhayes.bootleg.core.hid.TextTyper
 import dev.jacobhayes.bootleg.core.hid.TouchpadAction
+import dev.jacobhayes.bootleg.core.hid.TypingField
+import dev.jacobhayes.bootleg.core.hid.TypingFieldState
+import dev.jacobhayes.bootleg.core.hid.TypingFieldUpdate
 import dev.jacobhayes.bootleg.core.hid.UsLayout
 import dev.jacobhayes.bootleg.core.remote.HidPort
 import dev.jacobhayes.bootleg.core.remote.HidSendResult
@@ -231,26 +233,32 @@ class HidController(
     ) = sendKeyboard(keyboard.chord(modifiers, key))
 
     /**
-     * Types the difference between two versions of the on-screen text field: deleted characters
-     * become Backspace, inserted ones are typed. Returns the characters that a US layout can't type.
+     * Types an IME update of the on-screen typing field: deleted characters become Backspace,
+     * inserted ones are typed. Returns the field to show (the old one if the edit was refused) and
+     * the characters a US layout can't type.
      */
-    fun typeEdit(
-        before: String,
-        after: String,
-    ): List<Char> {
-        val edit = TextEdit.between(before, after)
-        if (edit.inserted.length > IME_EDIT_CHARS_MAX) {
-            messageFlow.value = "That's a lot of text at once. Use Paste as typing for long text."
-            return emptyList()
+    fun typeFieldUpdate(
+        before: TypingFieldState,
+        after: TypingFieldState,
+    ): TypedField =
+        when (val update = TypingField.update(before, after, IME_EDIT_CHARS_MAX, TYPING_FIELD_CHARS_MAX)) {
+            TypingFieldUpdate.TooLarge -> {
+                messageFlow.value = "That's a lot of text at once. Use Paste as typing for long text."
+                TypedField(before, emptyList())
+            }
+            TypingFieldUpdate.FieldFull -> {
+                messageFlow.value = "The field is full. Clear it to keep typing."
+                TypedField(before, emptyList())
+            }
+            is TypingFieldUpdate.Accepted -> {
+                repeat(update.edit.deletedCount) { tapKey(KeyUsage.BACKSPACE) }
+                for (char in update.edit.inserted) {
+                    val stroke = checkNotNull(UsLayout.strokeFor(char)) { "untypeable '$char' in a typing edit" }
+                    sendKeyboard(keyboard.typeStroke(stroke))
+                }
+                TypedField(update.field, update.unsupported)
+            }
         }
-        repeat(edit.deletedCount) { tapKey(KeyUsage.BACKSPACE) }
-        val unsupported = mutableListOf<Char>()
-        for (char in edit.inserted) {
-            val stroke: KeyStroke? = UsLayout.strokeFor(char)
-            if (stroke == null) unsupported += char else sendKeyboard(keyboard.typeStroke(stroke))
-        }
-        return unsupported
-    }
 
     fun touchpad(actions: List<TouchpadAction>) {
         // The compatible mouse has no wheel; its function would take only bytes 0..2 anyway.
@@ -467,23 +475,16 @@ class HidController(
         /** The on-screen field types edits directly; bigger edits (a paste into it) go through Paste as typing. */
         const val IME_EDIT_CHARS_MAX = 64
 
+        /** Characters kept in the on-screen field; older ones scroll away (they're already on the computer). */
+        const val TYPING_FIELD_CHARS_MAX = 120
+
         const val TEST_LINK_WAIT_MS = 10_000L
         const val TEST_DRAIN_TIMEOUT_MS = 2_000L
     }
 }
 
-/** A text change as a suffix replacement: delete [deletedCount] characters, then type [inserted]. */
-data class TextEdit(
-    val deletedCount: Int,
-    val inserted: String,
-) {
-    companion object {
-        fun between(
-            before: String,
-            after: String,
-        ): TextEdit {
-            val common = before.commonPrefixWith(after).length
-            return TextEdit(before.length - common, after.substring(common))
-        }
-    }
-}
+/** The typing field after an IME update, and the characters that couldn't be typed. */
+data class TypedField(
+    val field: TypingFieldState,
+    val unsupported: List<String>,
+)

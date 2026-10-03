@@ -51,6 +51,7 @@ import dev.jacobhayes.bootleg.remote.TailnetStatus
 import dev.jacobhayes.bootleg.storage.FileTasks
 import dev.jacobhayes.bootleg.storage.StoragePaths
 import dev.jacobhayes.bootleg.ui.catalog.CatalogScreen
+import dev.jacobhayes.bootleg.ui.control.ControlPane
 import dev.jacobhayes.bootleg.ui.control.ControlScreen
 import dev.jacobhayes.bootleg.ui.downloads.DownloadsScreen
 import dev.jacobhayes.bootleg.ui.drives.DrivesController
@@ -148,9 +149,48 @@ class ScreenshotTest {
 
     @Test
     fun control() {
-        val backend = FakeBootlegBackend(initialJournal = Journal(desired = Desired(hid = HidSpec(keyboard = true, mouse = true))))
+        val backend = hidOnBackend()
         capture("control") { ControlScreen(backend, HidController(backend, MainScope())) }
     }
+
+    @Test
+    fun controlPointer() {
+        val backend = hidOnBackend()
+        capture("control_pointer") { ControlScreen(backend, HidController(backend, MainScope()), initialPane = ControlPane.POINTER) }
+    }
+
+    @Test
+    fun controlType() {
+        val backend = hidOnBackend()
+        capture("control_type") { ControlScreen(backend, HidController(backend, MainScope()), initialPane = ControlPane.TYPE) }
+    }
+
+    @Test
+    fun controlTypeFocused() {
+        val backend = hidOnBackend()
+        capture("control_type_focused") {
+            ControlScreen(backend, HidController(backend, MainScope()), initialPane = ControlPane.TYPE, focusTypingOnStart = true)
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "w891dp-h411dp-hdpi")
+    fun controlPointerLandscape() {
+        val backend = hidOnBackend()
+        capture(
+            "control_pointer_landscape",
+        ) { ControlScreen(backend, HidController(backend, MainScope()), initialPane = ControlPane.POINTER) }
+    }
+
+    @Test
+    @Config(qualifiers = "w891dp-h411dp-hdpi")
+    fun controlKeysLandscape() {
+        val backend = hidOnBackend()
+        capture("control_keys_landscape") { ControlScreen(backend, HidController(backend, MainScope())) }
+    }
+
+    private fun hidOnBackend() =
+        FakeBootlegBackend(initialJournal = Journal(desired = Desired(hid = HidSpec(keyboard = true, mouse = true))))
 
     @Test
     fun remoteOff() {

@@ -499,6 +499,21 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   (fingers down scroll down, fingers right scroll right); the host's natural-scrolling setting
   applies on top. Scroll has no held state, so release-all is unchanged. With the compatible
   layout the app and the remote controller drop scroll input.
+- The typing field is translated purely (`core/hid/TypingField`): each IME update becomes Backspace
+  back to the first changed character, then the new characters, and a word still being composed is
+  sent at once. The IME's selection and composing region are kept as given, because dropping them
+  makes the IME insert its composing word a second time. At most 64 characters are typed per update
+  (bigger ones are refused and point to Paste as typing), and the field keeps the last 120.
+- Control screen: a header (switch, status, Boot keys, Paste) and a bottom accessory area (Ctrl,
+  Alt/Opt, Cmd/Win, Shift chips, then the Pointer / Keys / Type selector) are shared by three panes.
+  Buttons switch panes, because a swipe on the touchpad is mouse input. Keys is the first pane; the
+  last one selected is kept in the app's preferences, so Control reopens on it. Modifier state lives in `HidController`, so
+  switching panes keeps it. Keys keeps Esc, Del, the arrows and Enter low and never scrolled away.
+  Type puts its field directly above the accessory area. Selecting Type focuses the field and opens
+  the IME, Back clears focus, and selecting another pane hides the IME. One owner handles the IME
+  inset: `MainActivity` uses `adjustResize` with edge-to-edge, and `BootlegRoot` applies
+  `imePadding` for Control and hides the bottom navigation while Control's IME is up. Control
+  only applies and consumes its own Scaffold padding.
 - Paste-as-typing sends one report every 8ms (~60 characters a second). Boot-key plans re-send a
   held key every 200ms, so a host that resets USB while booting still sees it.
 - Debug builds expose only fixed harmless sequences to adb (`HID_SEND`: `f24`, `shift`, `mouse`

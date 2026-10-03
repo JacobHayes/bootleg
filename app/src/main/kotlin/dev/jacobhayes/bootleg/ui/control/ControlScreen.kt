@@ -1,55 +1,76 @@
 package dev.jacobhayes.bootleg.ui.control
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Keyboard
-import androidx.compose.material.icons.outlined.PowerSettingsNew
+import androidx.compose.material.icons.outlined.LockPerson
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
 import dev.jacobhayes.bootleg.core.gadget.MouseLayout
-import dev.jacobhayes.bootleg.core.hid.MouseButton
+import dev.jacobhayes.bootleg.core.hid.KeyboardLeds
 import dev.jacobhayes.bootleg.hid.HidController
 import dev.jacobhayes.bootleg.hid.HidLinkState
 import dev.jacobhayes.bootleg.ui.common.EmptyState
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Pointer, Keys and Type panes under a shared header (switch, status, Boot keys, Paste) above a
+ * shared modifier row and pane selector. The root owns the IME inset (see BootlegRoot), so this
+ * screen only applies and consumes its own Scaffold padding.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun ControlScreen(
     backend: BootlegBackend,
     hid: HidController,
+    initialPane: ControlPane = ControlPane.KEYS,
+    focusTypingOnStart: Boolean = false,
+    onPaneSelected: (ControlPane) -> Unit = {},
 ) {
     val spec by hid.spec.collectAsState()
     val busy by hid.busy.collectAsState()
@@ -62,7 +83,18 @@ fun ControlScreen(
     val root by backend.rootStatus.collectAsState()
     val enabled = spec.keyboard || spec.mouse
     var sheet by rememberSaveable { mutableStateOf(ControlSheet.NONE) }
+    var pane by rememberSaveable { mutableStateOf(initialPane) }
+    var upperBank by rememberSaveable { mutableStateOf(false) }
+    var shortcutsExpanded by rememberSaveable { mutableStateOf(false) }
+    // Not saved: coming back to a restored Type pane never opens the IME by itself.
+    var typeOpenRequests by remember { mutableIntStateOf(if (focusTypingOnStart) 1 else 0) }
+    val typing = remember { TypingUi() }
     val snackbar = remember { SnackbarHostState() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    val imeVisible = WindowInsets.isImeVisible
+    val configuration = LocalConfiguration.current
+    val wide = configuration.screenWidthDp > configuration.screenHeightDp
 
     LaunchedEffect(message) {
         message?.let {
@@ -72,61 +104,95 @@ fun ControlScreen(
     }
     // Open the devices while the screen is up so the status line is live.
     LaunchedEffect(enabled, busy) { if (enabled && !busy) hid.connect() }
+    // Back hides the IME but leaves the field focused; drop focus so tapping the field opens it again.
+    var imeWasVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(imeVisible) {
+        if (imeWasVisible && !imeVisible) focusManager.clearFocus()
+        imeWasVisible = imeVisible
+    }
+
+    fun hideKeyboard() {
+        keyboard?.hide()
+        focusManager.clearFocus()
+    }
+
+    fun selectPane(next: ControlPane) {
+        if (next == ControlPane.TYPE) typeOpenRequests++ else hideKeyboard()
+        pane = next
+        onPaneSelected(next)
+    }
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Control") },
-                actions = {
-                    if (enabled) {
-                        IconButton(onClick = { sheet = ControlSheet.BOOT_KEYS }) {
-                            Icon(Icons.Outlined.PowerSettingsNew, contentDescription = "Boot keys")
+            // A landscape IME leaves too little height for the header too.
+            if (!(wide && imeVisible)) {
+                TopAppBar(
+                    title = { Text("Control") },
+                    actions = {
+                        if (enabled) {
+                            TextButton(onClick = { sheet = ControlSheet.BOOT_KEYS }) { Text("Boot keys") }
+                            TextButton(onClick = { sheet = ControlSheet.PASTE }) { Text("Paste") }
                         }
-                        IconButton(onClick = { sheet = ControlSheet.PASTE }) {
-                            Icon(Icons.Outlined.ContentPaste, contentDescription = "Paste as typing")
-                        }
-                    }
-                },
-            )
+                        Switch(
+                            checked = enabled,
+                            onCheckedChange = hid::setEnabled,
+                            enabled = root !is RootStatus.Unavailable && !busy,
+                            modifier = Modifier.padding(start = 4.dp, end = 12.dp).semantics { contentDescription = "Keyboard & mouse" },
+                        )
+                    },
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(
             Modifier
                 .padding(padding)
+                .consumeWindowInsets(padding)
                 .fillMaxSize()
-                .imePadding()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            EnableRow(
-                enabled = enabled,
-                busy = busy,
-                status = statusText(enabled, busy, root, gadget, link),
-                onToggle = hid::setEnabled,
-                canToggle = root !is RootStatus.Unavailable,
-            )
+            if (!(wide && imeVisible)) StatusLine(statusOf(enabled, busy, root, gadget, link), leds, showLeds = enabled)
             if (!enabled) {
-                EmptyState(
-                    icon = Icons.Outlined.Keyboard,
-                    title = "Use this phone as a keyboard and mouse",
-                    body =
-                        "Adds a USB keyboard and mouse next to your drives. They're standard boot devices, so they also work " +
-                            "in BIOS menus and boot pickers. Turning this on briefly reconnects USB.",
-                )
+                OffState(root)
                 return@Column
             }
             job?.let { JobProgress(it, onCancel = hid::cancelJob) }
-            Touchpad(
-                onActions = hid::touchpad,
-                scrolling = spec.mouseLayout == MouseLayout.WHEEL,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { hid.click(MouseButton.LEFT) }, modifier = Modifier.weight(1f)) { Text("Left click") }
-                OutlinedButton(onClick = { hid.click(MouseButton.RIGHT) }, modifier = Modifier.weight(1f)) { Text("Right click") }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                val paneModifier = Modifier.fillMaxSize()
+                when (pane) {
+                    ControlPane.POINTER -> PointerPane(hid, wide, scrolling = spec.mouseLayout == MouseLayout.WHEEL, paneModifier)
+                    ControlPane.KEYS ->
+                        KeysPane(
+                            hid,
+                            wide,
+                            upperBank,
+                            onUpperBankChange = { upperBank = it },
+                            shortcutsExpanded,
+                            onShortcutsExpandedChange = { shortcutsExpanded = it },
+                            paneModifier,
+                        )
+                    ControlPane.TYPE -> {
+                        TypePane(hid, typing, imeVisible, onHideKeyboard = ::hideKeyboard, paneModifier)
+                        LaunchedEffect(typeOpenRequests) {
+                            if (typeOpenRequests > 0) {
+                                typing.focusRequester.requestFocus()
+                                keyboard?.show()
+                            }
+                        }
+                    }
+                }
             }
-            KeyboardPanel(hid, chips, leds, Modifier.padding(bottom = 8.dp))
+            if (wide) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ModifierRow(hid, chips, Modifier.weight(1f))
+                    PaneSelector(pane, ::selectPane, Modifier.weight(1f))
+                }
+            } else {
+                ModifierRow(hid, chips)
+                PaneSelector(pane, ::selectPane)
+            }
         }
     }
 
@@ -139,45 +205,103 @@ fun ControlScreen(
 
 private enum class ControlSheet { NONE, BOOT_KEYS, PASTE }
 
-@Composable
-private fun EnableRow(
-    enabled: Boolean,
-    busy: Boolean,
-    status: String,
-    onToggle: (Boolean) -> Unit,
-    canToggle: Boolean,
-) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Keyboard & mouse", style = MaterialTheme.typography.titleMedium)
-            Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.width(12.dp))
-        Switch(checked = enabled, onCheckedChange = onToggle, enabled = canToggle && !busy)
+/** The typing field's local history; kept while switching panes so returning to Type shows it. */
+@Stable
+internal class TypingUi {
+    var value by mutableStateOf(TextFieldValue(""))
+    var unsupported by mutableStateOf<List<String>>(emptyList())
+    val focusRequester = FocusRequester()
+
+    fun clear() {
+        value = TextFieldValue("")
+        unsupported = emptyList()
     }
 }
 
-private fun statusText(
+internal enum class StatusTone { NEUTRAL, GOOD, PROBLEM }
+
+internal data class ControlStatus(
+    val text: String,
+    val tone: StatusTone,
+)
+
+@Composable
+private fun StatusLine(
+    status: ControlStatus,
+    leds: KeyboardLeds?,
+    showLeds: Boolean,
+) {
+    val colors = MaterialTheme.colorScheme
+    val dot =
+        when (status.tone) {
+            StatusTone.GOOD -> colors.primary
+            StatusTone.PROBLEM -> colors.error
+            StatusTone.NEUTRAL -> colors.outline
+        }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Box(Modifier.padding(top = 6.dp).size(8.dp).background(dot, CircleShape))
+        Spacer(Modifier.width(8.dp))
+        Text(
+            status.text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (status.tone == StatusTone.PROBLEM) colors.error else colors.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        if (showLeds) {
+            Spacer(Modifier.width(8.dp))
+            LedIndicators(leds)
+        }
+    }
+}
+
+@Composable
+private fun OffState(root: RootStatus) {
+    if (root is RootStatus.Unavailable) {
+        EmptyState(
+            icon = Icons.Outlined.LockPerson,
+            title = "Root is needed",
+            body = "Bootleg adds the keyboard and mouse to the phone's USB connection, which needs root (Magisk). ${root.reason}",
+        )
+    } else {
+        EmptyState(
+            icon = Icons.Outlined.Keyboard,
+            title = "Keyboard and mouse are off",
+            body =
+                "Turn on the switch to use this phone as a keyboard, mouse and touchpad for the computer it's plugged " +
+                    "into. They also work in BIOS menus and boot pickers.",
+        )
+    }
+}
+
+internal fun statusOf(
     enabled: Boolean,
     busy: Boolean,
     root: RootStatus,
     gadget: GadgetState?,
     link: HidLinkState,
-): String {
-    if (root is RootStatus.Unavailable) return "Needs root: ${root.reason}"
-    if (busy) return "Reconnecting USB…"
-    if (!enabled) return "Off"
+): ControlStatus {
+    if (root is RootStatus.Unavailable) return ControlStatus("Needs root: ${root.reason}", StatusTone.PROBLEM)
+    if (busy) return ControlStatus("Reconnecting USB…", StatusTone.NEUTRAL)
+    if (!enabled) return ControlStatus("USB keyboard and mouse, including BIOS. Enabling briefly reconnects USB.", StatusTone.NEUTRAL)
     val exposed =
         gadget != null &&
             gadget.udc.isNotEmpty() &&
             gadget.configLinks.values.any { it == GadgetNames.HID_KEYBOARD_FUNCTION || MouseLayout.ofFunction(it) != null }
-    if (!exposed) return "Not exposed on USB yet"
+    if (!exposed) return ControlStatus("Not on USB yet", StatusTone.NEUTRAL)
     return when (link) {
-        HidLinkState.Stopped, HidLinkState.Opening -> "Exposed on USB · connecting…"
+        HidLinkState.Stopped, HidLinkState.Opening -> ControlStatus("On USB · connecting…", StatusTone.NEUTRAL)
         is HidLinkState.Open ->
-            if (link.hostListening) "Connected · the computer is reading input" else "The computer isn't reading input (asleep or off?)"
-        is HidLinkState.Reconnecting -> "Reconnecting (attempt ${link.attempt}): ${link.reason}"
+            if (link.hostListening) {
+                ControlStatus("Connected · the computer is reading input", StatusTone.GOOD)
+            } else {
+                ControlStatus("Computer not reading input (asleep, off or unplugged?)", StatusTone.PROBLEM)
+            }
+        is HidLinkState.Reconnecting -> ControlStatus("Reconnecting (attempt ${link.attempt}): ${link.reason}", StatusTone.PROBLEM)
         is HidLinkState.Failed ->
-            if (link.restartRequired) "Not connected: ${link.reason}." else "Not connected: ${link.reason}. Touch the pad to retry."
+            if (link.restartRequired) {
+                ControlStatus("Not connected: ${link.reason}.", StatusTone.PROBLEM)
+            } else {
+                ControlStatus("Not connected: ${link.reason}. Any key or the pad retries.", StatusTone.PROBLEM)
+            }
     }
 }
