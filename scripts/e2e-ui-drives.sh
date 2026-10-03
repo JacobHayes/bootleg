@@ -100,6 +100,7 @@ step "notification Eject all while the Mac holds both"
 check "notification offers Eject all" shade_eject_all "2 disks exported"
 shot notification-eject-all-refused
 adb shell cmd statusbar collapse
+launch_app
 check "both volumes still mounted (refused, nothing dropped)" bash -c "[[ -d /Volumes/$ISO_VOLUME && -d /Volumes/$FAT_VOLUME ]]"
 
 step "Mac ejects both; Eject all; slots removed"

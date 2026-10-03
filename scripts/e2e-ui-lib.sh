@@ -300,6 +300,19 @@ shade_action_center() {
 # that follows it) and taps its "Eject all" action. False if the action never showed.
 shade_eject_all() {
     local title=$1 point attempt
+    # Finished-download notifications group with the drives one and hide its actions: clear every
+    # dismissible notification first (the ongoing drives notification stays). The shade only
+    # becomes the uiautomator window over the launcher, not over the app: go home first (callers
+    # that need the app afterwards call launch_app).
+    adb shell input keyevent KEYCODE_HOME
+    sleep 1
+    adb shell cmd statusbar expand-notifications
+    sleep 1.5
+    if point=$(shade_action_center "Clear all"); then
+        # shellcheck disable=SC2086
+        adb shell input tap $point
+        sleep 1.5
+    fi
     for attempt in 1 2 3; do
         adb shell cmd statusbar expand-notifications
         sleep 1.5
