@@ -10,6 +10,7 @@ import dev.jacobhayes.bootleg.BootlegApp
 import dev.jacobhayes.bootleg.MainActivity
 import dev.jacobhayes.bootleg.R
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
+import dev.jacobhayes.bootleg.service.ejectAllWithFeedback
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -38,7 +39,7 @@ class BootlegTileService : TileService() {
     override fun onClick() {
         super.onClick()
         if (isActive(app.systemBackend.gadgetState.value)) {
-            app.appScope.launch { app.systemBackend.ejectAll() }
+            app.appScope.launch { ejectAllWithFeedback(app, app.systemBackend) }
             return
         }
         val intent = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

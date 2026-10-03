@@ -99,21 +99,21 @@ class BootlegBackendImpl(
 
     suspend fun reconcile(): ApplyResult = gadgetCall { it.reconcile() }
 
-    /** Normal (non-forced) eject of every LUN that currently has media. */
+    /**
+     * Normal (non-forced) eject of every LUN that currently has media. Tries each one even when the
+     * host refuses an earlier one, and returns the first refusal or failure (else the last result).
+     */
     suspend fun ejectAll(): ApplyResult {
         refreshGadget()
-        val loaded =
-            gadgetStateFlow.value
-                ?.luns
-                ?.filterValues { it.file.isNotEmpty() }
-                ?.keys
-                .orEmpty()
-        var last: ApplyResult = ApplyResult.Applied(gadgetStateFlow.value ?: return ApplyResult.Failed("gadget state unknown"), false)
+        val state = gadgetStateFlow.value ?: return ApplyResult.Failed("gadget state unknown")
+        val loaded = state.luns.filterValues { it.file.isNotEmpty() }.keys
+        var last: ApplyResult = ApplyResult.Applied(state, false)
+        var firstProblem: ApplyResult? = null
         for (lun in loaded.sorted()) {
             last = eject(lun, force = false)
-            if (last !is ApplyResult.Applied) return last
+            if (last !is ApplyResult.Applied && firstProblem == null) firstProblem = last
         }
-        return last
+        return firstProblem ?: last
     }
 
     override suspend fun createBlankImage(
