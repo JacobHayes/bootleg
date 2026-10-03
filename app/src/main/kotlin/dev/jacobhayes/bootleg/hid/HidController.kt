@@ -85,6 +85,9 @@ class HidController(
      * needs it); backgrounding then only releases everything.
      */
     @Volatile var keepSessionInBackground: Boolean = false
+
+    /** Main thread only: true while [setSpec] changes the gadget; no session may open meanwhile. */
+    private var gadgetChanging = false
     private var sessionWatchers: Job? = null
     private var activeJob: Job? = null
 
@@ -159,9 +162,16 @@ class HidController(
             busyFlow.value = true
             try {
                 cancelJob()
-                // Release and close before the functions disappear under the descriptors.
-                stopSession()
-                val result = backend.setHid(target)
+                // Release and close before the gadget changes, and open nothing until it's done: a hidg
+                // fd open across the change panics the kernel when it is closed.
+                gadgetChanging = true
+                val result =
+                    try {
+                        stopSession()
+                        backend.setHid(target)
+                    } finally {
+                        gadgetChanging = false
+                    }
                 // Partial means some drive slots failed; the HID functions were still applied.
                 val applied = result is ApplyResult.Applied || result is ApplyResult.Partial
                 if (!applied) messageFlow.value = "Couldn't change keyboard and mouse: ${describe(result)}"
@@ -361,8 +371,9 @@ class HidController(
         return kind in active.kinds && active.send(kind, report)
     }
 
-    /** Starts a session for the enabled functions if there isn't one; null when HID is off. */
+    /** Starts a session for the enabled functions if there isn't one; null when HID is off or the gadget is changing. */
     private fun ensureSession(enabled: HidSpec = spec.value): HidSession? {
+        if (gadgetChanging) return null
         val kinds =
             buildSet {
                 if (enabled.keyboard) add(HidKind.KEYBOARD)
