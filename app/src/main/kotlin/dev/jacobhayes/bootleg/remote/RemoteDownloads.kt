@@ -16,26 +16,23 @@ import dev.jacobhayes.bootleg.download.DownloadStatus
 import dev.jacobhayes.bootleg.download.Downloads
 import dev.jacobhayes.bootleg.download.VerifyState
 import dev.jacobhayes.bootleg.storage.StoragePaths
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
  * The catalog and downloads as the remote controller sees them: the same [CatalogRepository] and
  * [Downloads] the Catalog and Downloads screens use, so a remote start is a phone start. Only the
- * repository's state, staleness check and refresh are used.
+ * repository's state and its stale-feed refresh are used.
  */
 class RemoteDownloads(
     private val catalogRepository: CatalogRepository,
     private val downloadList: Downloads,
     private val storeDir: File,
     private val freeBytes: (File) -> Long,
-    private val scope: CoroutineScope,
 ) : DownloadPort {
     override val catalog: Flow<CatalogSnapshot> = catalogRepository.state.map(::snapshotOf).distinctUntilChanged()
 
@@ -68,15 +65,9 @@ class RemoteDownloads(
         return DownloadOutcome.Cancelled(true)
     }
 
+    // The Catalog screen's own call on open: the repository decides what's stale and runs the fetches in its scope.
     override fun refreshCatalogIfStale() {
-        scope.launch {
-            if (catalogRepository.state.value.entries
-                    .isEmpty()
-            ) {
-                catalogRepository.loadCache()
-            }
-            if (catalogRepository.isStale(CATALOG_MAX_AGE_MS)) catalogRepository.refresh()
-        }
+        catalogRepository.refreshStale()
     }
 
     /** What's left to fetch (a paused download resumes) plus the engine's margin must fit; null if it does. */
@@ -98,8 +89,6 @@ class RemoteDownloads(
         }
 
     companion object {
-        /** The Catalog screen's rule: a distro fetched more than 6 hours ago is refreshed when looked at. */
-        const val CATALOG_MAX_AGE_MS = 6L * 60 * 60 * 1000
         private const val BYTES_PER_MIB = 1024L * 1024
 
         fun snapshotOf(state: CatalogState): CatalogSnapshot =

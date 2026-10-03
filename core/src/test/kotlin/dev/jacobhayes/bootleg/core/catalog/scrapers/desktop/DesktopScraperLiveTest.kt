@@ -61,7 +61,7 @@ class DesktopScraperLiveTest {
         val http = MemoizingHttp(JdkHttp())
         val (result, checked) =
             runBlocking {
-                val result = Catalog(desktopScrapers.map { RetryingScraper(it) }, http).fetchAll()
+                val result = Catalog(desktopScrapers.map { RetryingScraper(it) }, http, feedTimeoutMs = LIVE_FEED_TIMEOUT_MS).fetchAll()
                 result to check(result.releases, RetryingHttp(http))
             }
         val byDistro = checked.groupBy { it.release.distroId }
@@ -166,6 +166,9 @@ class DesktopScraperLiveTest {
 
     companion object {
         private const val PROBE_CONCURRENCY_MAX = 16
+
+        /** Room for [RetryingScraper]'s retry: its whole budget plus slack, instead of the app's feed deadline. */
+        private const val LIVE_FEED_TIMEOUT_MS = RetryingScraper.BUDGET_MS + 5_000L
         private val client: HttpClient =
             HttpClient
                 .newBuilder()

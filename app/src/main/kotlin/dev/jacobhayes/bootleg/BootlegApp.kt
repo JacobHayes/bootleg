@@ -2,6 +2,9 @@ package dev.jacobhayes.bootleg
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.StatFs
 import dev.jacobhayes.bootleg.catalog.CatalogRepository
 import dev.jacobhayes.bootleg.catalog.OkHttpHttp
@@ -48,7 +51,40 @@ class BootlegApp : Application() {
     private val catalogHttp by lazy { OkHttpHttp(httpClient) }
     private val storeDir = File(StoragePaths.STORE_FUSE_DIR)
 
-    val catalog by lazy { CatalogRepository(catalogScrapers(), catalogHttp, File(filesDir, "catalog-cache.json")) }
+    val catalog by lazy {
+        CatalogRepository(
+            catalogScrapers(),
+            catalogHttp,
+            File(filesDir, "catalog-cache.json"),
+            appScope,
+            networkAvailable = ::hasUsableNetwork,
+        ).also { repository ->
+            // Keeps "offline" current and catches up once the network is back (or unblocked for us).
+            getSystemService(ConnectivityManager::class.java)?.registerDefaultNetworkCallback(
+                object : ConnectivityManager.NetworkCallback() {
+                    override fun onCapabilitiesChanged(
+                        network: Network,
+                        capabilities: NetworkCapabilities,
+                    ) {
+                        appScope.launch { repository.onNetworkChanged() }
+                    }
+
+                    override fun onLost(network: Network) {
+                        defaultNetworkBlocked = false
+                        appScope.launch { repository.onNetworkChanged() }
+                    }
+
+                    override fun onBlockedStatusChanged(
+                        network: Network,
+                        blocked: Boolean,
+                    ) {
+                        defaultNetworkBlocked = blocked
+                        appScope.launch { repository.onNetworkChanged() }
+                    }
+                },
+            )
+        }
+    }
     val drives by lazy { DrivesController(backend, appScope) }
     val hid by lazy {
         HidController(backend, appScope, mouseLayout = { prefs.mouseLayout.value }).also {
@@ -57,7 +93,7 @@ class BootlegApp : Application() {
     }
     val remote by lazy {
         RemoteManager(this, systemBackend, hid, prefs, appScope) {
-            RemoteDownloads(catalog, downloads, storeDir, freeBytes = { dir -> StatFs(dir.path).availableBytes }, appScope)
+            RemoteDownloads(catalog, downloads, storeDir, freeBytes = { dir -> StatFs(dir.path).availableBytes })
         }
     }
     val fileTasks by lazy { FileTasks(contentResolver, appScope, storeDir) { backend.refreshImages() } }
@@ -92,6 +128,20 @@ class BootlegApp : Application() {
                 }
             }
         }
+    }
+
+    /** The default network callback's last blocked status for this app (Doze, background limits, data saver). */
+    @Volatile private var defaultNetworkBlocked = false
+
+    /**
+     * A default network with internet that isn't blocked for this app. activeNetwork is null while
+     * networking is blocked; the callback's blocked status covers a block it reports first.
+     */
+    private fun hasUsableNetwork(): Boolean {
+        if (defaultNetworkBlocked) return false
+        val connectivity = getSystemService(ConnectivityManager::class.java) ?: return true
+        val network = connectivity.activeNetwork ?: return false
+        return connectivity.getNetworkCapabilities(network)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
     }
 
     companion object {

@@ -3,8 +3,16 @@ package dev.jacobhayes.bootleg.core.catalog
 import kotlinx.serialization.Serializable
 
 object CatalogLimits {
-    const val FETCH_CONCURRENCY_MAX = 4
-    const val REQUEST_TIMEOUT_MS = 20_000L
+    /** Feeds (scrapers) fetched at once. A feed's deadline starts when it gets a slot. */
+    const val FEED_CONCURRENCY_MAX = 6
+
+    /** In-flight requests within one feed; across all feeds at most FEED_CONCURRENCY_MAX times this. */
+    const val REQUESTS_PER_FEED_MAX = 4
+
+    /** One feed's whole fetch (all its requests and parsing). */
+    const val FEED_TIMEOUT_MS = 30_000L
+    const val REQUEST_TIMEOUT_MS = 15_000L
+    const val CONNECT_TIMEOUT_MS = 10_000L
     const val RESPONSE_BYTES_MAX = 8L * 1024 * 1024
 }
 
@@ -16,7 +24,7 @@ enum class Category { DESKTOP, SERVER, RESCUE }
 
 @Serializable
 data class Distro(
-    /** Stable id, e.g. "ubuntu", "ubuntu-server", "kubuntu", "debian-netinst". */
+    /** Stable id, e.g. "ubuntu", "ubuntu-server", "debian-netinst". */
     val id: String,
     val name: String,
     val category: Category,

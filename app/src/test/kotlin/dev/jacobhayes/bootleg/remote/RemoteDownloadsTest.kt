@@ -89,8 +89,8 @@ class RemoteDownloadsTest {
     }
 
     private fun port(): RemoteDownloads {
-        val catalog = CatalogRepository(emptyList(), NoHttp, temp.newFile())
-        return RemoteDownloads(catalog, downloads, storeDir, freeBytes = { freeBytes }, MainScope())
+        val catalog = CatalogRepository(emptyList(), NoHttp, temp.newFile(), MainScope())
+        return RemoteDownloads(catalog, downloads, storeDir, freeBytes = { freeBytes })
     }
 
     private fun release(

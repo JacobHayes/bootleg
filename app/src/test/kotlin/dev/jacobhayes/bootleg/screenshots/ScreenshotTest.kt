@@ -60,6 +60,8 @@ import dev.jacobhayes.bootleg.ui.library.LibraryScreen
 import dev.jacobhayes.bootleg.ui.remote.RemoteScreen
 import dev.jacobhayes.bootleg.ui.settings.SettingsScreen
 import dev.jacobhayes.bootleg.ui.theme.BootlegTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -117,8 +119,17 @@ class ScreenshotTest {
 
     @Test
     fun catalog() {
-        val catalog = CatalogRepository(listOf(SampleScraper, FailingScraper), NoHttp, temp.newFile("catalog.json"))
-        runBlocking { catalog.refresh() }
+        val scope = CoroutineScope(Dispatchers.Unconfined)
+        val catalog =
+            CatalogRepository(
+                listOf(SampleScraper, FailingScraper, EmptyScraper),
+                NoHttp,
+                temp.newFile("catalog.json"),
+                scope,
+                ioDispatcher = Dispatchers.Unconfined,
+            )
+        // Every feed settles before the capture: one still loading would animate forever and never idle.
+        runBlocking { catalog.refreshAll().join() }
         capture("catalog") { CatalogScreen(catalog, newDownloads(), onShowDownloads = {}) }
     }
 
@@ -409,8 +420,15 @@ class ScreenshotTest {
     }
 
     private object FailingScraper : Scraper {
-        override val distros = listOf(Distro("manjaro", "Manjaro", Category.DESKTOP, "https://manjaro.org"))
+        override val distros = listOf(Distro("debian", "Debian", Category.DESKTOP, "https://debian.org"))
 
         override suspend fun releases(http: Http): List<Release> = throw IOException("Release index returned HTTP 503")
+    }
+
+    /** Answers with nothing for this arch. */
+    private object EmptyScraper : Scraper {
+        override val distros = listOf(Distro("nixos", "NixOS", Category.DESKTOP, "https://nixos.org"))
+
+        override suspend fun releases(http: Http): List<Release> = emptyList()
     }
 }

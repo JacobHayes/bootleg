@@ -1,13 +1,21 @@
 package dev.jacobhayes.bootleg.core.catalog
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import java.io.IOException
 import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -72,7 +80,7 @@ class CatalogTest {
                     FakeScraper("slow") { awaitCancellation() },
                     FakeScraper("empty") { emptyList() },
                 )
-            val result = Catalog(scrapers, FakeHttp(), scraperTimeoutMs = 200).fetchAll()
+            val result = Catalog(scrapers, FakeHttp(), feedTimeoutMs = 200).fetchAll()
             assertEquals(listOf("good"), result.releases.map { it.distroId })
             assertEquals(listOf("good", "broken", "slow", "empty"), result.distros.map { it.id })
             assertEquals(
@@ -82,20 +90,49 @@ class CatalogTest {
         }
 
     @Test
-    fun `requests across all scrapers are capped and a slow request fails only its scraper`() =
+    fun `a hanging feed does not delay the others`() =
         runBlocking<Unit> {
-            val bodies = (0 until 20).associate { "https://example.org/$it" to "ok" }
-            val http = FakeHttp(bodies, delayMs = 20)
+            val catalog =
+                Catalog(
+                    listOf(FakeScraper("hung") { awaitCancellation() }) +
+                        (1..8).map { index -> FakeScraper("f$index") { listOf(release("f$index")) } },
+                    FakeHttp(),
+                    feedTimeoutMs = 5_000,
+                )
+            val startedNs = System.nanoTime()
+            coroutineScope {
+                val hung = async { catalog.fetch("hung") }
+                (1..8).map { index -> async { catalog.fetch("f$index") } }.awaitAll().forEach { result ->
+                    assertTrue(result is FeedResult.Fetched, "$result")
+                }
+                assertTrue((System.nanoTime() - startedNs) / 1_000_000 < 1_000, "the others finished without waiting for the hung feed")
+                hung.cancel()
+            }
+        }
+
+    @Test
+    fun `requests are capped per feed, feeds are capped, and a slow request fails only its feed`() =
+        runBlocking<Unit> {
+            val bodies = (0 until 80).associate { "https://example.org/$it" to "ok" }
+            val wide = FakeHttp(bodies, delayMs = 20)
+            val fanOut =
+                FakeScraper("wide") { scraperHttp ->
+                    ScraperSupport.fanOut((0 until 12).toList()) { scraperHttp.getText("https://example.org/$it") }
+                    listOf(release("wide"))
+                }
+            assertTrue(Catalog(listOf(fanOut), wide).fetch("wide") is FeedResult.Fetched)
+            assertEquals(CatalogLimits.REQUESTS_PER_FEED_MAX, wide.inFlightMax.get())
+
+            val many = FakeHttp(bodies, delayMs = 20)
             val scrapers =
-                (0 until 5).map { scraperIndex ->
-                    FakeScraper("s$scraperIndex") { scraperHttp ->
-                        ScraperSupport.fanOut((0 until 4).toList()) { scraperHttp.getText("https://example.org/${scraperIndex * 4 + it}") }
-                        listOf(release("s$scraperIndex"))
+                (0 until 10).map { index ->
+                    FakeScraper("s$index") { scraperHttp ->
+                        scraperHttp.getText("https://example.org/$index")
+                        listOf(release("s$index"))
                     }
                 }
-            val result = Catalog(scrapers, http).fetchAll()
-            assertEquals(5, result.releases.size)
-            assertEquals(CatalogLimits.FETCH_CONCURRENCY_MAX, http.inFlightMax.get())
+            assertEquals(10, Catalog(scrapers, many).fetchAll().releases.size)
+            assertEquals(CatalogLimits.FEED_CONCURRENCY_MAX, many.inFlightMax.get())
 
             val timedOut =
                 Catalog(
@@ -107,9 +144,120 @@ class CatalogTest {
                     ),
                     FakeHttp(bodies, 500),
                     requestTimeoutMs = 50,
-                ).fetchAll()
-            assertEquals(listOf(ScraperError(listOf("x"), "request timed out after 50ms: https://example.org/0")), timedOut.errors)
+                ).fetch("x")
+            assertEquals(FeedResult.Failed("request timed out after 50ms: https://example.org/0"), timedOut)
         }
+
+    @Test
+    fun `the feed deadline starts once the feed has a slot`() =
+        runBlocking<Unit> {
+            // Twice as many feeds as slots, each taking most of its deadline: queued feeds still make it.
+            val scrapers =
+                (0 until CatalogLimits.FEED_CONCURRENCY_MAX * 2).map { index ->
+                    FakeScraper("q$index") {
+                        delay(150)
+                        listOf(release("q$index"))
+                    }
+                }
+            val result = Catalog(scrapers, FakeHttp(), feedTimeoutMs = 250).fetchAll()
+            assertEquals(emptyList<ScraperError>(), result.errors)
+            assertEquals(scrapers.size, result.releases.size)
+        }
+
+    /** Like OkHttp: cancelling the caller cancels the call, which then fails with IOException("Canceled"). */
+    private class CancellingHttp : Http {
+        val started = CompletableDeferred<Unit>()
+
+        override suspend fun get(url: String): HttpResponse {
+            started.complete(Unit)
+            try {
+                awaitCancellation()
+            } catch (cancellation: CancellationException) {
+                throw IOException("Canceled", cancellation)
+            }
+        }
+
+        override suspend fun head(url: String) = get(url)
+    }
+
+    @Test
+    fun `cancelling a fetch is a cancellation, never a failure, even when the call fails as it is cancelled`() =
+        runBlocking<Unit> {
+            val http = CancellingHttp()
+            val catalog =
+                Catalog(
+                    listOf(
+                        FakeScraper("a") {
+                            it.getText("https://example.org/a")
+                            emptyList()
+                        },
+                    ),
+                    http,
+                )
+            var outcome: Any? = null
+            val job = launch { outcome = runCatching { catalog.fetch("a") } }
+            http.started.await()
+            job.cancelAndJoin()
+            val failure = (outcome as Result<*>).exceptionOrNull()
+            assertTrue(failure is CancellationException, "expected a cancellation, got $outcome")
+        }
+
+    @Test
+    fun `a call failing because its own deadline cancelled it reports the timeout`() =
+        runBlocking<Unit> {
+            val scraper =
+                FakeScraper("a") {
+                    it.getText("https://example.org/a")
+                    emptyList()
+                }
+            assertEquals(
+                FeedResult.Failed("request timed out after 50ms: https://example.org/a"),
+                Catalog(listOf(scraper), CancellingHttp(), requestTimeoutMs = 50).fetch("a"),
+            )
+            assertEquals(
+                FeedResult.Failed("timed out after 50ms"),
+                Catalog(listOf(scraper), CancellingHttp(), feedTimeoutMs = 50).fetch("a"),
+            )
+        }
+
+    @Test
+    fun `a stray cancellation inside a scraper is that feed's failure`() =
+        runBlocking<Unit> {
+            val scraper = FakeScraper("a") { throw CancellationException("inner job went away") }
+            val result = Catalog(listOf(scraper), FakeHttp()).fetch("a")
+            assertTrue(result is FeedResult.Failed && "inner job went away" in result.message, "$result")
+        }
+
+    @Test
+    fun `feeds group a scraper's distros and distros sort by category then name`() {
+        val multi =
+            object : Scraper {
+                override val distros =
+                    listOf(
+                        Distro("ubuntu", "Ubuntu", Category.DESKTOP, "https://example.org"),
+                        Distro("ubuntu-server", "Ubuntu Server", Category.SERVER, "https://example.org"),
+                    )
+
+                override suspend fun releases(http: Http) = emptyList<Release>()
+            }
+        val zeta =
+            object : Scraper {
+                override val distros = listOf(Distro("zeta", "zeta", Category.DESKTOP, "https://example.org"))
+
+                override suspend fun releases(http: Http) = emptyList<Release>()
+            }
+        val alpine =
+            object : Scraper {
+                override val distros = listOf(Distro("alpine", "Alpine", Category.SERVER, "https://example.org"))
+
+                override suspend fun releases(http: Http) = emptyList<Release>()
+            }
+        val catalog = Catalog(listOf(zeta, multi, alpine), FakeHttp())
+        assertEquals(listOf("ubuntu", "zeta", "alpine", "ubuntu-server"), catalog.distros.map { it.id })
+        assertEquals("ubuntu", catalog.feedOf("ubuntu-server")?.id)
+        assertNull(catalog.feedOf("missing"))
+        assertThrows<IllegalArgumentException> { runBlocking { catalog.fetch("ubuntu-server") } }
+    }
 
     @Test
     fun `the response cap counts bytes, not characters`() =

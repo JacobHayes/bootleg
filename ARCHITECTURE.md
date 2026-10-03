@@ -96,7 +96,7 @@ app/       Android app (Compose, Material 3)
   service/   BootlegService (foreground, type connectedDevice), reconcile, notification,
              keep-awake policy
   download/  DownloadJobService (user-initiated data transfer jobs), engine, pure resume planner
-  catalog/   CatalogRepository (runs core scrapers, caches last good result), OkHttp `Http`
+  catalog/   CatalogRepository (per-feed stale-while-revalidate, caches last good result), OkHttp `Http`
   ui/        Drives (slots), Library, Catalog, Downloads, Settings, Blank image creator,
              HID (touchpad/keyboard), Remote. The UI talks to the system side only through
              `BootlegBackend`
@@ -382,18 +382,44 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
   that one entry (bounded size, no path traversal) to `fileName`, verifying `sha256` when known.
 - `sumsSigned` is informational in v1: GPG signature verification is not done (documented). HEAD
   failures fall back to a ranged `GET bytes=0-0`.
-- Bounded parallel fetch (4), 20s timeout. Each scraper fails independently and its error shows in
-  the UI. `Catalog` enforces the cap on in-flight requests across all scrapers (so scrapers may fan
-  out internally), gives each scraper a 60s deadline, drops duplicates, and rejects releases with a
-  non-https URL, an unsafe file name (`/`, `\`, `..`, leading `.`), a malformed sha256, or neither a
-  sha256 nor a sums URL.
+- A feed is one scraper and the distros it fills (Ubuntu's feed fills Ubuntu and Ubuntu Server).
+  `Catalog.fetch(feed)` runs at most 6 feeds at once; each feed gets its own cap of 4 in-flight
+  requests, a 15s per-request timeout (10s to connect) and a 30s deadline that starts once it has a
+  slot, so a slow or hung upstream only ever fails its own feed. It drops duplicates and rejects
+  releases with a non-https URL, an unsafe file name (`/`, `\`, `..`, leading `.`), a malformed
+  sha256, or neither a sha256 nor a sums URL; a feed whose every release is rejected has failed.
+- Cancellation is never failure: `withDeadline` turns whatever a cancelled call ends with (OkHttp's
+  `IOException("Canceled")`) into the caller's cancellation, or into "timed out" when its own
+  deadline cancelled it. `OkHttpHttp` uses `enqueue`, so cancelling the coroutine cancels the call
+  instead of waiting out a blocking `execute()`.
 - Supported-release rules where upstream has no "supported" flag: Ubuntu uses distro-info-data
   dates; Fedora keeps the two newest stable releases; Mint keeps the newest
   point release of the two newest majors; Pop!_OS probes `YY.04` LTS versions from the last 4 years.
   openSUSE images resolve through MirrorCache metalinks (`.meta4`), which pin the versioned file and
   give its SHA-256 (Leap 16 publishes only SHA-512 files).
-- The last good result per distro is cached on device and shown as stale with its age. Nothing is
-  bundled.
+- `CatalogRepository` (app) is stale-while-revalidate, process-wide, and runs fetches in the app
+  scope, so leaving the screen doesn't cancel them:
+  - `state: StateFlow<CatalogState>`: every distro (sorted by category, then name
+    case-insensitively) with its last good releases, `fetchedAtMs`, `loading`, and the latest
+    attempt's `error`/`failedAtMs`; plus `cacheLoaded`, `refreshing` and `offline`.
+  - `refreshStale()` (Catalog opened) fetches feeds that were never fetched, are older than 6h or
+    whose last attempt failed, except those that failed in the last minute. `refreshAll()`
+    (refresh button, pull) and `refresh(distroId)` (a card's Retry) fetch regardless. A feed
+    already in flight is joined, never fetched twice; a new fetch waits for a cancelled one to
+    clean up. The returned jobs only wait: cancelling one (a remote client going away) never
+    cancels a fetch someone else is waiting for.
+  - Each feed lands as soon as it finishes and is saved to the on-device JSON cache (last good result
+    per distro; distros no scraper declares any more are dropped). A failure keeps the saved
+    releases and marks only that feed's cards. A cache write that fails keeps the results in memory.
+  - Offline means the app has no usable network: `activeNetwork` is null, which includes networking
+    blocked for the app in Doze or background limits. It's checked when the Catalog opens, before
+    each fetch, after a failed one, and on every default-network callback (capabilities, lost,
+    blocked status). Offline, no fetch starts and a failure isn't recorded against its feed; the
+    screen shows "Offline · showing saved results" and hides earlier per-card errors. A failure
+    with a network present (one host's DNS included) is that feed's own error. Back online, the
+    repository waits for fetches still running, then refetches everything stale or failed, recent
+    failures included.
+  Nothing is bundled.
 - Downloads: user-initiated data transfer jobs (`JobInfo.setUserInitiated`). Wi-Fi only means a
   network request with `TRANSPORT_WIFI`, not just UNMETERED. Resume uses `Range` + `If-Range`
   (ETag/Last-Modified):
@@ -826,8 +852,9 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   `DownloadPort` flows (latest wins, like device snapshots) and runs `start`/`cancel` on its own
   lane and dispatcher, one at a time with a 10 s deadline, so a download request never waits on a
   gadget operation. The catalog is consumed only as a snapshot (distros, releases, last fetch,
-  error, refreshing) plus "refresh if stale"; the app's own staleness rule (6 h, as on the Catalog
-  screen) decides, and the controller asks at most once per 60 s.
+  error, refreshing) plus "refresh if stale": the repository's `refreshStale()`, the call the
+  Catalog screen makes on open, decides which feeds are due (see Catalog), and the controller asks
+  at most once per 60 s.
 - **Background scheduling:** Android schedules a user-initiated job only while the app is
   visible or may start activities from the background (AOSP `canScheduleUserInitiatedJobs`); the
   Remote `connectedDevice` FGS doesn't qualify, so with the phone in a drawer `schedule` returns
@@ -933,7 +960,7 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
 |---|---|
 | LUNs | ≤ 8 |
 | Concurrent downloads | ≤ 2 |
-| Catalog fetch | concurrency 4, 20s per request |
+| Catalog fetch | 6 feeds at once, 4 requests per feed, 15s per request (10s connect), 30s per feed |
 | HID queue | ≤ 256 |
 | Paste | ≤ 64 KiB |
 | Root op timeout | 10s |

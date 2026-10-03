@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,8 @@ fun DistroCard(
     records: Map<String, DownloadRecord>,
     onToggle: () -> Unit,
     onDownload: (Release) -> Unit,
+    onRetry: () -> Unit,
+    cacheLoaded: Boolean = true,
 ) {
     val releases = entry.releases.filter { it.arch == arch }
     ElevatedCard(Modifier.fillMaxWidth()) {
@@ -52,8 +55,9 @@ fun DistroCard(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(entry.distro.name, style = MaterialTheme.typography.titleMedium)
-                DistroStatusLine(entry, releases.size, arch)
+                DistroStatusLine(entry, releases.size, arch, cacheLoaded)
             }
+            if (entry.error != null && !entry.loading) TextButton(onClick = onRetry) { Text("Retry") }
             Icon(
                 if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                 contentDescription = if (expanded) "Collapse" else "Expand",
@@ -81,10 +85,19 @@ private fun DistroStatusLine(
     entry: DistroEntry,
     releaseCount: Int,
     arch: Arch,
+    cacheLoaded: Boolean,
 ) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val age = entry.fetchedAtMs?.let { formatAge(System.currentTimeMillis() - it) }
-    if (entry.error != null) {
+    if (entry.fetchedAtMs == null && (entry.loading || !cacheLoaded)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+            Spacer(Modifier.width(6.dp))
+            Text("Loading…", style = MaterialTheme.typography.bodySmall, color = muted)
+        }
+        return
+    }
+    if (entry.error != null && !entry.loading) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 Icons.Outlined.ErrorOutline,
@@ -110,7 +123,8 @@ private fun DistroStatusLine(
             releaseCount == 1 -> "1 image"
             else -> "$releaseCount images"
         }
-    Text(listOfNotNull(summary, age?.let { "updated $it" }).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = muted)
+    val parts = listOfNotNull(summary, age?.let { "updated $it" }, "updating…".takeIf { entry.loading })
+    Text(parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = muted)
 }
 
 @Composable

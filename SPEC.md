@@ -22,8 +22,9 @@ Confirmed on device: configfs gadget `g1` on UDC `11110000.dwc3`;
 | Composite gadget | Never replace the USB function: add disks/HID next to `ffs.adb` and leave other apps' functions alone |
 | Storage | `/sdcard/bootleg/` (kernel is given the `/data/media/0/...` path, not the FUSE path); can also pick any file on the phone |
 | Catalog | Live-scraped at runtime from each distro's release index/API; **no bundled fallback list**. Images you already downloaded still work offline |
+| Catalog refresh | The last good result per distro shows at once and refreshes in the background when older than 6 h. Each feed (one per scraper) loads, fails and retries on its own; a failed card keeps its saved results and has a Retry. Leaving the screen doesn't cancel a refresh, and no network (or networking blocked for the app) shows "Offline" instead of failing every card |
 | Catalog scope | Supported releases (not EOL), x86_64 + arm64, arch filter defaults to x86_64 |
-| Distros | Desktop: Ubuntu, Fedora, Debian, Mint, Pop!_OS, openSUSE, Arch, NixOS, Omarchy (no Ubuntu flavors, no Manjaro). Server: Ubuntu Server, Debian netinst, Alpine, Rocky, AlmaLinux, Proxmox VE, TrueNAS. Rescue: SystemRescue, GParted Live, Clonezilla, Memtest86+, ShredOS, netboot.xyz |
+| Distros | Desktop: Ubuntu, Fedora, Debian, Mint, Pop!_OS, openSUSE, Arch, NixOS, Omarchy (no Ubuntu flavors, no Manjaro). Server: Ubuntu Server, Debian netinst, Alpine, Rocky, AlmaLinux, Proxmox VE, TrueNAS. Rescue: SystemRescue, GParted Live, Clonezilla, Memtest86+, ShredOS, netboot.xyz. Each tab lists its distros by name, case-insensitively |
 | Downloads | Resumable user-initiated transfer jobs, optional Wi-Fi only, SHA256 checked against the distro's published sums |
 | Blank images | Create sparse images of a chosen size: raw, FAT32 (MBR), exFAT, ext4 |
 | Persistence | Re-expose the last mounted set after reboot (opt-in) |

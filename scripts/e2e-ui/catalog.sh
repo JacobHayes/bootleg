@@ -4,6 +4,7 @@
 # and label, and no .partial/.zip left behind. Images already in the Library are deleted through
 # the UI first, so every run downloads. Sourced by scripts/e2e-ui.sh.
 
+define_test catalog.open "open cold (no cache): list at once, cards fill in (one transient feed failure tolerated, live upstreams); reopen: saved results at once"
 define_test catalog.netboot "download netboot.xyz.iso (plain ISO): verified, sidecar, owner/label, in Library"
 define_test catalog.memtest "download Memtest86+ (zip, extracted): verified, sidecar, owner/label, no leftovers"
 define_test catalog.gparted-pause-cancel "GParted Live: pause, resume appends, cancel removes the partial (~10 MB)" --opt-in
@@ -60,6 +61,54 @@ download_and_verify() {
     check "$file: owner and label match the store" catalog_owned_like_store "$file"
     tab Library
     check "$file: in Library" has_text "$file"
+}
+
+CATALOG_LIST_WAIT_S=3
+# A feed's deadline is 30 s once it has a fetch slot (CatalogLimits.FEED_TIMEOUT_MS), plus slot waits.
+CATALOG_LOAD_WAIT_S=45
+# The feeds are live upstreams: one failing card is an upstream blip, more is Bootleg's problem.
+CATALOG_FAILED_CARDS_MAX=1
+
+catalog_cards_loaded() { ! ui_has "~Loading" && ! ui_has "Not loaded yet"; }
+catalog_failed_cards() {
+    local texts
+    texts=$(ui_texts) || return 1
+    grep -cE "Refresh failed|Couldn't load" <<<"$texts" || true
+}
+catalog_cards_ok() {
+    local failed
+    failed=$(catalog_failed_cards) || return 1
+    ((failed == 0)) && return 0
+    log "    WARN: $failed Desktop card(s) failed to load (live upstream); up to $CATALOG_FAILED_CARDS_MAX tolerated"
+    ((failed <= CATALOG_FAILED_CARDS_MAX))
+}
+
+# The Catalog tab opened at $1 (ms); logs how long until the step's condition held.
+catalog_elapsed() { log "    $1 after $(($(now_ms) - $2)) ms"; }
+
+test_catalog_open() {
+    local started
+    step "cold open (no saved results)"
+    adb shell am force-stop "$PACKAGE"
+    adb shell run-as "$PACKAGE" rm -f files/catalog-cache.json
+    launch_app
+    started=$(now_ms)
+    ui tap Catalog # not `tab`: it waits for a still screen, which would hide the timing
+    check "cold: the Desktop list shows at once" wait_until "$CATALOG_LIST_WAIT_S" has_text "Arch Linux"
+    catalog_elapsed "list" "$started"
+    check "cold: every Desktop card loads" wait_until "$CATALOG_LOAD_WAIT_S" catalog_cards_loaded
+    catalog_elapsed "cards loaded" "$started"
+    check "cold: at most $CATALOG_FAILED_CARDS_MAX Desktop card failed" catalog_cards_ok
+    shot cold
+
+    step "reopen (saved results)"
+    restart_app
+    started=$(now_ms)
+    ui tap Catalog # not `tab`: it waits for a still screen, which would hide the timing
+    check "warm: saved results show at once" wait_until "$CATALOG_LIST_WAIT_S" has_text "~updated"
+    catalog_elapsed "saved results" "$started"
+    check "warm: at most $CATALOG_FAILED_CARDS_MAX Desktop card failed" catalog_cards_ok
+    shot warm
 }
 
 test_catalog_netboot() {

@@ -15,6 +15,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -42,8 +43,6 @@ import dev.jacobhayes.bootleg.download.Downloads
 import dev.jacobhayes.bootleg.ui.common.EmptyState
 import kotlinx.coroutines.launch
 
-private const val CATALOG_MAX_AGE_MS = 6L * 60 * 60 * 1000
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CatalogScreen(
@@ -59,10 +58,8 @@ fun CatalogScreen(
     var arch by rememberSaveable { mutableStateOf(Arch.X86_64) }
     var expanded by rememberSaveable { mutableStateOf(setOf<String>()) }
 
-    LaunchedEffect(Unit) {
-        if (state.entries.isEmpty()) catalog.loadCache()
-        if (catalog.isStale(CATALOG_MAX_AGE_MS)) catalog.refresh()
-    }
+    // Starts fetches in the repository's own scope: leaving the screen doesn't cancel them.
+    LaunchedEffect(Unit) { catalog.refreshStale() }
 
     val onDownload: (Release, String) -> Unit = { release, distroName ->
         val message =
@@ -83,7 +80,7 @@ fun CatalogScreen(
             TopAppBar(
                 title = { Text("Catalog") },
                 actions = {
-                    IconButton(onClick = { scope.launch { catalog.refresh() } }, enabled = !state.refreshing) {
+                    IconButton(onClick = { catalog.refreshAll() }, enabled = !state.refreshing) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                     }
                 },
@@ -94,25 +91,30 @@ fun CatalogScreen(
         Column(Modifier.padding(padding).fillMaxSize()) {
             CategoryTabs(category) { category = it }
             ArchFilter(arch) { arch = it }
+            if (state.offline) {
+                Text(
+                    "Offline · showing saved results",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
             PullToRefreshBox(
                 isRefreshing = state.refreshing,
-                onRefresh = { scope.launch { catalog.refresh() } },
+                onRefresh = { catalog.refreshAll() },
                 modifier = Modifier.fillMaxSize(),
             ) {
-                val entries = state.entries.filter { it.distro.category == category }
+                // Offline, earlier failures say nothing about the feeds: the banner explains instead.
+                val entries =
+                    state.entries
+                        .filter { it.distro.category == category }
+                        .map { if (state.offline) it.copy(error = null, failedAtMs = null) else it }
                 when {
                     catalog.distros.isEmpty() ->
                         EmptyState(
                             icon = Icons.Outlined.CloudDownload,
                             title = "No catalog sources",
                             body = "This build has no distro scrapers yet. Add images from the Library instead.",
-                        )
-
-                    entries.isEmpty() && state.entries.isEmpty() ->
-                        EmptyState(
-                            icon = Icons.Outlined.CloudDownload,
-                            title = "Loading catalog…",
-                            body = "Fetching the latest releases from each distro.",
                         )
 
                     else ->
@@ -132,6 +134,8 @@ fun CatalogScreen(
                                             if (entry.distro.id in expanded) expanded - entry.distro.id else expanded + entry.distro.id
                                     },
                                     onDownload = { onDownload(it, entry.distro.name) },
+                                    onRetry = { catalog.refresh(entry.distro.id) },
+                                    cacheLoaded = state.cacheLoaded,
                                 )
                             }
                         }

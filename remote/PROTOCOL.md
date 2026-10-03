@@ -206,9 +206,9 @@ Details:
   the app's cached catalog (the same one the phone's Catalog tab shows), never a scrape per
   request. `arch` is `x86_64` or `arm64`; `category` is `desktop`, `server` or `rescue`
   (`bad_request` otherwise); `distroId` picks one distro. The request also lets the phone refresh
-  a stale catalog in the background (its own rule, as when the Catalog tab opens: older than 6 h
-  or never fetched), at most once per 60 s for all sessions together; `refreshing` says one is
-  running and a `catalog` push follows when it ends. The reply is bounded: at most 256 entries and
+  a stale catalog in the background (its own rule, as when the Catalog tab opens: each feed older
+  than 6 h, never fetched, or failed more than 60 s ago), at most once per 60 s for all sessions
+  together; `refreshing` says one is running and a `catalog` push follows when it ends. The reply is bounded: at most 256 entries and
   48 KiB of JSON; whatever doesn't fit is left out and `truncated` is true (narrow it with
   `arch`, `category` or `distroId`).
 - **`download.start`** starts the catalog entry's download exactly as the phone's Catalog does:
@@ -402,6 +402,6 @@ the 11th locks pairing until it's reset on the phone. Attempts while pairing is 
 | Device operation | 10 s (`tether.set` 75 s), one at a time |
 | Heartbeat | ping every 5 s, dead after 15 s without pong |
 | `catalog.list` reply | ≤ 256 entries, ≤ 48 KiB |
-| Catalog refresh from the remote | when older than 6 h, ≤ 1 per 60 s |
+| Catalog refresh from the remote | stale feeds only (older than 6 h), ≤ 1 per 60 s |
 | Downloads | ≤ 4 queued or running (≤ 2 transferring); one `download.*` request at a time, 10 s |
 | `downloads` push | ≤ 64 downloads, ≤ 48 KiB, ≤ 2/s per session |
