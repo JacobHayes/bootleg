@@ -106,7 +106,11 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   empty) is recorded as `HostEjected`, and Bootleg never re-inserts that media on its own. With the
   journal idle, an existing LUN whose `file` is empty (and whose `ro`/`cdrom` still match the slot)
   is a host eject even if the HAL has since unbound the UDC or our link was removed; a missing or
-  recreated LUN is not. A forced eject also clears the host's prevent-removal flag.
+  recreated LUN is not. To tell them apart even when a recreated LUN's defaults match (an RW slot),
+  every LUN Bootleg configures carries a marker in `inquiry_string` (vendor `Bootleg`, product
+  `Virtual Drive`, revision = a 4-character nonce kept in the journal), written in place, also on a
+  linked LUN; a new LUN starts with the kernel's empty value. Only LUNs that still carry the marker
+  count as host-ejected. A forced eject also clears the host's prevent-removal flag.
 - **Executor** (root, in-process file IO, no shell per op): before each prepare/cleanup op it
   re-reads the owned state (functions, links, LUNs; no USB properties) and aborts and replans (at
   most 3 times) if it changed. Inside a switch it re-reads only the UDC and our own links, and
@@ -126,6 +130,8 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   an operation leads to Bootleg-off. Then it reads back and asserts the invariants:
   - our links exist and the UDC is bound (unless nothing at all is linked);
   - `cdrom=1 â‡’ ro=1`;
+  - every Bootleg LUN has `removable=1`, `nofua=0` and our marker (the planner repairs a
+    linked LUN's flags with a detach, the marker in place);
   - â‰¤ 8 LUNs;
   - no writable file is exported twice;
   - every `file` path is canonical and inside an allowed root;
@@ -138,7 +144,7 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   unaffected exports stay in place. The full **Bootleg-off** (remove all our functions, rebind) is
   used only when the UDC can't be bound at all, or when the user asks for an emergency teardown.
 - **Journal.** The desired state, each slot's intent (`Exported`, `HostEjected`, `UserEjected`,
-  `Failed`) and the in-flight transition (`Mutating` for prepare/cleanup, `Unbinding` for a whole
+  `Failed`), the LUN marker nonce and the in-flight transition (`Mutating` for prepare/cleanup, `Unbinding` for a whole
   switch) are persisted to app storage before each phase, never inside the unbound window. On
   start or after a crash, reconcile reads the journal plus the full live state (UDC, links,
   functions, LUN attributes) and finishes or reverts the transition; leftover unlinked owned
@@ -166,7 +172,8 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   allowed root (see Root boundary), `fstat`s it, and writes
   `/proc/<rootpid>/fd/<n>` into `lun/file`. The kernel opens the same inode, which closes the
   check-then-open race. Duplicate exports are rejected by `(st_dev, st_ino)` whenever any copy is
-  RW. `ro` is changed only while the LUN has no file, and in-place swaps require `removable=1`.
+  RW: before `apply`, root opens every slot's image (confined, as below) and checks the whole set,
+  so two hard links to one inode can't both be exported with one writable. `ro` is changed only while the LUN has no file, and in-place swaps require `removable=1`.
 - **Write safety.** `nofua=0`. While a file is exported writable, Bootleg won't let the app open
   it for writing. Sparse RW images show their allocated vs. declared size, and creating one warns
   when free space is less than the declared size (or optionally preallocates with `fallocate`).
@@ -177,7 +184,9 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   the app or the root process. Media stays exported when the UI dies. On restart the service
   reads the actual state and adopts it.
 - The AIDL API (`IBootlegRoot`) is typed. Structured values cross as kotlinx.serialization JSON;
-  it never takes shell strings, and root runs programs by argv only:
+  it never takes shell strings, and root runs programs by argv only, each in its own session
+  (`setsid`): a timeout SIGKILLs the whole process group and returns only once the group and the
+  output reader are gone (bounded waits):
   - `readGadget()`, `readJournal()`
   - `apply(desired)`, `eject(lun, force)`, `reinsert(lun)`, `reconcile()`, `bootlegOff()`
   - `createBlankImage(name, sizeBytes, format, preallocate)`, `deleteImage(path)`, `listImages()`
@@ -232,6 +241,11 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   (â‰¤ 100 chars). FAT32 needs a â‰¥ 33 MiB partition; MBR caps at 2 TiB. New files get the store
   directory's owner, group (0660) and SELinux label, then a media scan, so the app,
   MediaProvider and MTP see them.
+- Every store operation (list, create, format, sweep, sidecar reads) first pins the store
+  directory with the confined walk (no symlink anywhere below the media root) and then works by
+  name inside that fd. External programs (`losetup`) get `/proc/<pid>/fd/<n>` of a file opened
+  that way, never a path. Sidecars are opened `O_NOFOLLOW`, must be regular files, and are read
+  at most 4 KiB + 1 bytes, so one that grows while it's read is refused.
 
 ## Catalog
 
@@ -318,7 +332,8 @@ required for direct LAN paths and incoming hotspot connections. Log upload is of
 - **Go** (`remote/`) only does transport:
   - sockets and the tsnet node;
   - `WhoIs`, with identity bound to the accepted connection and listener, never to request
-    data;
+    data, and bounded before it crosses the bridge (â‰¤ 32 tags, â‰¤ 256 UTF-16 units per string,
+    valid UTF-8, `connJson` â‰¤ 16 KiB), or the connection is refused before `Open`;
   - exact Origin/Host checks, size/rate/connection limits, and frame-length validation;
   - WebSocket ping/pong.
 
@@ -383,7 +398,9 @@ required for direct LAN paths and incoming hotspot connections. Log upload is of
   - **Ingress:** the listener binds the hotspot address. Each connection's local address must
     equal it and its remote address must be in the hotspot subnet and not the phone's own
     hotspot address (a local app looping back through the hotspot IP), or it's rejected. The
-    reservation ending closes the listener and its sessions.
+    reservation ending closes the listener and its sessions, also while offline mode is still
+    starting (the start is superseded, and the listener only starts on a reservation still open).
+    A `/pair` body must arrive within 5s (a per-request read deadline, so WebSockets get none).
   - **Accepted risk (no TLS):** a malicious hotspot participant could sniff a token over plain
     HTTP.
 - **Both transports:**
