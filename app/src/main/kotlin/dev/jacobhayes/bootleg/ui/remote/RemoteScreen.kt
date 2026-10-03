@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.ErrorOutline
@@ -38,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,8 +91,23 @@ fun RemoteScreen(
     onGrantLocalNetwork: () -> Unit,
     onOpenUrl: (String) -> Unit,
 ) {
+    val listState = rememberLazyListState()
+    // While the hotspot runs it's what the user is doing: its card (QR, network, URL, code) moves up
+    // under the notices and the list scrolls to it, instead of starting below the fold.
+    val hotspotActive = state.hotspot is HotspotState.Starting || state.hotspot is HotspotState.On
+    val noticeCount = (if (state.error != null) 1 else 0) + (if (state.enabled && !state.localNetworkGranted) 1 else 0)
+    LaunchedEffect(hotspotActive) { if (hotspotActive) listState.animateScrollToItem(1 + noticeCount) }
+    val offlineSection: LazyListScope.() -> Unit = {
+        item(key = "offline:title") { SectionTitle("Offline mode") }
+        item(key = "offline:hotspot") { HotspotCard(state, actions, nowElapsedMs, onStartHotspot) }
+        if (state.status.tokens.isNotEmpty()) {
+            item(key = "offline:tokens") { SectionTitle("Paired over the hotspot") }
+            items(state.status.tokens, key = { "token:" + it.sha256 }) { TokenRow(it, actions) }
+        }
+    }
     Scaffold(topBar = { TopAppBar(title = { Text("Remote") }) }) { padding ->
         LazyColumn(
+            state = listState,
             modifier = Modifier.padding(padding).fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -110,6 +128,7 @@ fun RemoteScreen(
                 }
             }
             if (!state.enabled && !state.running) return@LazyColumn
+            if (hotspotActive) offlineSection()
             item { TailnetCard(state, onOpenUrl) }
             if (state.status.pending.isNotEmpty()) {
                 item { SectionTitle("Waiting for approval") }
@@ -127,12 +146,7 @@ fun RemoteScreen(
                 item { Muted("None yet. Devices on your tailnet show up above when they connect, and you approve them once.") }
             }
             items(state.status.approvals, key = { "approval:" + it.nodeId }) { ApprovalRow(it, actions) }
-            item { SectionTitle("Offline mode") }
-            item { HotspotCard(state, actions, nowElapsedMs, onStartHotspot) }
-            if (state.status.tokens.isNotEmpty()) {
-                item { SectionTitle("Paired over the hotspot") }
-                items(state.status.tokens, key = { "token:" + it.sha256 }) { TokenRow(it, actions) }
-            }
+            if (!hotspotActive) offlineSection()
         }
     }
 }
