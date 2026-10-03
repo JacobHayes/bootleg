@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-USB_SERIAL=${BOOTLEG_USB_SERIAL:-}
+USB_SERIAL=$(scripts/usb-serial.sh)
 WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
 LOCK_DIR=/private/tmp/claude-501/bootleg-device.lock
 FIXTURE_DIR=build/device-fixtures

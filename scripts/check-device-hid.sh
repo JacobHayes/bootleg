@@ -20,7 +20,7 @@
 set -eu
 
 WIRELESS=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
-USB=${BOOTLEG_USB_SERIAL:-}
+USB=$(scripts/usb-serial.sh)
 LOCK=/private/tmp/claude-501/bootleg-device.lock
 LOCK_WAIT_S_MAX=120
 ENUMERATE_WAIT_S_MAX=10

@@ -5,7 +5,7 @@
 # Usage: scripts/wifi-serial.sh [usb-serial]
 set -euo pipefail
 
-usb_serial=${1:-${BOOTLEG_USB_SERIAL:-}}
+usb_serial=${1:-$(scripts/usb-serial.sh)}
 port=5555
 
 address=$(adb -s "$usb_serial" shell ip -4 addr show wlan0 | grep -oE 'inet [0-9.]+' | head -1 | cut -d' ' -f2)
