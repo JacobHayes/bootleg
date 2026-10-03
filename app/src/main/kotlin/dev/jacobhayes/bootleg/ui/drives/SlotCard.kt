@@ -159,7 +159,8 @@ fun ForceEjectDialog(
         title = "Force eject slot ${lun + 1}?",
         body =
             lead + "Eject the disk on the computer first if you can. Force ejecting can corrupt data the " +
-                "computer hasn't written yet, and macOS may show a stale volume until the drive reconnects.",
+                "computer hasn't written yet. After a force eject, macOS sees the drive again only once USB " +
+                "reconnects (unplug and replug the cable), even after Re-insert.",
         confirmLabel = "Force eject",
         destructive = true,
         onConfirm = onConfirm,

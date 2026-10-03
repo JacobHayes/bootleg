@@ -121,8 +121,8 @@ fun DrivesScreen(
         ConfirmDialog(
             title = "Eject all drives?",
             body =
-                "Every exported image is removed from the host. Unmount them on the computer first " +
-                    "to avoid data loss on writable disks.",
+                "Every exported image is removed from the host. Eject them on the computer first: macOS keeps " +
+                    "an attached disk in use and refuses until then, and writable disks can lose data.",
             confirmLabel = "Eject all",
             onConfirm = controller::ejectAll,
             onDismiss = { confirmEjectAll = false },
@@ -172,11 +172,12 @@ private fun SlotList(
                 )
             }
         }
+        val statuses = state.slots.mapIndexed { index, slot -> slotStatus(index, slot, applied, journal) }
         itemsIndexed(state.slots) { index, slot ->
             SlotCard(
                 index = index,
                 slot = slot,
-                status = slotStatus(index, slot, applied, journal),
+                status = statuses[index],
                 busy = state.busy,
                 onModeChange = { controller.setMode(index, it) },
                 onEject = { controller.eject(index, force = false) },
@@ -186,8 +187,23 @@ private fun SlotList(
                 onRemove = { controller.removeSlot(index) },
             )
         }
+        if (statuses.any { it.kind == SlotStatusKind.EXPORTED }) {
+            item {
+                Text(
+                    EJECT_HINT,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+        }
     }
 }
+
+/** macOS holds an attached disk (prevent-removal) until it ejects it itself, so the phone's Eject is refused before that. */
+private const val EJECT_HINT =
+    "Eject drives on the computer first. macOS keeps an attached disk in use until you eject it there, " +
+        "so Eject here is refused until then (Force eject still works)."
 
 @Composable
 private fun RootChip(root: RootStatus) {

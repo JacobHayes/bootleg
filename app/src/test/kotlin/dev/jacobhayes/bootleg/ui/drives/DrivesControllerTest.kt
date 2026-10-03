@@ -90,6 +90,13 @@ class DrivesControllerTest {
 
             controller.reinsert(0)
             assertEquals(SlotIntent.EXPORTED, backend.journal.value.slotIntents[0])
+            // macOS only notices media re-inserted after a force eject once USB reconnects; say so.
+            assertEquals(DrivesController.REINSERTED_AFTER_FORCE_EJECT, controller.state.value.message)
+
+            backend.ejectPreventedByHost = false
+            controller.eject(0, force = false)
+            controller.reinsert(0)
+            assertEquals("Done", controller.state.value.message, "a normal eject + re-insert needs no hint")
         }
 
     @Test

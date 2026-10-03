@@ -56,6 +56,9 @@ class DrivesController(
     private val message = MutableStateFlow<String?>(null)
     private val forceEjectOffer = MutableStateFlow<Int?>(null)
 
+    /** LUNs force-ejected since the last apply: macOS only sees their media again after USB reconnects. */
+    private val forceEjected = mutableSetOf<Int>()
+
     val state: StateFlow<DrivesUiState> =
         combine(draft, backend.journal, busy, message, forceEjectOffer) { draft, journal, busy, message, offer ->
             val applied = slotsOf(journal)
@@ -99,6 +102,7 @@ class DrivesController(
         run("Applying") {
             val slots = state.value.slots
             val result = backend.apply(desiredFor(slots, backend.journal.value))
+            if (result is ApplyResult.Applied && result.reenumerated) forceEjected.clear()
             draft.value = null
             reinsertFreshSlots(slots, result) ?: result
         }
@@ -137,10 +141,18 @@ class DrivesController(
         force: Boolean,
     ) = run(if (force) "Force ejecting" else "Ejecting") {
         forceEjectOffer.value = null
-        backend.eject(lun, force).also { offerForceEjectIfPrevented(lun, it) }
+        backend.eject(lun, force).also {
+            offerForceEjectIfPrevented(lun, it)
+            if (force && it is ApplyResult.Applied) forceEjected += lun
+        }
     }
 
-    fun reinsert(lun: Int) = run("Re-inserting") { backend.reinsert(lun) }
+    fun reinsert(lun: Int) =
+        run("Re-inserting") {
+            backend.reinsert(lun).also {
+                if (it is ApplyResult.Applied && forceEjected.remove(lun)) message.value = REINSERTED_AFTER_FORCE_EJECT
+            }
+        }
 
     fun dismissForceEjectOffer() {
         forceEjectOffer.value = null
@@ -184,7 +196,9 @@ class DrivesController(
         message.value = null
         scope.launch {
             try {
-                message.value = describe(action())
+                val result = action()
+                // An action may have set a more specific message itself.
+                if (message.value == null) message.value = describe(result)
             } catch (error: Exception) {
                 message.value = "$label failed: ${error.message ?: error::class.simpleName}"
             } finally {
@@ -198,6 +212,9 @@ class DrivesController(
         const val EJECT_PREVENTED_REASON = DefaultGadgetController.EJECT_PREVENTED_REASON
 
         private val EJECTED_INTENTS = setOf(SlotIntent.HOST_EJECTED, SlotIntent.USER_EJECTED)
+
+        const val REINSERTED_AFTER_FORCE_EJECT =
+            "Re-inserted. After a force eject, macOS sees the drive again only once USB reconnects (unplug and replug the cable)."
 
         fun slotsOf(journal: Journal): List<DraftSlot> =
             journal.desired.slots.sortedBy { it.lun }.map { spec ->
