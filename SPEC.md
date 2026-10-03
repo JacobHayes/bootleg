@@ -23,7 +23,7 @@ Confirmed on device: configfs gadget `g1` on UDC `11110000.dwc3`;
 | Storage | `/sdcard/bootleg/` (kernel is given the `/data/media/0/...` path, not the FUSE path); can also pick any file on the phone |
 | Catalog | Live-scraped at runtime from each distro's release index/API; **no bundled fallback list**. Images you already downloaded still work offline |
 | Catalog scope | Supported releases (not EOL), x86_64 + arm64, arch filter defaults to x86_64 |
-| Distros | Desktop: Ubuntu (+flavors), Fedora, Debian, Mint, Pop!_OS, openSUSE, Arch, Manjaro, NixOS, Omarchy. Server: Ubuntu Server, Debian netinst, Alpine, Rocky, AlmaLinux, Proxmox VE, TrueNAS. Rescue: SystemRescue, GParted Live, Clonezilla, Memtest86+, ShredOS, netboot.xyz |
+| Distros | Desktop: Ubuntu, Fedora, Debian, Mint, Pop!_OS, openSUSE, Arch, NixOS, Omarchy (no Ubuntu flavors, no Manjaro). Server: Ubuntu Server, Debian netinst, Alpine, Rocky, AlmaLinux, Proxmox VE, TrueNAS. Rescue: SystemRescue, GParted Live, Clonezilla, Memtest86+, ShredOS, netboot.xyz |
 | Downloads | Resumable user-initiated transfer jobs, optional Wi-Fi only, SHA256 checked against the distro's published sums |
 | Blank images | Create sparse images of a chosen size: raw, FAT32 (MBR), exFAT, ext4 |
 | Persistence | Re-expose the last mounted set after reboot (opt-in) |

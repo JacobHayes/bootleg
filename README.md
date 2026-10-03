@@ -8,8 +8,7 @@ whatever computer it's plugged into. You can also drive it from another computer
   your phone.
 - **Catalog.** Browse current releases of popular distros and download them with checksum
   verification. The list is scraped live from each project's own release data. It covers:
-  - Desktop: Ubuntu and its flavors, Fedora, Debian, Mint, Pop!_OS, openSUSE, Arch, Manjaro,
-    NixOS and Omarchy.
+  - Desktop: Ubuntu, Fedora, Debian, Mint, Pop!_OS, openSUSE, Arch, NixOS and Omarchy.
   - Server: Ubuntu Server, Debian netinst, Alpine, Rocky, AlmaLinux, Proxmox VE and TrueNAS.
   - Rescue: SystemRescue, GParted, Clonezilla, Memtest86+, ShredOS and netboot.xyz.
 - **Blank images.** Create raw, FAT32, exFAT or ext4 disk images to use as writable drives or as

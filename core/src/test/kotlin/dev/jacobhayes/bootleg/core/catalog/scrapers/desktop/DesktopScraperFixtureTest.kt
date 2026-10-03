@@ -44,7 +44,7 @@ class DesktopScraperFixtureTest {
 
     @Test
     fun `Ubuntu offers supported series with the newest point release per arch`() {
-        val releases = scrape(UbuntuScraper(UbuntuProject.UBUNTU, today))
+        val releases = scrape(UbuntuScraper(today))
         assertEquals(setOf("22.04.5 LTS", "24.04.5 LTS", "24.04.5.1 LTS", "26.04.1 LTS"), releases.map { it.version }.toSet())
         val noble = releases.single("ubuntu", Arch.X86_64, version = "24.04.5.1 LTS")
         assertEquals("https://releases.ubuntu.com/noble/ubuntu-24.04.5.1-desktop-amd64.iso", noble.url)
@@ -65,46 +65,8 @@ class DesktopScraperFixtureTest {
     }
 
     @Test
-    fun `Ubuntu flavors follow their own 3-year LTS support and skip missing series`() {
-        val kubuntu = scrape(UbuntuScraper(UbuntuProject.KUBUNTU, today))
-        assertEquals(listOf("24.04.5 LTS", "26.04.1 LTS"), kubuntu.map { it.version }.sorted())
-        val noble = kubuntu.single("kubuntu", Arch.X86_64, version = "24.04.5 LTS")
-        assertEquals("2027-04-25", noble.supportedUntil)
-        assertEquals("https://cdimage.ubuntu.com/kubuntu/releases/noble/release/kubuntu-24.04.5-desktop-amd64.iso", noble.url)
-        assertEquals("ae59e59c54337bcd8f8e60825b4a3f58797121ae0e89855524ffc92b8075c1d6", noble.sha256)
-
-        // Ubuntu MATE published no 26.04.
-        assertEquals(listOf("24.04.5 LTS"), scrape(UbuntuScraper(UbuntuProject.MATE, today)).map { it.version })
-
-        val xubuntu = scrape(UbuntuScraper(UbuntuProject.XUBUNTU, today))
-        assertEquals(
-            "f057788b4597321fd13b8daa54fd4492de1b39a1c35372e7fa8d73f77dc109ff",
-            xubuntu.single("xubuntu", Arch.X86_64, "Minimal", "26.04.1 LTS").sha256,
-        )
-        assertEquals(4, xubuntu.size)
-
-        val studio = scrape(UbuntuScraper(UbuntuProject.STUDIO, today))
-        assertEquals("ubuntustudio-24.04.5-dvd-amd64.iso", studio.single("ubuntu-studio", Arch.X86_64, version = "24.04.5 LTS").fileName)
-
-        val unity = scrape(UbuntuScraper(UbuntuProject.UNITY, today))
-        assertEquals(listOf("24.04.5 LTS", "26.04 LTS"), unity.map { it.version }.sorted())
-
-        for (project in listOf(
-            UbuntuProject.LUBUNTU,
-            UbuntuProject.BUDGIE,
-            UbuntuProject.CINNAMON,
-            UbuntuProject.EDUBUNTU,
-            UbuntuProject.KYLIN,
-        )) {
-            val releases = scrape(UbuntuScraper(project, today))
-            assertEquals(2, releases.size, "$project: $releases")
-            assertTrue(releases.all { it.arch == Arch.X86_64 && it.distroId == project.distroId })
-        }
-    }
-
-    @Test
     fun `Ubuntu returns nothing once every series is past end of life`() {
-        assertEquals(emptyList<Release>(), scrape(UbuntuScraper(UbuntuProject.UBUNTU) { LocalDate.of(2099, 1, 1) }))
+        assertEquals(emptyList<Release>(), scrape(UbuntuScraper { LocalDate.of(2099, 1, 1) }))
     }
 
     @Test
@@ -202,17 +164,6 @@ class DesktopScraperFixtureTest {
         assertEquals("684ded26c63240ff4a41e8c25ee84ea6da233f557364821f13d12c2b0a9059a5", release.sha256)
         assertEquals("https://geo.mirror.pkgbuild.com/iso/2026.10.01/sha256sums.txt", release.sumsUrl)
         assertEquals(1640497152, release.sizeBytes)
-    }
-
-    @Test
-    fun `Manjaro offers the official editions with per-file checksums`() {
-        val releases = scrape(ManjaroScraper())
-        assertEquals(6, releases.size)
-        val kde = releases.single("manjaro", Arch.X86_64, "KDE Plasma")
-        assertEquals("26.1.1", kde.version)
-        assertEquals("https://download.manjaro.org/kde/26.1.1/manjaro-kde-26.1.1-260825-linux71.iso", kde.url)
-        assertEquals("https://download.manjaro.org/kde/26.1.1/manjaro-kde-26.1.1-260825-linux71.iso.sha256", kde.sumsUrl)
-        assertNull(kde.sha256)
     }
 
     @Test

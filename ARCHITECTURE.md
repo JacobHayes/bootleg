@@ -388,7 +388,7 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   non-https URL, an unsafe file name (`/`, `\`, `..`, leading `.`), a malformed sha256, or neither a
   sha256 nor a sums URL.
 - Supported-release rules where upstream has no "supported" flag: Ubuntu uses distro-info-data
-  dates (flavor LTS = 3 years); Fedora keeps the two newest stable releases; Mint keeps the newest
+  dates; Fedora keeps the two newest stable releases; Mint keeps the newest
   point release of the two newest majors; Pop!_OS probes `YY.04` LTS versions from the last 4 years.
   openSUSE images resolve through MirrorCache metalinks (`.meta4`), which pin the versioned file and
   give its SHA-256 (Leap 16 publishes only SHA-512 files).

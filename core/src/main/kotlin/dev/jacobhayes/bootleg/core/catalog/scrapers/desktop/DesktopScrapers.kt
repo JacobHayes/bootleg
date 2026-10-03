@@ -4,7 +4,7 @@ import dev.jacobhayes.bootleg.core.catalog.Scraper
 
 /** Desktop distros, plus Ubuntu Server and Debian netinst, which share the Ubuntu/Debian scraping logic. */
 val desktopScrapers: List<Scraper> =
-    ubuntuScrapers +
+    listOf(UbuntuScraper()) +
         listOf(
             DebianLiveScraper(),
             DebianNetinstScraper(),
@@ -14,7 +14,6 @@ val desktopScrapers: List<Scraper> =
             OpenSuseLeapScraper(),
             OpenSuseTumbleweedScraper(),
             ArchLinuxScraper(),
-            ManjaroScraper(),
             NixOsScraper(),
             OmarchyScraper(),
         )
