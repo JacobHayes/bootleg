@@ -597,6 +597,28 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
      ejects, revokes and turns Remote and the drives off whatever happens.
   The time is mostly three gadget re-enumerations (mount, `hid on`, `hid off`) plus the final
   drives-off, 3.5–4s each, so it misses the 30s target by about 5s.
+- **L4 `check:device:web`** (`scripts/check-device-web.sh` + `scripts/web-check/check.mjs`; run
+  by hand, not part of `check:all`; takes the device lock per run). The phone's real page in the
+  installed Google Chrome, driven by `playwright-core` (pinned in `scripts/web-check/package.json`,
+  installed into `build/web-check`; it downloads no browser), over the tailnet:
+  1. Response headers on every asset (CSP, `X-Frame-Options`, `nosniff`, no CORS) and a
+     foreign-Origin `/ws` upgrade refused with 403.
+  2. The page shows pending; approve through the hook; the page turns approved without a reload.
+  3. Take control; the image picker lists library images by name (never ids or paths).
+  4. Expose a 64 MB FAT32 blank (debug `CREATE_BLANK`) read-only from the page; the Mac mounts it
+     read-only. The Mac unmounts it; the page's Eject is refused (macOS holds the medium even
+     unmounted), the row offers Force eject, and the phone reads LUN 0 back empty.
+  5. HID on from the page; F24 from the "More keys" overflow writes reports (`HID_STATE`); F24
+     held in the capture area is released when another tab comes to the front; HID off.
+  6. Paste prepare shows the plan (including a character the US layout can't type); Cancel,
+     never run.
+  7. A second browser context (same node, second session) asks to take over: decline keeps the
+     lease, allow moves it.
+  8. Revoke through the hook: both pages say revoked, their sockets close and they don't
+     reconnect (a reconnect would show up as a new pending request).
+  Only F24 reaches the Mac; no mouse button is ever sent. Every step saves a screenshot to
+  `build/web-check/shots` (`BOOTLEG_WEB_HEADFUL=1` shows the window). An EXIT trap ejects,
+  revokes, turns HID, Remote and the drives off and deletes the image.
 - **Known gaps:**
   - Host-captured releases need a Mac capture helper. That needs the user to grant Input
     Monitoring once; until then releases are proved by phone-side `HID_STATE` plus

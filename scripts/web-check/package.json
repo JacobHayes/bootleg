@@ -1,0 +1,8 @@
+{
+  "name": "bootleg-web-check",
+  "private": true,
+  "description": "L4 web check dependencies (scripts/check-device-web.sh installs them into build/web-check)",
+  "dependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

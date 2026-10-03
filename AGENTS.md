@@ -32,6 +32,7 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
 | `mise run check:device` | L4 | real phone end to end, `scripts/check-device.sh` (local only, not CI; takes the device lock) |
 | `mise run check:device:hid` | L4 | HID only: Mac enumerates keyboard + mouse, harmless input, off again (<30s) |
 | `mise run check:device:remote` | L4 | Remote: the real `bootleg` CLI over the tailnet (pending, approve, RO mount, harmless HID, revoke) |
+| `mise run check:device:web` | L4 | Remote web UI in Chrome (playwright-core, local install; manual, not in `check:all`): pending → approve, RO mount + eject, F24, release on tab switch, paste prepare/cancel, takeover, revoke; screenshots in `build/web-check/shots` |
 | `mise run check:all` | L0–L4 | `check`, then `check:catalog` in parallel with `check:device` and `check:device:remote` |
 | `mise run fixtures:refresh` | | re-record catalog fixtures; review the diff before committing |
 | `mise run screenshots:record` | | re-record UI goldens (`app/src/test/screenshots/`); look at the PNGs before committing |

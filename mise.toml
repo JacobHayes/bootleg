@@ -3,6 +3,7 @@ java = "temurin-21"
 gradle = "latest"
 android-sdk = "latest"
 go = "latest"
+node = "latest" # only for check:device:web (Playwright drives the Mac's Chrome)
 
 [env]
 ANDROID_HOME = "{{config_root}}/.android-sdk"
@@ -50,6 +51,10 @@ run = "sh scripts/check-device-hid.sh"
 [tasks."check:device:remote"]
 description = "L4 remote: the real bootleg CLI over the tailnet: pending, approve, RO mount, harmless HID, revoke (needs `mise run deploy` and an enrolled node)"
 run = "bash scripts/check-device-remote.sh"
+
+[tasks."check:device:web"]
+description = "L4 web: the phone's web UI in Chrome over the tailnet: pending, approve, RO mount + eject, F24, tab-switch release, paste prepare/cancel, takeover, revoke (needs `mise run deploy`, Chrome and node)"
+run = "bash scripts/check-device-web.sh"
 
 [tasks.deploy]
 description = "Install the debug app on the phone and pre-grant root + storage access"
