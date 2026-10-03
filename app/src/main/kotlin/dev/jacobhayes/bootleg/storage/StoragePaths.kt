@@ -2,7 +2,12 @@ package dev.jacobhayes.bootleg.storage
 
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import java.io.File
+import java.io.IOException
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
+import java.nio.file.StandardCopyOption
 
 /**
  * Path conventions for the image store. The app reads/writes through the FUSE view
@@ -68,13 +73,36 @@ object StoragePaths {
     /**
      * Moves a finished staging file into place, refusing to replace an existing image (a download and an
      * import of the same name can both finish). Throws FileAlreadyExistsException then.
+     *
+     * A stale FUSE entry (the file was removed under `/data/media`, behind the FUSE daemon's back) is
+     * not an image: the staging file is renamed over it, which the daemon carries out on the backing
+     * directory and which clears the entry (an app's unlink of a stale entry fails with ENOENT).
      */
     fun moveIntoPlace(
         staging: File,
         target: File,
     ) {
-        Files.move(staging.toPath(), target.toPath())
+        try {
+            Files.move(staging.toPath(), target.toPath())
+        } catch (exists: FileAlreadyExistsException) {
+            if (!isStaleEntry(target)) throw exists
+            Files.move(staging.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        }
     }
+
+    /** True when [file] is really there: it exists and opens (a stale FUSE entry stats fine but won't open). */
+    fun existsLive(file: File): Boolean = file.exists() && !isStaleEntry(file)
+
+    /** True when [file] stats as present but opening it says it doesn't exist. */
+    fun isStaleEntry(file: File): Boolean =
+        try {
+            Files.newByteChannel(file.toPath()).close()
+            false
+        } catch (missing: NoSuchFileException) {
+            Files.exists(file.toPath(), LinkOption.NOFOLLOW_LINKS)
+        } catch (other: IOException) {
+            false
+        }
 
     fun isValidImageName(name: String): Boolean =
         name.isNotBlank() &&

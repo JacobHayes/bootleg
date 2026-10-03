@@ -34,7 +34,7 @@ class Downloads(
         if (!StoragePaths.isValidImageName(release.fileName)) return EnqueueResult.Rejected("Bad file name: ${release.fileName}")
         val existing = store[release.fileName]
         if (existing != null && existing.isActive) return EnqueueResult.AlreadyActive
-        if (engine.finalFile(release.fileName).exists()) return EnqueueResult.AlreadyDownloaded
+        if (StoragePaths.existsLive(engine.finalFile(release.fileName))) return EnqueueResult.AlreadyDownloaded
         val record =
             existing?.copy(status = DownloadStatus.QUEUED, error = null, rescheduleCount = 0, verify = VerifyState.PENDING)
                 ?: DownloadRecord.from(release, distroName, nowMs())

@@ -4,6 +4,7 @@ import android.os.ParcelFileDescriptor
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import android.util.Log
 import dev.jacobhayes.bootleg.core.gadget.Clock
 import dev.jacobhayes.bootleg.core.gadget.DeadMan
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
@@ -160,6 +161,8 @@ class ShellDeadMan(
  * of the opened file, never the path.
  */
 object ConfinedFiles {
+    private const val TAG = "ConfinedFiles"
+
     // The SDK has no O_DIRECTORY, so directories are checked with fstat after the open. O_NONBLOCK: a
     // FIFO must fail that check, not hang the binder thread in open().
     private val OPEN_FLAGS = OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW or OsConstants.O_CLOEXEC or OsConstants.O_NONBLOCK
@@ -226,19 +229,45 @@ object ConfinedFiles {
     /** [directory] itself, through its fd: listing this lists the pinned directory. Valid in this process only. */
     fun selfPath(directory: ParcelFileDescriptor): String = "/proc/self/fd/${directory.fd}"
 
-    /** Removes the regular file at [confined] and its `.sha256` sidecar (if any), by name inside the parent's fd. */
-    fun deleteImage(confined: ConfinedPath) {
+    /**
+     * Removes the regular file at [confined] and its `.sha256` sidecar (if any). The checks run by name
+     * inside the parent's fd; the unlink then goes through [visibleDirectory] (the FUSE view of the
+     * parent) when given. Shared storage's FUSE daemon caches entries indefinitely and only learns of
+     * changes made through it: unlinked behind its back under `/data/media`, the file keeps showing up
+     * to apps (stat succeeds, open fails), so a later download of the same name refuses to replace it.
+     * Whatever the FUSE unlink did, the backing entry is removed (or confirmed gone) by fd afterwards.
+     */
+    fun deleteImage(
+        confined: ConfinedPath,
+        visibleDirectory: String?,
+    ) {
         withParent(confined) { parent, rootDevice ->
             val target = childPath(parent, confined.name)
             val stat = errnoAsArgument(confined) { Os.lstat(target) }
             require(OsConstants.S_ISREG(stat.st_mode)) { "not a regular file: ${confined.path}" }
             require(stat.st_dev == rootDevice) { "file is on another filesystem than ${confined.root}: ${confined.path}" }
-            Os.remove(target)
+            removeEntry(parent, confined.name, visibleDirectory)
+            removeEntry(parent, "${confined.name}.sha256", visibleDirectory)
+        }
+    }
+
+    private fun removeEntry(
+        parent: ParcelFileDescriptor,
+        name: String,
+        visibleDirectory: String?,
+    ) {
+        if (visibleDirectory != null) {
             try {
-                Os.remove(childPath(parent, "${confined.name}.sha256"))
+                Os.remove("$visibleDirectory/$name")
             } catch (e: ErrnoException) {
-                if (e.errno != OsConstants.ENOENT) throw e
+                // ENOENT for a missing sidecar; anything else falls back to the backing path below.
+                if (e.errno != OsConstants.ENOENT) Log.w(TAG, "unlink through $visibleDirectory failed: ${e.message}")
             }
+        }
+        try {
+            Os.remove(childPath(parent, name))
+        } catch (e: ErrnoException) {
+            if (e.errno != OsConstants.ENOENT) throw e
         }
     }
 

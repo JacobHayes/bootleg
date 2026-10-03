@@ -82,6 +82,26 @@ class CommandProvider : ContentProvider() {
                                 backend.deleteImage(path).getOrThrow()
                                 buildJsonObject { put("deleted", path) }.toString()
                             }
+                            "PROBE_FILE" -> {
+                                // How the app's FUSE view sees a store file (stale entries stat fine but don't open).
+                                val name = requireNotNull(arguments.getString("name") ?: arg) { "missing name" }
+                                val file = java.io.File(dev.jacobhayes.bootleg.storage.StoragePaths.STORE_FUSE_DIR, name)
+                                val open =
+                                    runCatching {
+                                        java.nio.file.Files
+                                            .newByteChannel(file.toPath())
+                                            .close()
+                                    }.fold({ "ok" }, { "${it::class.simpleName}: ${it.message}" })
+                                buildJsonObject {
+                                    put("exists", file.exists())
+                                    put("open", open)
+                                    put(
+                                        "stale",
+                                        dev.jacobhayes.bootleg.storage.StoragePaths
+                                            .isStaleEntry(file),
+                                    )
+                                }.toString()
+                            }
                             "CREATE_BLANK" -> {
                                 val created =
                                     backend

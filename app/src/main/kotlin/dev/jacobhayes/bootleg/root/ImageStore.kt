@@ -40,7 +40,8 @@ class ImageStore(
         val confined = ConfinedPath.parse(ImagePaths.toKernelPath(path), listOf("$storePath/"))
         require(IMAGE_EXTENSION.containsMatchIn(confined.name)) { "not an image: $path" }
         require(confined.path !in exportedPaths) { "image is exported; eject it first: $path" }
-        ConfinedFiles.deleteImage(confined)
+        val visibleDirectory = confined.path.substringBeforeLast('/').takeIf { it.startsWith(ImagePaths.MEDIA_ROOT) }
+        ConfinedFiles.deleteImage(confined, visibleDirectory?.let(ImagePaths::toSharedStoragePath))
     }
 
     fun createBlank(

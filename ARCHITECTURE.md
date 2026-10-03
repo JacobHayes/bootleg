@@ -208,8 +208,12 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   `android.system.Os` has no `openat`), so a directory swapped for a symlink mid-check can't
   redirect it. Each directory and the final file are checked with `fstat` (directory, then
   regular file, all on the root's `st_dev`), and `/proc/self/fd/N` of the final fd goes into
-  `lun/file`. Deletes are confined to `/data/media/0/bootleg/`, unlink by name inside the walked
-  parent fd, and refuse exported files. Caller check: the binder caller's uid must equal the app's
+  `lun/file`. Deletes are confined to `/data/media/0/bootleg/`, are checked by name inside the
+  walked parent fd, and refuse exported files. The unlink itself goes through the FUSE view
+  (`/storage/emulated/0/bootleg/<name>`), then by fd to confirm the entry is gone: the FUSE daemon
+  caches entries indefinitely and only learns of changes made through it, so a file unlinked under
+  `/data/media` keeps showing up to apps (stat works, open fails with ENOENT) and a download of the
+  same name would refuse to replace it. Caller check: the binder caller's uid must equal the app's
   uid. Calls are serialized (the controller isn't thread-safe); image formatting has its own lock
   so it never blocks an eject. A delete takes the image lock and then the gadget lock (never the
   other order), so no apply can export the file between the exported check and the unlink.
@@ -241,6 +245,10 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
 
 - `/sdcard/bootleg/` is the image store: images, `.partial` downloads, `.sha256` sidecars. The
   kernel gets `/data/media/0/bootleg/...`.
+- Finished downloads and imports move into place without replacing an existing image. A target
+  that stats but won't open (a stale FUSE entry) is replaced by a rename (an app's unlink of a stale
+  entry fails with ENOENT; a rename goes through);
+  "already downloaded" checks use the same test.
 - Picking a file: if its `/sdcard/...` path maps to `/data/media/0/...`, use it in place. If the
   picker returns a document-provider URI with no usable path, offer "Import" (copy into the store).
 - The app grants itself `MANAGE_EXTERNAL_STORAGE` via root `appops` so it can browse files.
