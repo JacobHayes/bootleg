@@ -22,8 +22,9 @@ interface IBootlegRoot {
     // Grants the app MANAGE_EXTERNAL_STORAGE via appops; returns true on success.
     boolean grantSelfStorage();
     // HID relay. kind: "keyboard" | "mouse". Root opens that function's /dev/hidgN (matched by device
-    // number) and keeps the fd: apps may not use the device-labelled node. client is a token whose
-    // death makes root release every key and button.
+    // number) and keeps the fd: apps may not use the device-labelled node. client is an
+    // IHidRelayClient: root tells it when it drops the fds itself, and its death makes root release
+    // every key and button.
     void hidOpen(String kind, IBinder client);
     // Nonblocking write with a 50ms deadline; returns a HidWriteResult ordinal. Calls on one binder
     // are synchronous, so reports reach the host in call order.

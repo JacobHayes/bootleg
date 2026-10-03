@@ -1329,6 +1329,7 @@ class RemoteController(
                     } else {
                         null
                     },
+                    device.hidLink.wireName.takeIf { device.hid.keyboard || device.hid.mouse },
                 ),
             lease = leaseViewFor(),
         )

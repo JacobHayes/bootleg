@@ -12,11 +12,15 @@ import dev.jacobhayes.bootleg.core.gadget.LunState
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.hid.HidEndpoint
+import dev.jacobhayes.bootleg.hid.HidRelayNotice
 import dev.jacobhayes.bootleg.storage.StoragePaths
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
@@ -121,6 +125,10 @@ class FakeBootlegBackend(
 
     /** There are no HID devices here; opening never completes, so screens show a steady "connecting" state. */
     override suspend fun openHid(kind: HidKind): HidEndpoint = awaitCancellation()
+
+    /** Tests emit relay notices here. */
+    val hidRelayNoticeFlow = MutableSharedFlow<HidRelayNotice>(extraBufferCapacity = HidRelayNotice.BUFFER_COUNT_MAX)
+    override val hidRelayNotices: Flow<HidRelayNotice> = hidRelayNoticeFlow.asSharedFlow()
 
     /** Simulates macOS holding the volume mounted: a normal eject is refused (EBUSY). */
     var ejectPreventedByHost = false

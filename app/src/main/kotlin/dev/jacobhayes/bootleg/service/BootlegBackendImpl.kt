@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.media.MediaScannerConnection
-import android.os.Binder
 import android.os.IBinder
 import android.util.Log
 import com.topjohnwu.superuser.Shell
@@ -23,10 +22,12 @@ import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.hid.HidEndpoint
+import dev.jacobhayes.bootleg.hid.HidRelayNotice
 import dev.jacobhayes.bootleg.hid.RootHidEndpoint
 import dev.jacobhayes.bootleg.root.BootlegJson
 import dev.jacobhayes.bootleg.root.BootlegRootService
 import dev.jacobhayes.bootleg.root.IBootlegRoot
+import dev.jacobhayes.bootleg.root.IHidRelayClient
 import dev.jacobhayes.bootleg.root.ImagePaths
 import dev.jacobhayes.bootleg.root.RootImage
 import kotlinx.coroutines.CancellationException
@@ -34,8 +35,11 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -60,8 +64,26 @@ class BootlegBackendImpl(
 
     private val bindMutex = Mutex()
 
-    /** Lives as long as this process; when it dies, root releases every HID key and button. */
-    private val hidClientToken = Binder()
+    private val hidRelayNoticeFlow = MutableSharedFlow<HidRelayNotice>(extraBufferCapacity = HidRelayNotice.BUFFER_COUNT_MAX)
+    override val hidRelayNotices: Flow<HidRelayNotice> = hidRelayNoticeFlow.asSharedFlow()
+
+    /** Lives as long as this process; when it dies, root releases every HID key and button. Root's notices arrive on binder threads. */
+    private val hidClientToken =
+        object : IHidRelayClient.Stub() {
+            override fun onClosed(
+                reason: String,
+                reopenFollows: Boolean,
+                restartRequired: Boolean,
+            ) {
+                if (!hidRelayNoticeFlow.tryEmit(HidRelayNotice.Closed(reason, reopenFollows, restartRequired))) {
+                    Log.w(TAG, "HID relay notice dropped: $reason")
+                }
+            }
+
+            override fun onReopenable() {
+                if (!hidRelayNoticeFlow.tryEmit(HidRelayNotice.Reopenable)) Log.w(TAG, "HID relay reopen notice dropped")
+            }
+        }
 
     @Volatile private var connection: RootConnection? = null
 
@@ -227,6 +249,8 @@ class BootlegBackendImpl(
             Log.w(TAG, "root service disconnected")
             if (connection === this) connection = null
             root.completeExceptionally(IllegalStateException("root service disconnected"))
+            // The kernel closed the dead relay's fds; the HID session reopens through a new root service.
+            hidRelayNoticeFlow.tryEmit(HidRelayNotice.Closed("root service restarted", reopenFollows = false, restartRequired = false))
         }
     }
 

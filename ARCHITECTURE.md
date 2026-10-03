@@ -188,7 +188,7 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
     every write, read and close, and a watch thread polls it every 50ms while anything is open.
     Gone means unbound and not yet rebound, so the fds are closed at once, which is safe; the
     HAL's rebind comes 350ms or more after an unbind, so a HAL-driven unbind/rebind (USB mode
-    change, tethering, a reset) normally just closes the session, which reopens with backoff. Changed means rebound under an open fd, so closing it would panic:
+    change, tethering, a reset) normally just closes the session, which is told at once and reopens once USB has settled (below). Changed means rebound under an open fd, so closing it would panic:
     the fd is quarantined instead (kept open and logged). A quarantined fd is
     unrecoverable without a reboot (process exit closes it too), so while one exists the relay
     refuses opens and the holder scan reports it, which refuses every gadget change that would
@@ -204,7 +204,26 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
     so reconcile can't rebind or remove hid functions under it.
   - `HidController` opens no session while its own HID apply runs (input meanwhile is dropped);
     it opens the new session after the apply returns. Other applies close the relay's fds when
-    they re-enumerate, and the session reopens with its usual backoff.
+    they re-enumerate.
+  - After a close the relay didn't initiate (the watch, a write or a read finding the node
+    unbound or rebound), it refuses opens until the UDC is bound and the lost functions' devices
+    exist (`/sys/dev/char/M:m`) continuously for the controller's stable-bound window
+    (`STABLE_BOUND_MS`, 1s), polled by the watch every 50ms, at most 30s
+    (`HidLimits.RELAY_SETTLE_WAIT_MS_MAX`). The HAL unbinds and rebinds more than once after a mode
+    switch, and an fd opened between those rebinds would be held across the next one.
+  - The client token passed to `hidOpen` is an `IHidRelayClient` (oneway). Whenever the relay
+    drops the client's fds on its own (a gadget change's `closeAll()`, or a close it didn't
+    initiate) or refuses its open because of a quarantine, it sends
+    `onClosed(reason, reopenFollows, restartRequired)`. It sends `onReopenable()` when the
+    controller call that fenced it ends, or when the settle above sees USB stable, if the client
+    lost fds to it or was refused an open meanwhile (not when a settle gives up at the cap).
+    Notices are raised under the relay lock and sent after it, in order.
+  - On `onClosed`, `HidSession` leaves `Open` at once (`Reconnecting`), drops queued input, owes a
+    release-all and refuses input until the reopened endpoints took it, so nothing typed during
+    the gap reaches the host late and no key stays down. With `reopenFollows` it reopens at
+    `onReopenable` (or after 30s), otherwise right away; `onReopenable` also cuts a reopen
+    backoff short. `restartRequired` is terminal: `Failed` with "restart the phone to use keyboard
+    and mouse again", and input no longer retries. A root service death reads as `onClosed` too.
   - The fake configfs models hidg fds: binding a linked hid function (by anyone) while an fd
     opened under an earlier bind is still open, or the executor unbinding, unlinking or removing
     a hid function with an fd open, is a hard test failure. The controller and simulator suites
@@ -380,7 +399,8 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   never replayed late, and new input is refused until the owed release-all (all-zero keyboard and
   mouse reports) gets through. After 2s of that, or on `ENXIO`/`ESHUTDOWN`, the endpoints are reopened
   with backoff (250ms doubling to 5s, at most 40 attempts; the next input retries after that).
-  Release-all also happens on stop, on app background and on queue overflow, and resets the
+  When root drops the fds itself the session is told and reconnects without waiting for input
+  (see HID fds and gadget changes). Release-all also happens on stop, on app background and on queue overflow, and resets the
   on-screen modifier and button state. Keyboard LED output reports are polled while idle.
 - Input mapping is pure (`core/hid`): `TouchpadGestures` (drag moves with acceleration, tap = left,
   two-finger tap = right, hold = drag with the left button; no wheel yet, so no scroll gesture),

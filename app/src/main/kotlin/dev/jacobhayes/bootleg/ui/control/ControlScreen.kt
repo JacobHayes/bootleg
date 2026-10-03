@@ -172,6 +172,7 @@ private fun statusText(
         is HidLinkState.Open ->
             if (link.hostListening) "Connected · the computer is reading input" else "The computer isn't reading input (asleep or off?)"
         is HidLinkState.Reconnecting -> "Reconnecting (attempt ${link.attempt}): ${link.reason}"
-        is HidLinkState.Failed -> "Not connected: ${link.reason}. Touch the pad to retry."
+        is HidLinkState.Failed ->
+            if (link.restartRequired) "Not connected: ${link.reason}." else "Not connected: ${link.reason}. Touch the pad to retry."
     }
 }

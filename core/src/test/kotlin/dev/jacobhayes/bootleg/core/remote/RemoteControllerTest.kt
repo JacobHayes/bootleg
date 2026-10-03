@@ -511,6 +511,19 @@ class RemoteControllerTest {
             h.setDevice(h.device.copy(hid = HidSpec()))
             assertFalse(h.controller.releaseBarrierActive)
         }
+
+        @Test
+        fun `the state carries the HID link while HID is on`() {
+            h.connect("s1")
+            for (status in listOf(HidLinkStatus.OPEN, HidLinkStatus.RECONNECTING, HidLinkStatus.OPEN, HidLinkStatus.RESTART_REQUIRED)) {
+                h.setDevice(h.device.copy(hid = HidSpec(keyboard = true, mouse = true), hidLink = status))
+                h.advance(RemoteLimits.PUSH_INTERVAL_MS_MIN)
+                assertEquals(status.wireName, hidField("s1", "link"))
+            }
+            h.setDevice(h.device.copy(hid = HidSpec(), hidLink = HidLinkStatus.STOPPED))
+            h.advance(RemoteLimits.PUSH_INTERVAL_MS_MIN)
+            assertNull(hidField("s1", "link"))
+        }
     }
 
     @Nested
@@ -1086,12 +1099,17 @@ class RemoteControllerTest {
         )
     }
 
-    private fun hidStatus(name: String): String? =
+    private fun hidStatus(name: String): String? = hidField(name, "status")
+
+    private fun hidField(
+        name: String,
+        field: String,
+    ): String? =
         h
             .pushes(name, "state")
             .last()
             .getValue("hid")
-            .jsonObject["status"]
+            .jsonObject[field]
             ?.jsonPrimitive
             ?.content
 

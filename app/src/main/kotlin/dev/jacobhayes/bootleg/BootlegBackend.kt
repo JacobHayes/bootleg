@@ -7,6 +7,8 @@ import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.hid.HidEndpoint
+import dev.jacobhayes.bootleg.hid.HidRelayNotice
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 enum class BlankImageFormat { RAW, FAT32, EXFAT, EXT4 }
@@ -70,4 +72,7 @@ interface BootlegBackend {
 
     /** Opens one of Bootleg's HID functions through the root relay; the caller closes it. */
     suspend fun openHid(kind: HidKind): HidEndpoint
+
+    /** What the root relay says when it drops (or refuses) the HID fds on its own; the open HID session follows it. */
+    val hidRelayNotices: Flow<HidRelayNotice>
 }

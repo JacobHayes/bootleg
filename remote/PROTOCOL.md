@@ -234,13 +234,18 @@ State = {rev: int, slots: [Slot], images: [Image], hid: Hid, lease: Lease}
 Slot  = {lun: int, imageId: string, name: string, mode: "cdrom"|"disk_ro"|"disk_rw",
          status: "exported"|"host_ejected"|"user_ejected"|"failed"}
 Image = {imageId: string, name: string, sizeBytes: int, defaultMode: "cdrom"|"disk_ro"|"disk_rw"}
-Hid   = {keyboard: bool, mouse: bool, status?: "release_pending"}
+Hid   = {keyboard: bool, mouse: bool, status?: "release_pending",
+         link?: "stopped"|"connecting"|"open"|"reconnecting"|"failed"|"restart_required"}
 ```
 
 `imageId` is opaque (16 hex characters), stable for a path; a slot exposing a file outside the
 image library still has one, so `slots.apply` can keep it. `hid.status` is `release_pending` once
 release-all retries have failed for 60 s; input is refused until the HID node reopens or HID is
-turned off.
+turned off. `hid.link` (present while the keyboard or mouse is on) is the phone's HID session:
+`stopped` until input opens it, `reconnecting` while the phone reopens its devices (after a USB
+gadget change or re-enumeration; input is refused meanwhile, not queued), `failed` after the
+reopen attempts ran out (the next input retries), and `restart_required` when only restarting the
+phone brings the keyboard and mouse back.
 
 ### 2.4 Pushes
 

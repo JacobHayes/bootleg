@@ -206,7 +206,30 @@ data class DeviceSnapshot(
     val slots: List<RemoteSlot> = emptyList(),
     val hid: HidSpec = HidSpec(),
     val images: List<RemoteImage> = emptyList(),
+    val hidLink: HidLinkStatus = HidLinkStatus.STOPPED,
 )
+
+/**
+ * The app's HID session as remote clients see it (`state.hid.link`). Coarser than the app's link
+ * state on purpose (no attempt counts, no host-listening flips), so it changes only when the link does.
+ */
+enum class HidLinkStatus(
+    val wireName: String,
+) {
+    /** No session yet; the first input opens one. */
+    STOPPED("stopped"),
+    CONNECTING("connecting"),
+    OPEN("open"),
+
+    /** Root dropped the fds (a gadget change, a re-enumeration) or an open failed; input is refused until it reopens. */
+    RECONNECTING("reconnecting"),
+
+    /** Gave up; the next input retries. */
+    FAILED("failed"),
+
+    /** An fd was open across someone else's rebind; keyboard and mouse work again only after the phone restarts. */
+    RESTART_REQUIRED("restart_required"),
+}
 
 sealed interface DeviceOp {
     data class Apply(

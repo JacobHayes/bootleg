@@ -54,6 +54,21 @@ object HidNodes {
         }
     }
 
+    /**
+     * Whether the UDC is bound and each of [kinds]' functions has its device (`/sys/dev/char/M:m`
+     * exists only while the function is bound). Anything unreadable counts as not bound.
+     */
+    fun gadgetBound(kinds: Set<HidKind>): Boolean {
+        val udc = runCatching { File("${GadgetNames.GADGET_ROOT}/UDC").readText().trim() }.getOrDefault("")
+        if (udc.isEmpty()) return false
+        return kinds.all { kind ->
+            runCatching {
+                val number = DeviceNumber.parse(File("${GadgetNames.GADGET_ROOT}/functions/${kind.functionName}/dev").readText())
+                File("/sys/dev/char/${number.major}:${number.minor}").exists()
+            }.getOrDefault(false)
+        }
+    }
+
     /** Inode of the device's sysfs directory (following the class symlink), or null while it doesn't exist. */
     fun sysfsInode(sysfsPath: String): Long? =
         try {

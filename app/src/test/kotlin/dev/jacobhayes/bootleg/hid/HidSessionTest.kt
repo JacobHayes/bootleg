@@ -314,6 +314,198 @@ class HidSessionTest {
             )
         }
 
+    private val gadgetChange = HidRelayNotice.Closed("paused for a gadget change", reopenFollows = true, restartRequired = false)
+
+    @Test
+    fun `a gadget change shows reconnecting at once, refuses input, and reopens when it ends`() =
+        runTest {
+            val opener = FakeOpener()
+            val session = session(opener)
+            session.start()
+            runCurrent()
+            val first = opener.latest(HidKind.KEYBOARD)
+            val opensBefore = opener.opened.size
+
+            session.onRelayNotice(gadgetChange)
+            // No input needed and no loop turn: the link is no longer reported open.
+            assertEquals(HidLinkState.Reconnecting(1, gadgetChange.reason), session.state.value)
+            assertEquals(HidOffer.UNAVAILABLE, session.offer(HidKind.KEYBOARD, keyboardPress))
+            runCurrent()
+            assertTrue(first.closed)
+            // The gadget change is still running: nothing reopens, however long it takes (within the bound).
+            advanceTimeBy(HidSessionTuning().reopenWaitMaxMs - 1)
+            runCurrent()
+            assertEquals(opensBefore, opener.opened.size)
+            assertEquals(HidOffer.UNAVAILABLE, session.offer(HidKind.KEYBOARD, keyboardPress))
+
+            session.onRelayNotice(HidRelayNotice.Reopenable)
+            runCurrent()
+            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            val second = opener.latest(HidKind.KEYBOARD)
+            assertTrue(second !== first)
+            // Release-all first; nothing offered during the gap was kept for later.
+            assertEquals(listOf(keyboardRelease.toList()), second.written)
+            assertTrue(session.send(HidKind.KEYBOARD, keyboardPress))
+            runCurrent()
+            assertEquals(listOf(keyboardRelease, keyboardPress).map { it.toList() }, second.written)
+        }
+
+    @Test
+    fun `a held key is released after the reopen, never pressed again`() =
+        runTest {
+            val opener = FakeOpener()
+            val session = session(opener)
+            session.start()
+            runCurrent()
+            assertTrue(session.send(HidKind.KEYBOARD, keyboardPress))
+            runCurrent()
+            val epoch = session.releaseEpoch.value
+
+            session.onRelayNotice(gadgetChange)
+            assertTrue(session.releaseEpoch.value > epoch, "input state (held keys, sticky modifiers) is forgotten")
+            assertTrue(session.releaseOwed)
+            session.onRelayNotice(HidRelayNotice.Reopenable)
+            runCurrent()
+            for (kind in bothKinds) {
+                val reports = opener.latest(kind).reports()
+                assertEquals(1, reports.size, "$kind")
+                assertTrue(isReleaseAll(reports.single()))
+            }
+            assertFalse(session.releaseOwed)
+        }
+
+    @Test
+    fun `the wait for a gadget change to end is bounded`() =
+        runTest {
+            val opener = FakeOpener()
+            val tuning = HidSessionTuning(reopenWaitMaxMs = 1_000)
+            val session = session(opener, tuning)
+            session.start()
+            runCurrent()
+            val opensBefore = opener.opened.size
+            session.onRelayNotice(gadgetChange)
+            advanceTimeBy(tuning.reopenWaitMaxMs + 1)
+            runCurrent()
+            assertTrue(opener.opened.size > opensBefore)
+            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+        }
+
+    @Test
+    fun `a close with nothing to wait for (root restarted) reopens right away, then backs off until the node is back`() =
+        runTest {
+            val opener = FakeOpener()
+            val tuning = HidSessionTuning()
+            val session = session(opener, tuning)
+            session.start()
+            runCurrent()
+            opener.failNext = 1
+            session.onRelayNotice(HidRelayNotice.Closed("root service restarted", reopenFollows = false, restartRequired = false))
+            runCurrent()
+            assertEquals(HidLinkState.Reconnecting(1, "open failed: no node yet"), session.state.value)
+            advanceTimeBy(tuning.reopenBackoffMs(1) + 1)
+            runCurrent()
+            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            assertTrue(isReleaseAll(opener.latest(HidKind.MOUSE).reports().single()))
+        }
+
+    @Test
+    fun `the end of a gadget change cuts a reopen backoff short`() =
+        runTest {
+            val opener = FakeOpener()
+            val session = session(opener, HidSessionTuning(reopenBackoffInitialMs = 5_000, reopenBackoffMaxMs = 5_000))
+            opener.failNext = 1
+            session.start()
+            runCurrent()
+            assertTrue(session.state.value is HidLinkState.Reconnecting)
+            session.onRelayNotice(HidRelayNotice.Reopenable)
+            runCurrent()
+            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            assertEquals(0L, testScheduler.currentTime)
+        }
+
+    @Test
+    fun `a quarantine is terminal - restart required, and input never retries`() =
+        runTest {
+            val opener = FakeOpener()
+            val session = session(opener)
+            session.start()
+            runCurrent()
+            val opensBefore = opener.opened.size
+            val quarantine = HidRelayNotice.Closed("restart the phone", reopenFollows = false, restartRequired = true)
+
+            session.onRelayNotice(quarantine)
+            assertEquals(HidLinkState.Failed("restart the phone", restartRequired = true), session.state.value)
+            runCurrent()
+            assertFalse(session.isRunning)
+            assertTrue(opener.opened.all { it.closed })
+            // A milder notice afterwards doesn't make it retry either.
+            session.onRelayNotice(HidRelayNotice.Reopenable)
+            session.onRelayNotice(gadgetChange)
+            assertFalse(session.send(HidKind.KEYBOARD, keyboardPress))
+            session.start()
+            advanceTimeBy(60_000)
+            runCurrent()
+            assertEquals(opensBefore, opener.opened.size)
+            assertEquals(HidLinkState.Failed("restart the phone", restartRequired = true), session.state.value)
+        }
+
+    @Test
+    fun `a quarantine notice for a refused open ends reconnecting`() =
+        runTest {
+            val opener = FakeOpener()
+            opener.failNext = 100
+            val session = session(opener)
+            session.start()
+            runCurrent()
+            assertTrue(session.state.value is HidLinkState.Reconnecting)
+            session.onRelayNotice(HidRelayNotice.Closed("restart the phone", reopenFollows = false, restartRequired = true))
+            runCurrent()
+            assertEquals(HidLinkState.Failed("restart the phone", restartRequired = true), session.state.value)
+            assertFalse(session.isRunning)
+        }
+
+    @Test
+    fun `a notice while stopped is ignored`() =
+        runTest {
+            val opener = FakeOpener()
+            val session = session(opener)
+            session.onRelayNotice(gadgetChange)
+            assertEquals(HidLinkState.Stopped, session.state.value)
+            session.start()
+            runCurrent()
+            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+        }
+
+    @Test
+    fun `relay notices racing the loop never leave the link stuck reconnecting`() {
+        val executor = Executors.newSingleThreadExecutor()
+        val scope = CoroutineScope(SupervisorJob() + executor.asCoroutineDispatcher())
+        try {
+            val opener = FakeOpener()
+            val session = HidSession(opener, scope, bothKinds, { System.nanoTime() / 1_000_000 })
+
+            fun awaitOpen(round: Int) {
+                val deadlineNs = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (session.state.value != HidLinkState.Open(hostListening = true) || session.releaseOwed) {
+                    check(System.nanoTime() < deadlineNs) { "round $round: link stuck at ${session.state.value}" }
+                    Thread.sleep(1)
+                }
+            }
+            session.start()
+            awaitOpen(-1)
+            val notice = HidRelayNotice.Closed("root service restarted", reopenFollows = false, restartRequired = false)
+            repeat(ROUND_COUNT) { round ->
+                // From another thread, like a binder callback, while the loop reopens right away.
+                thread { repeat(round % 3 + 1) { session.onRelayNotice(notice) } }.join()
+                awaitOpen(round)
+                assertEquals(HidOffer.ACCEPTED, session.offer(HidKind.MOUSE, mouseMove), "round $round")
+            }
+        } finally {
+            scope.cancel()
+            executor.shutdownNow()
+        }
+    }
+
     @Test
     fun `releaseAll racing many senders never lets input reach the host after the release`() {
         val executor = Executors.newSingleThreadExecutor()

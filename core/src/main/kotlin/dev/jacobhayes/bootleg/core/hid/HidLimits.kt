@@ -8,6 +8,9 @@ object HidLimits {
     /** Per-report write deadline; a host that stops polling must not block the writer. */
     const val REPORT_WRITE_DEADLINE_MS = 50L
 
+    /** How long root waits for USB to stay bound again after someone else re-enumerated, before allowing HID opens anyway. */
+    const val RELAY_SETTLE_WAIT_MS_MAX = 30_000L
+
     /** Paste-as-typing input, measured in UTF-8 bytes. */
     const val PASTE_SIZE_BYTES_MAX = 64 * 1024
 

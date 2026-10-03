@@ -187,7 +187,7 @@ func statusCommand(ctx context.Context, call *invocation, c *client) error {
 	}
 	fmt.Fprintf(call.stdout, "Session %d, %s, over %s\n", c.sessionID(), c.currentAuth(), call.host)
 	fmt.Fprintf(call.stdout, "Lease: %s\n", describeLease(state.Lease, c.sessionID()))
-	fmt.Fprintf(call.stdout, "HID: keyboard %s, mouse %s%s\n", onOff(state.Hid.Keyboard), onOff(state.Hid.Mouse), suffix(state.Hid.Status))
+	fmt.Fprintf(call.stdout, "HID: keyboard %s, mouse %s%s\n", onOff(state.Hid.Keyboard), onOff(state.Hid.Mouse), suffix(hidStatus(state.Hid)))
 	if len(state.Slots) == 0 {
 		fmt.Fprintln(call.stdout, "Disks: none")
 	}
@@ -222,6 +222,14 @@ func onOff(value bool) string {
 		return "on"
 	}
 	return "off"
+}
+
+// hidStatus is the owed-release status, else the link when it isn't plainly open.
+func hidStatus(hid protocol.HidState) string {
+	if hid.Status != "" || hid.Link == "open" {
+		return hid.Status
+	}
+	return hid.Link
 }
 
 func suffix(status string) string {

@@ -1,7 +1,9 @@
 package dev.jacobhayes.bootleg.root
 
 import android.os.IBinder
+import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.hid.HidLimits
 import dev.jacobhayes.bootleg.hid.HidWriteResult
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -10,6 +12,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.lang.reflect.Proxy
+import kotlin.concurrent.thread
 
 class HidRelayTest {
     private class FakeEndpoint(
@@ -57,17 +60,79 @@ class HidRelayTest {
         }
     }
 
+    /** Records notices as strings, and checks each is sent without the relay lock held. */
+    private class FakeNotifier : HidRelay.ClientNotifier {
+        val sent = mutableListOf<String>()
+
+        /** The relay sending the notices. */
+        lateinit var sender: HidRelay
+
+        override fun closed(
+            client: IBinder,
+            reason: String,
+            reopenFollows: Boolean,
+            restartRequired: Boolean,
+        ) {
+            assertRelayUnlocked()
+            sent += "closed($client, $reason, reopenFollows=$reopenFollows, restartRequired=$restartRequired)"
+        }
+
+        override fun reopenable(client: IBinder) {
+            assertRelayUnlocked()
+            sent += "reopenable($client)"
+        }
+
+        private fun assertRelayUnlocked() {
+            // Another thread must get the relay lock while a notice is being sent.
+            val other = thread { sender.quarantinedCount }
+            other.join(LOCK_WAIT_MS)
+            assertFalse(other.isAlive, "notice sent while holding the relay lock")
+        }
+    }
+
     private val opened = mutableListOf<FakeEndpoint>()
     private val deathLink = FakeDeathLink()
-    private val relay = HidRelay({ kind -> FakeEndpoint(kind).also { opened += it } }, deathLink, warn = {})
 
-    /** A binder token with identity only; the relay never calls it directly (the death link does). */
-    private fun token(): IBinder =
+    /** The fake clock and gadget the relay polls while settling. */
+    private var clockMs = 0L
+    private var gadgetBound = true
+    private val watches = mutableListOf<() -> Boolean>()
+
+    /** A relay whose watch the test runs by hand ([poll]), on the fake clock and gadget. */
+    private fun watchedRelay(): HidRelay =
+        HidRelay(
+            { kind -> FakeEndpoint(kind).also { opened += it } },
+            deathLink,
+            warn = {},
+            notifier = notifier,
+            gadgetBound = { gadgetBound },
+            nowMs = { clockMs },
+        ) { watches += it }.also { notifier.sender = it }
+
+    /** Runs the watch every [HidRelay.WATCH_INTERVAL_MS] for [durationMs]; false once it stopped. */
+    private fun poll(durationMs: Long): Boolean {
+        var watching = true
+        repeat((durationMs / HidRelay.WATCH_INTERVAL_MS).toInt()) {
+            clockMs += HidRelay.WATCH_INTERVAL_MS
+            watching = watches.last()()
+        }
+        return watching
+    }
+
+    private val notifier = FakeNotifier()
+    private val relay =
+        HidRelay({ kind -> FakeEndpoint(kind).also { opened += it } }, deathLink, warn = {}, notifier = notifier).also {
+            notifier.sender =
+                it
+        }
+
+    /** A binder token with identity only; the relay never calls it directly (the death link and notifier do). */
+    private fun token(name: String? = null): IBinder =
         Proxy.newProxyInstance(IBinder::class.java.classLoader, arrayOf(IBinder::class.java)) { proxy, method, args ->
             when (method.name) {
                 "hashCode" -> System.identityHashCode(proxy)
                 "equals" -> proxy === args?.firstOrNull()
-                "toString" -> "token@${System.identityHashCode(proxy)}"
+                "toString" -> name ?: "token@${System.identityHashCode(proxy)}"
                 else -> error("unexpected binder call ${method.name}")
             }
         } as IBinder
@@ -174,8 +239,7 @@ class HidRelayTest {
 
     @Test
     fun `the watch closes an fd as soon as its function is unbound, before any rebind`() {
-        val watches = mutableListOf<() -> Boolean>()
-        val watched = HidRelay({ kind -> FakeEndpoint(kind).also { opened += it } }, deathLink, warn = {}) { watches += it }
+        val watched = watchedRelay()
         val client = token()
         watched.open(HidKind.KEYBOARD, client)
         watched.open(HidKind.MOUSE, client)
@@ -183,11 +247,55 @@ class HidRelayTest {
         assertTrue(watches.single()(), "still watching while open")
 
         opened.forEach { it.binding = HidRelay.Binding.UNBOUND }
-        assertFalse(watches.single()(), "nothing left to watch")
+        gadgetBound = false
+        assertTrue(watches.single()(), "still watching while USB settles")
         assertTrue(opened.all { it.closed })
         assertEquals(0, watched.quarantinedCount)
+        gadgetBound = true
+        assertFalse(poll(DefaultGadgetController.STABLE_BOUND_MS + HidRelay.WATCH_INTERVAL_MS), "nothing left to watch once settled")
         watched.open(HidKind.KEYBOARD, client)
         assertEquals(2, watches.size, "a new watch once something is open again")
+    }
+
+    @Test
+    fun `after someone else re-enumerates, nothing opens until USB stayed bound for the stable window`() {
+        val watched = watchedRelay()
+        val client = token("app")
+        watched.open(HidKind.KEYBOARD, client)
+        // The HAL's mode switch: unbind, bind, then (inside the stable window) unbind and bind again.
+        opened.single().binding = HidRelay.Binding.UNBOUND
+        gadgetBound = false
+        poll(HidRelay.WATCH_INTERVAL_MS)
+        assertTrue(opened.single().closed)
+        poll(400)
+        gadgetBound = true
+        poll(600)
+        assertThrows<IllegalStateException> { watched.open(HidKind.KEYBOARD, client) }
+        gadgetBound = false
+        poll(400)
+        gadgetBound = true
+        poll(DefaultGadgetController.STABLE_BOUND_MS - HidRelay.WATCH_INTERVAL_MS)
+        val refused = assertThrows<IllegalStateException> { watched.open(HidKind.KEYBOARD, client) }
+        assertEquals(HidRelay.SETTLING_MESSAGE, refused.message)
+        assertEquals(1, opened.size, "nothing was opened across the second rebind")
+        assertFalse("reopenable(app)" in notifier.sent)
+
+        poll(2 * HidRelay.WATCH_INTERVAL_MS)
+        assertEquals("reopenable(app)", notifier.sent.last())
+        watched.open(HidKind.KEYBOARD, client)
+        assertEquals(2, opened.size)
+    }
+
+    @Test
+    fun `a settle that never sees USB stable gives up at the cap without announcing a reopen`() {
+        val watched = watchedRelay()
+        val client = token("app")
+        watched.open(HidKind.MOUSE, client)
+        opened.single().binding = HidRelay.Binding.UNBOUND
+        gadgetBound = false
+        assertFalse(poll(HidLimits.RELAY_SETTLE_WAIT_MS_MAX + HidRelay.WATCH_INTERVAL_MS), "the watch stops at the cap")
+        assertFalse("reopenable(app)" in notifier.sent)
+        watched.open(HidKind.MOUSE, client)
     }
 
     @Test
@@ -220,5 +328,88 @@ class HidRelayTest {
         relay.endGadgetChange()
         val refused = assertThrows<IllegalStateException> { relay.open(HidKind.MOUSE, client) }
         assertEquals(HidRelay.QUARANTINED_MESSAGE, refused.message)
+    }
+
+    @Test
+    fun `a gadget change tells the client its fds are gone, and when opens work again`() {
+        val client = token("app")
+        relay.open(HidKind.KEYBOARD, client)
+        relay.open(HidKind.MOUSE, client)
+        relay.closeAllForGadgetChange()
+        // Every UDC write closes again; nothing is left, so nothing more is said.
+        relay.closeAllForGadgetChange()
+        assertEquals(listOf("closed(app, ${HidRelay.GADGET_CHANGING_MESSAGE}, reopenFollows=true, restartRequired=false)"), notifier.sent)
+
+        relay.endGadgetChange()
+        assertEquals("reopenable(app)", notifier.sent.last())
+        assertEquals(2, notifier.sent.size)
+        // The next controller call that changes nothing says nothing.
+        relay.endGadgetChange()
+        assertEquals(2, notifier.sent.size)
+    }
+
+    @Test
+    fun `a client refused an open during a gadget change is told when it ends`() {
+        relay.closeAllForGadgetChange()
+        val client = token("app")
+        assertThrows<IllegalStateException> { relay.open(HidKind.KEYBOARD, client) }
+        assertEquals(emptyList<String>(), notifier.sent)
+        relay.endGadgetChange()
+        assertEquals(listOf("reopenable(app)"), notifier.sent)
+    }
+
+    @Test
+    fun `a gadget change with nothing open says nothing`() {
+        relay.closeAllForGadgetChange()
+        relay.endGadgetChange()
+        assertEquals(emptyList<String>(), notifier.sent)
+    }
+
+    @Test
+    fun `the client is told when someone else unbinds its function, by the watch or a write`() {
+        val watched = watchedRelay()
+        val client = token("app")
+        watched.open(HidKind.KEYBOARD, client)
+        watched.open(HidKind.MOUSE, client)
+        val closed = "closed(app, ${HidRelay.REENUMERATED_MESSAGE}, reopenFollows=true, restartRequired=false)"
+        opened[0].binding = HidRelay.Binding.UNBOUND
+        assertEquals(HidWriteResult.DISCONNECTED, watched.write(HidKind.KEYBOARD, report(HidKind.KEYBOARD)))
+        assertEquals(listOf(closed), notifier.sent)
+
+        opened[1].binding = HidRelay.Binding.UNBOUND
+        watches.single()()
+        assertEquals(listOf(closed, closed), notifier.sent)
+    }
+
+    @Test
+    fun `a quarantine tells the client a restart is required, and so does every refused open`() {
+        val watched = watchedRelay()
+        val client = token("app")
+        watched.open(HidKind.KEYBOARD, client)
+        opened.single().binding = HidRelay.Binding.REBOUND
+        watches.single()()
+        val restart = "closed(app, ${HidRelay.QUARANTINED_MESSAGE}, reopenFollows=false, restartRequired=true)"
+        assertEquals(listOf(restart), notifier.sent)
+
+        assertThrows<IllegalStateException> { watched.open(HidKind.KEYBOARD, client) }
+        assertEquals(listOf(restart, restart), notifier.sent)
+        // Opens stay refused after a gadget change too, so no reopen notice.
+        watched.closeAllForGadgetChange()
+        watched.endGadgetChange()
+        assertEquals(listOf(restart, restart), notifier.sent)
+    }
+
+    @Test
+    fun `a gadget change that finds an fd rebound behind us says a restart is required`() {
+        val client = token("app")
+        relay.open(HidKind.KEYBOARD, client)
+        opened.single().binding = HidRelay.Binding.REBOUND
+        relay.closeAllForGadgetChange()
+        relay.endGadgetChange()
+        assertEquals(listOf("closed(app, ${HidRelay.QUARANTINED_MESSAGE}, reopenFollows=false, restartRequired=true)"), notifier.sent)
+    }
+
+    private companion object {
+        const val LOCK_WAIT_MS = 2_000L
     }
 }

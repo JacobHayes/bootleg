@@ -15,6 +15,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -23,6 +24,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.util.concurrent.atomic.AtomicInteger
@@ -39,7 +41,7 @@ class HidControllerTest {
 
     /** HID is on; [setHid] waits for [applied]; every open is counted (and never completes). */
     private class GatedBackend(
-        private val fake: FakeBootlegBackend = FakeBootlegBackend(initialJournal = Journal(Desired(hid = HidSpec(true, true)))),
+        val fake: FakeBootlegBackend = FakeBootlegBackend(initialJournal = Journal(Desired(hid = HidSpec(true, true)))),
     ) : BootlegBackend by fake {
         val applying = CompletableDeferred<Unit>()
         val applied = CompletableDeferred<Unit>()
@@ -78,6 +80,28 @@ class HidControllerTest {
                 withTimeout(OPEN_SETTLE_MS * 20) { while (backend.opens.get() == 0) delay(10) }
             } finally {
                 // Stops the session on the controller's own scope, which cancelling ours wouldn't.
+                backend.applied.complete(Unit)
+                controller.setSpec(HidSpec())
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun `relay notices reach the session from its first open, and a quarantine shows restart required`() {
+        runBlocking<Unit> {
+            val backend = GatedBackend()
+            val scope = CoroutineScope(main)
+            val controller = HidController(backend, scope)
+            try {
+                controller.connect()
+                // Right away, while the first open is still in flight.
+                val quarantine = HidRelayNotice.Closed("restart the phone", reopenFollows = false, restartRequired = true)
+                assertTrue(backend.fake.hidRelayNoticeFlow.tryEmit(quarantine))
+                withTimeout(OPEN_SETTLE_MS * 20) {
+                    controller.link.first { it == HidLinkState.Failed("restart the phone", restartRequired = true) }
+                }
+            } finally {
                 backend.applied.complete(Unit)
                 controller.setSpec(HidSpec())
                 scope.cancel()

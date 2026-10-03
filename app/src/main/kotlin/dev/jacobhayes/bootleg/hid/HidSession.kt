@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -69,10 +70,32 @@ sealed interface HidLinkState {
         val reason: String,
     ) : HidLinkState
 
-    /** Gave up after [HidSessionTuning.reopenAttemptCountMax]; the next [HidSession.send] tries again. */
+    /**
+     * Gave up after [HidSessionTuning.reopenAttemptCountMax]; the next [HidSession.send] tries again. With
+     * [restartRequired] (root quarantined an fd) nothing works until the phone restarts, so nothing retries.
+     */
     data class Failed(
         val reason: String,
+        val restartRequired: Boolean = false,
     ) : HidLinkState
+}
+
+/** What the root relay tells the session when it drops the session's fds on its own (see `IHidRelayClient`). */
+sealed interface HidRelayNotice {
+    /** The fds are gone. [reopenFollows]: wait for [Reopenable] (the gadget change ended, or USB has been stably bound again). */
+    data class Closed(
+        val reason: String,
+        val reopenFollows: Boolean,
+        val restartRequired: Boolean,
+    ) : HidRelayNotice
+
+    /** Opens are safe again: the gadget change is over, or USB has stayed bound for the stable-bound window. */
+    data object Reopenable : HidRelayNotice
+
+    companion object {
+        /** Notices come a few per gadget change, and the session takes each one at once. */
+        const val BUFFER_COUNT_MAX = 8
+    }
 }
 
 data class HidSessionStats(
@@ -96,6 +119,8 @@ data class HidSessionTuning(
     val reopenAttemptCountMax: Int = 40,
     /** How often keyboard LED output reports are polled while idle. */
     val ledPollIntervalMs: Long = 100,
+    /** How long to wait for [HidRelayNotice.Reopenable] after root closed the fds, before trying anyway (root's own cap). */
+    val reopenWaitMaxMs: Long = HidLimits.RELAY_SETTLE_WAIT_MS_MAX,
 ) {
     init {
         require(queueLengthMax in 1..HidLimits.REPORT_QUEUE_LENGTH_MAX) { "queue length must be 1..${HidLimits.REPORT_QUEUE_LENGTH_MAX}" }
@@ -103,6 +128,7 @@ data class HidSessionTuning(
         require(stallReopenMs > writeDeadlineMs && stallRetryIntervalMs > 0) { "bad stall timing: $this" }
         require(reopenBackoffInitialMs in 1..reopenBackoffMaxMs && reopenAttemptCountMax > 0) { "bad reopen backoff: $this" }
         require(ledPollIntervalMs > 0) { "bad LED poll interval: $this" }
+        require(reopenWaitMaxMs > 0) { "bad reopen wait: $this" }
     }
 
     /** Backoff before reopen attempt [attempt] (1-based): doubling from the initial value, capped. */
@@ -125,6 +151,10 @@ data class HidSessionTuning(
  *   reports time out: queued input is dropped (never replayed late), release-all is retried until
  *   the host takes it, and after [HidSessionTuning.stallReopenMs] the endpoints are reopened.
  * - ENXIO/ESHUTDOWN (function gone, host off) reopen with bounded backoff.
+ * - When root drops the fds itself ([onRelayNotice]: a gadget change, a re-enumeration by someone
+ *   else), the link leaves Open at once, input is refused until the endpoints are reopened and the
+ *   release-all is delivered, and the reopen waits until root says opens are safe. A quarantined fd
+ *   is terminal: [HidLinkState.Failed] with `restartRequired`.
  * - Every error, overflow and stop owes the host a release-all (all-zero keyboard and mouse
  *   reports); [releaseEpoch] increments so input state (sticky modifiers, held buttons) resets too.
  *
@@ -150,6 +180,10 @@ class HidSession(
     private val queueLock = Any()
     private val queue = ArrayDeque<Pending>()
     private val wakeUp = Channel<Unit>(Channel.CONFLATED)
+    private val reopenable = Channel<Unit>(Channel.CONFLATED)
+
+    /** A relay notice the loop hasn't handled yet; guarded by [queueLock], since it also holds input back. */
+    private var relayClosed: HidRelayNotice.Closed? = null
     private val endpoints = HashMap<HidKind, HidEndpoint>()
 
     @Volatile private var releaseAllOwed = false
@@ -179,8 +213,12 @@ class HidSession(
 
     fun start() {
         if (isRunning) return
+        // A quarantined fd only goes away with a restart; reopening would just be refused again.
+        if ((stateFlow.value as? HidLinkState.Failed)?.restartRequired == true) return
         failedAttempts = 0
         stallStartMs = null
+        // A notice from before this start is about endpoints that are gone; opening fresh covers it.
+        synchronized(queueLock) { relayClosed = null }
         dropQueueAndOweRelease()
         stateFlow.value = HidLinkState.Opening
         job = scope.launch { runLoop() }
@@ -196,7 +234,11 @@ class HidSession(
             clearQueue()
             for ((kind, endpoint) in endpoints) writeWithDeadline(kind, endpoint, kind.releaseAllReport)
             closeEndpoints()
-            stateFlow.value = HidLinkState.Stopped
+            // Under the lock, so a relay notice racing the stop can't publish its state after this.
+            synchronized(queueLock) {
+                relayClosed = null
+                stateFlow.value = HidLinkState.Stopped
+            }
             bumpReleaseEpoch()
         }
     }
@@ -221,7 +263,7 @@ class HidSession(
         when (val current = stateFlow.value) {
             is HidLinkState.Open -> if (!current.hostListening) return dropped(HidOffer.UNAVAILABLE)
             is HidLinkState.Failed -> {
-                // User input is the signal to try again.
+                // User input is the signal to try again (start refuses when only a restart helps).
                 start()
                 return dropped(HidOffer.UNAVAILABLE)
             }
@@ -232,7 +274,7 @@ class HidSession(
             synchronized(queueLock) {
                 when {
                     // Input waits behind the owed release; queued now, it could reach the host after it.
-                    releaseAllOwed -> HidOffer.UNAVAILABLE
+                    releaseAllOwed || relayClosed != null -> HidOffer.UNAVAILABLE
                     queue.size >= tuning.queueLengthMax -> {
                         droppedCount = dropQueueAndOweReleaseLocked()
                         HidOffer.QUEUE_FULL
@@ -260,17 +302,57 @@ class HidSession(
         wakeUp.trySend(Unit)
     }
 
+    /**
+     * Root dropped (or refused) this session's fds on its own. Callable from any thread: the link leaves
+     * Open and input is refused right away; the loop closes and reopens the endpoints.
+     */
+    fun onRelayNotice(notice: HidRelayNotice) {
+        when (notice) {
+            is HidRelayNotice.Closed -> {
+                if (!isRunning && !notice.restartRequired) return
+                statsFlow.update { it.copy(lastError = notice.reason) }
+                val dropped =
+                    synchronized(queueLock) {
+                        // stop() publishes Stopped under this lock after clearing the job.
+                        if (!isRunning && !notice.restartRequired) return
+                        val pending = relayClosed
+                        // A restart-required notice is never replaced by a milder one.
+                        val kept = if (pending?.restartRequired == true) pending else notice
+                        relayClosed = kept
+                        // Published before the loop can take the notice, so the loop's own later state
+                        // (reopened, Open) always lands after this one, never under it.
+                        stateFlow.value =
+                            if (kept.restartRequired) {
+                                HidLinkState.Failed(kept.reason, restartRequired = true)
+                            } else {
+                                HidLinkState.Reconnecting(1, kept.reason)
+                            }
+                        dropQueueAndOweReleaseLocked()
+                    }
+                countDropped(dropped)
+                wakeUp.trySend(Unit)
+            }
+            HidRelayNotice.Reopenable -> reopenable.trySend(Unit)
+        }
+    }
+
     /** Waits until everything queued has been written or dropped. */
     suspend fun awaitIdle(timeoutMs: Long): Boolean = withTimeoutOrNull(timeoutMs) { queueLengthFlow.first { it == 0 } } != null
 
     private suspend fun runLoop() {
         while (true) {
+            val closed = synchronized(queueLock) { relayClosed.also { relayClosed = null } }
+            if (closed != null && !handleRelayClosed(closed)) return
             if (endpoints.size != kinds.size) {
                 if (failedAttempts >= tuning.reopenAttemptCountMax) {
                     stateFlow.value = HidLinkState.Failed(statsFlow.value.lastError ?: "could not open HID devices")
                     return
                 }
-                if (failedAttempts > 0) delay(tuning.reopenBackoffMs(failedAttempts))
+                if (failedAttempts > 0) {
+                    // The end of a gadget change cuts the backoff short; a new relay notice is handled first.
+                    awaitReopenable(tuning.reopenBackoffMs(failedAttempts))
+                    if (synchronized(queueLock) { relayClosed != null }) continue
+                }
                 if (!openEndpoints()) continue
             }
             if (releaseAllOwed) {
@@ -286,6 +368,35 @@ class HidSession(
             val written = writeOrRecover(next.kind, next.report)
             synchronized(queueLock) { queueLengthFlow.value = queue.size }
             if (!written) statsFlow.update { it.copy(reportsDropped = it.reportsDropped + 1) }
+        }
+    }
+
+    /** Closes what root already dropped and waits out its gadget change; false when only a restart helps. */
+    private suspend fun handleRelayClosed(closed: HidRelayNotice.Closed): Boolean {
+        closeEndpoints()
+        stallStartMs = null
+        dropQueueAndOweRelease()
+        if (closed.restartRequired) {
+            stateFlow.value = HidLinkState.Failed(closed.reason, restartRequired = true)
+            return false
+        }
+        failedAttempts = 0
+        stateFlow.value = HidLinkState.Reconnecting(1, closed.reason)
+        if (closed.reopenFollows) awaitReopenable(tuning.reopenWaitMaxMs)
+        return true
+    }
+
+    /** Waits at most [timeoutMs] for [HidRelayNotice.Reopenable]; a new [HidRelayNotice.Closed] ends the wait too. */
+    private suspend fun awaitReopenable(timeoutMs: Long) {
+        withTimeoutOrNull(timeoutMs) {
+            while (synchronized(queueLock) { relayClosed == null }) {
+                val reopened =
+                    select {
+                        reopenable.onReceive { true }
+                        wakeUp.onReceive { false }
+                    }
+                if (reopened) break
+            }
         }
     }
 
@@ -322,6 +433,8 @@ class HidSession(
         // Nothing was admitted since the barrier went up, so the release is the last thing the host saw.
         synchronized(queueLock) {
             check(queue.isEmpty()) { "input was queued behind an owed release" }
+            // Root dropped the fds meanwhile, so this release may not have reached the host; owe it to the reopened endpoints.
+            if (relayClosed != null) return false
             releaseAllOwed = false
         }
         statsFlow.update { it.copy(releaseAllCount = it.releaseAllCount + 1) }

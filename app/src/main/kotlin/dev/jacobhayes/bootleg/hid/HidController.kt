@@ -26,6 +26,7 @@ import dev.jacobhayes.bootleg.core.hid.UsLayout
 import dev.jacobhayes.bootleg.core.remote.HidPort
 import dev.jacobhayes.bootleg.core.remote.HidSendResult
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -387,7 +388,10 @@ class HidController(
         session = created
         sessionWatchers?.cancel()
         sessionWatchers =
-            scope.launch {
+            // Undispatched so the relay notices are subscribed before the session's first open: the
+            // flow has no replay, and a quarantine refusal must not be missed.
+            scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                launch(start = CoroutineStart.UNDISPATCHED) { backend.hidRelayNotices.collect(created::onRelayNotice) }
                 launch { created.state.collect { linkFlow.value = it } }
                 launch { created.leds.collect { ledsFlow.value = it } }
                 launch { created.stats.collect { statsFlow.value = it } }

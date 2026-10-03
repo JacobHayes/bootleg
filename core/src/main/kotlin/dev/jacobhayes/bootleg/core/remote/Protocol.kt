@@ -357,6 +357,8 @@ data class HidView(
     val mouse: Boolean,
     /** [HID_STATUS_RELEASE_PENDING] once release-all hasn't reached the host for 60 s; input is refused. */
     val status: String? = null,
+    /** The phone's HID session ([HidLinkStatus.wireName]) while the keyboard or mouse is on. */
+    val link: String? = null,
 )
 
 const val HID_STATUS_RELEASE_PENDING = "release_pending"

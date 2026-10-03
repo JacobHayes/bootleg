@@ -301,6 +301,9 @@ type HidState struct {
 	Keyboard bool   `json:"keyboard"`
 	Mouse    bool   `json:"mouse"`
 	Status   string `json:"status,omitempty"`
+	// Link is the phone's HID session while the keyboard or mouse is on:
+	// stopped, connecting, open, reconnecting, failed or restart_required.
+	Link string `json:"link,omitempty"`
 }
 
 // State is the state push and the state.get result (under "state").

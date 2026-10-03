@@ -9,9 +9,11 @@ import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.remote.DevicePort
 import dev.jacobhayes.bootleg.core.remote.DeviceSnapshot
+import dev.jacobhayes.bootleg.core.remote.HidLinkStatus
 import dev.jacobhayes.bootleg.core.remote.RemoteImage
 import dev.jacobhayes.bootleg.core.remote.RemoteSlot
 import dev.jacobhayes.bootleg.hid.HidController
+import dev.jacobhayes.bootleg.hid.HidLinkState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -37,9 +39,21 @@ class RemoteDevice(
     override suspend fun setHid(spec: HidSpec): ApplyResult = hid.setSpec(spec)
 
     override val snapshots: Flow<DeviceSnapshot> =
-        combine(backend.journal, backend.images) { journal, images -> snapshotOf(journal, images) }.distinctUntilChanged()
+        combine(backend.journal, backend.images, hid.link) { journal, images, link ->
+            snapshotOf(journal, images).copy(hidLink = statusOf(link))
+        }.distinctUntilChanged()
 
     companion object {
+        fun statusOf(link: HidLinkState): HidLinkStatus =
+            when (link) {
+                HidLinkState.Stopped -> HidLinkStatus.STOPPED
+                HidLinkState.Opening -> HidLinkStatus.CONNECTING
+                // Whether the host is reading flips with every stalled write; not worth a state push.
+                is HidLinkState.Open -> HidLinkStatus.OPEN
+                is HidLinkState.Reconnecting -> HidLinkStatus.RECONNECTING
+                is HidLinkState.Failed -> if (link.restartRequired) HidLinkStatus.RESTART_REQUIRED else HidLinkStatus.FAILED
+            }
+
         fun snapshotOf(
             journal: Journal,
             images: List<ImageFile>,

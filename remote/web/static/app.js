@@ -426,7 +426,8 @@ function renderState() {
   const hid = state.hid || {};
   if (document.activeElement !== $("hid-keyboard")) $("hid-keyboard").checked = !!hid.keyboard;
   if (document.activeElement !== $("hid-mouse")) $("hid-mouse").checked = !!hid.mouse;
-  $("hid-status").textContent = hid.status || "";
+  // The owed-release status wins; otherwise the link, unless it is plainly open.
+  $("hid-status").textContent = hid.status || (hid.link && hid.link !== "open" ? hid.link.replace("_", " ") : "");
 }
 
 // The computer may hold the medium (macOS keeps it locked even after an

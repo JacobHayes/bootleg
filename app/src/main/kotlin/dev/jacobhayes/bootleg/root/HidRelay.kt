@@ -2,7 +2,9 @@ package dev.jacobhayes.bootleg.root
 
 import android.os.IBinder
 import android.util.Log
+import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.hid.HidLimits
 import dev.jacobhayes.bootleg.hid.FdHidEndpoint
 import dev.jacobhayes.bootleg.hid.HidWriteResult
 
@@ -19,11 +21,23 @@ import dev.jacobhayes.bootleg.hid.HidWriteResult
  * else may rebind behind Bootleg, every call first checks the binding the fd was opened under: an
  * fd whose function was only unbound is closed at once (safe before a rebind), and one that was
  * rebound is quarantined, never closed.
+ *
+ * Whenever the relay drops the client's fds on its own (not on the client's write or close), it
+ * tells the client ([ClientNotifier.closed]), and once opens are safe again it says so
+ * ([ClientNotifier.reopenable]): when the gadget change that closed them ends, or, after a close it
+ * didn't initiate (someone else unbound or rebound the function), once the UDC and the lost functions'
+ * nodes have stayed bound for [DefaultGadgetController.STABLE_BOUND_MS] (at most
+ * [HidLimits.RELAY_SETTLE_WAIT_MS_MAX]). Until then opens are refused: the HAL unbinds and rebinds
+ * more than once after a mode switch, and an fd opened in between would be held across its next rebind.
  */
 class HidRelay internal constructor(
     private val openEndpoint: (HidKind) -> RelayEndpoint,
     private val deathLink: ClientDeathLink,
     private val warn: (String) -> Unit,
+    private val notifier: ClientNotifier = ClientNotifier.NONE,
+    /** Whether the UDC is bound and every one of these functions has its device node (polled while settling). */
+    private val gadgetBound: (Set<HidKind>) -> Boolean = { true },
+    private val nowMs: () -> Long = { 0L },
     private val startWatch: (watch: () -> Boolean) -> Unit = {},
 ) {
     constructor() : this(
@@ -33,6 +47,9 @@ class HidRelay internal constructor(
         },
         BinderDeathLink,
         { message -> Log.w(TAG, message) },
+        BinderClientNotifier,
+        HidNodes::gadgetBound,
+        android.os.SystemClock::elapsedRealtime,
         ::watchOnThread,
     )
 
@@ -73,13 +90,55 @@ class HidRelay internal constructor(
         )
     }
 
+    /** One-way notices to the client ([IHidRelayClient]); never blocks and never throws. */
+    interface ClientNotifier {
+        fun closed(
+            client: IBinder,
+            reason: String,
+            reopenFollows: Boolean,
+            restartRequired: Boolean,
+        )
+
+        fun reopenable(client: IBinder)
+
+        companion object {
+            val NONE =
+                object : ClientNotifier {
+                    override fun closed(
+                        client: IBinder,
+                        reason: String,
+                        reopenFollows: Boolean,
+                        restartRequired: Boolean,
+                    ) = Unit
+
+                    override fun reopenable(client: IBinder) = Unit
+                }
+        }
+    }
+
     private val lock = Any()
+
+    /** Taken around collecting and sending notices, so they reach the client in the order they were raised. */
+    private val noticeLock = Any()
     private val endpoints = HashMap<HidKind, RelayEndpoint>()
     private var client: IBinder? = null
     private var clientDeath: IBinder.DeathRecipient? = null
 
     /** True while the gadget controller is changing the gadget: no fd may be opened. */
     private var fenced = false
+
+    /** The client to tell when the current gadget change ends: it lost its fds to it, or was refused an open. */
+    private var reopenWaiter: IBinder? = null
+
+    /** Functions lost to someone else's unbind or rebind: opens wait until they are stably bound again. */
+    private val settlingKinds = mutableSetOf<HidKind>()
+    private var settleStartMs = 0L
+
+    /** Since when the gadget has been seen bound while settling; null while it isn't. */
+    private var boundSinceMs: Long? = null
+
+    /** Raised under [lock], sent after it is released (see [locked]). */
+    private val notices = mutableListOf<(ClientNotifier) -> Unit>()
 
     /** True while a watch is polling [checkBindings]. */
     private var watching = false
@@ -95,9 +154,12 @@ class HidRelay internal constructor(
     fun open(
         kind: HidKind,
         clientToken: IBinder,
-    ) = synchronized(lock) {
-        check(!fenced) { "keyboard and mouse are paused while the USB gadget changes" }
-        check(quarantined.isEmpty()) { QUARANTINED_MESSAGE }
+    ) = locked {
+        refuseIfQuarantined(clientToken)
+        if (fenced || settlingKinds.isNotEmpty()) {
+            reopenWaiter = clientToken
+            error(if (fenced) GADGET_CHANGING_MESSAGE else SETTLING_MESSAGE)
+        }
         if (client !== clientToken) {
             // One recipient per client, so a late death notice from a replaced client is ignored.
             val recipient = IBinder.DeathRecipient { onClientDied(clientToken) }
@@ -109,23 +171,22 @@ class HidRelay internal constructor(
         }
         endpoints.remove(kind)?.let { releaseAndClose(kind, it) }
         // Releasing the replaced endpoints may have found one rebound behind us.
-        check(quarantined.isEmpty()) { QUARANTINED_MESSAGE }
+        refuseIfQuarantined(clientToken)
         endpoints[kind] = openEndpoint(kind)
-        if (!watching) {
-            watching = true
-            startWatch(::checkBindings)
-        }
+        ensureWatching()
     }
 
     /**
-     * Polled every [WATCH_INTERVAL_MS] while anything is open: an fd whose function someone else unbound
-     * is closed right away, before the HAL's rebind (350ms or more after an unbind) can poison it. False
-     * once nothing is open, which stops the watch.
+     * Polled every [WATCH_INTERVAL_MS] while anything is open or settling: an fd whose function someone
+     * else unbound is closed right away, before the HAL's rebind (350ms or more after an unbind) can poison
+     * it, and a settle ends once the gadget has stayed bound long enough. False once there is neither,
+     * which stops the watch.
      */
     fun checkBindings(): Boolean =
-        synchronized(lock) {
+        locked {
             HidKind.entries.forEach(::current)
-            watching = endpoints.isNotEmpty()
+            advanceSettle()
+            watching = endpoints.isNotEmpty() || settlingKinds.isNotEmpty()
             watching
         }
 
@@ -134,45 +195,131 @@ class HidRelay internal constructor(
         report: ByteArray,
     ): HidWriteResult {
         require(report.size == kind.reportSizeBytes) { "$kind report must be ${kind.reportSizeBytes} bytes, got ${report.size}" }
-        return synchronized(lock) { current(kind)?.writeWithin(report) ?: HidWriteResult.DISCONNECTED }
+        // The notice can't race the caller's reopen: opens are refused until the settle ends.
+        return locked { current(kind)?.writeWithin(report) ?: HidWriteResult.DISCONNECTED }
     }
 
-    fun readOutput(kind: HidKind): ByteArray = synchronized(lock) { current(kind)?.readOutputReport() ?: ByteArray(0) }
+    fun readOutput(kind: HidKind): ByteArray = locked { current(kind)?.readOutputReport() ?: ByteArray(0) }
 
     /** Releases [kind] (best effort, within the deadline) and closes it. */
     fun close(kind: HidKind) =
-        synchronized(lock) {
+        locked {
             endpoints.remove(kind)?.let { releaseAndClose(kind, it) }
             if (endpoints.isEmpty()) detachClient()
         }
 
     /** Before the gadget controller rebinds or removes anything: release and close all, and refuse opens until [endGadgetChange]. */
     fun closeAllForGadgetChange() =
-        synchronized(lock) {
+        locked {
             fenced = true
+            val holder = client
+            val hadEndpoints = endpoints.isNotEmpty()
             releaseAndCloseAll()
+            if (holder != null) {
+                reopenWaiter = holder
+                if (hadEndpoints) {
+                    val restartRequired = quarantined.isNotEmpty()
+                    val reason = if (restartRequired) QUARANTINED_MESSAGE else GADGET_CHANGING_MESSAGE
+                    notice { it.closed(holder, reason, reopenFollows = !restartRequired, restartRequired = restartRequired) }
+                }
+            }
         }
 
     fun endGadgetChange() =
-        synchronized(lock) {
+        locked {
             fenced = false
+            // While settling, the settle's end tells the waiter instead.
+            if (settlingKinds.isNotEmpty()) return@locked
+            val waiter = reopenWaiter
+            reopenWaiter = null
+            if (waiter != null && quarantined.isEmpty()) notice { it.reopenable(waiter) }
         }
 
     val quarantinedCount: Int get() = synchronized(lock) { quarantined.size }
+
+    /** Caller holds [lock]. Ends the settle once the gadget has been bound for the stable-bound window, or gives up at the cap. */
+    private fun advanceSettle() {
+        if (settlingKinds.isEmpty()) return
+        val now = nowMs()
+        val bound = runCatching { gadgetBound(settlingKinds.toSet()) }.getOrDefault(false)
+        if (!bound) {
+            boundSinceMs = null
+        } else if (boundSinceMs == null) {
+            boundSinceMs = now
+        }
+        val stable = bound && now - checkNotNull(boundSinceMs) >= DefaultGadgetController.STABLE_BOUND_MS
+        val expired = now - settleStartMs >= HidLimits.RELAY_SETTLE_WAIT_MS_MAX
+        if (!stable && !expired) return
+        if (expired && !stable) warn("USB did not stay bound within ${HidLimits.RELAY_SETTLE_WAIT_MS_MAX}ms; allowing HID opens again")
+        settlingKinds.clear()
+        boundSinceMs = null
+        // Only a stable gadget is announced; at the cap the client's own wait runs out at the same time.
+        val waiter = reopenWaiter
+        if (stable && waiter != null && !fenced && quarantined.isEmpty()) {
+            reopenWaiter = null
+            notice { it.reopenable(waiter) }
+        }
+    }
+
+    /** Caller holds [lock]. */
+    private fun ensureWatching() {
+        if (watching) return
+        watching = true
+        startWatch(::checkBindings)
+    }
+
+    /** Runs [block] under [lock], then sends the notices it raised (even when it throws), outside [lock]. */
+    private fun <T> locked(block: () -> T): T =
+        try {
+            synchronized(lock, block)
+        } finally {
+            synchronized(noticeLock) {
+                val pending = synchronized(lock) { notices.toList().also { notices.clear() } }
+                pending.forEach { send -> runCatching { send(notifier) } }
+            }
+        }
+
+    /** Caller holds [lock]. */
+    private fun notice(send: (ClientNotifier) -> Unit) {
+        check(notices.size < NOTICE_COUNT_MAX) { "more than $NOTICE_COUNT_MAX HID notices raised in one call" }
+        notices += send
+    }
+
+    /** Caller holds [lock]: tells [clientToken] to stop trying (it would only be refused until a restart), then throws. */
+    private fun refuseIfQuarantined(clientToken: IBinder) {
+        if (quarantined.isEmpty()) return
+        notice { it.closed(clientToken, QUARANTINED_MESSAGE, reopenFollows = false, restartRequired = true) }
+        error(QUARANTINED_MESSAGE)
+    }
 
     /** [kind]'s endpoint if it is still on its bind; one that isn't is closed or quarantined and dropped. */
     private fun current(kind: HidKind): RelayEndpoint? {
         val endpoint = endpoints[kind] ?: return null
         if (endpoint.binding() == Binding.CURRENT) return endpoint
+        val holder = client
         endpoints.remove(kind)
         releaseAndClose(kind, endpoint)
+        // Someone else re-enumerated: no open until the gadget has settled (see the class comment).
+        if (settlingKinds.isEmpty()) {
+            settleStartMs = nowMs()
+            boundSinceMs = null
+        }
+        settlingKinds += kind
+        if (holder != null) reopenWaiter = holder
+        ensureWatching()
+        if (holder != null) {
+            val restartRequired = quarantined.isNotEmpty()
+            val reason = if (restartRequired) QUARANTINED_MESSAGE else REENUMERATED_MESSAGE
+            notice { it.closed(holder, reason, reopenFollows = !restartRequired, restartRequired = restartRequired) }
+        }
         if (endpoints.isEmpty()) detachClient()
         return null
     }
 
     private fun onClientDied(token: IBinder) {
-        synchronized(lock) {
-            if (client !== token) return
+        locked {
+            if (reopenWaiter === token) reopenWaiter = null
+            if (client !== token) return@locked
             warn("HID client died; releasing all keys and buttons")
             releaseAndCloseAll()
             client = null
@@ -247,6 +394,24 @@ class HidRelay internal constructor(
         }
     }
 
+    /** Oneway calls: a busy or dead app never holds root up, and a dead one only makes them fail (ignored). */
+    private object BinderClientNotifier : ClientNotifier {
+        override fun closed(
+            client: IBinder,
+            reason: String,
+            reopenFollows: Boolean,
+            restartRequired: Boolean,
+        ) {
+            runCatching { IHidRelayClient.Stub.asInterface(client).onClosed(reason, reopenFollows, restartRequired) }
+                .onFailure { Log.w(TAG, "HID client notice failed", it) }
+        }
+
+        override fun reopenable(client: IBinder) {
+            runCatching { IHidRelayClient.Stub.asInterface(client).onReopenable() }
+                .onFailure { Log.w(TAG, "HID client notice failed", it) }
+        }
+    }
+
     companion object {
         private const val TAG = "BootlegHidRelay"
 
@@ -260,7 +425,13 @@ class HidRelay internal constructor(
         }
 
         val QUARANTINED_COUNT_MAX = HidKind.entries.size
+
+        /** One per kind from a watch pass, plus a refusal and a reopen notice. */
+        val NOTICE_COUNT_MAX = HidKind.entries.size + 2
         const val QUARANTINED_MESSAGE =
             "a keyboard/mouse device was re-enumerated by someone else while open; restart the phone to use keyboard and mouse again"
+        const val GADGET_CHANGING_MESSAGE = "keyboard and mouse are paused while the USB gadget changes"
+        const val REENUMERATED_MESSAGE = "USB was re-enumerated"
+        const val SETTLING_MESSAGE = "keyboard and mouse wait for USB to settle after a re-enumeration"
     }
 }
