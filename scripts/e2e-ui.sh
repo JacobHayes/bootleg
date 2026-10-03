@@ -19,7 +19,12 @@
 #
 # Environment: BOOTLEG_WIFI_SERIAL / BOOTLEG_USB_SERIAL override the detected adb serials;
 # BOOTLEG_DEVICE_LOCK_HELD=1 when the caller already holds the device lock; BOOTLEG_UI_SERVER=0
-# falls back to `uiautomator dump` (slow).
+# falls back to `uiautomator dump` (slow); E2E_SETUP_TIMEOUT_S bounds the one-time setup once the
+# lock is held (default 240).
+#
+# Bounds: every adb call (scripts/ui.sh) and helper request has a timeout. A signal (INT, TERM,
+# HUP) during setup exits at once; during the tests it skips the rest after the running test. The
+# device lock is released on every exit but SIGKILL.
 # shellcheck source=scripts/e2e-ui-lib.sh
 source "$(dirname "$0")/e2e-ui-lib.sh"
 
@@ -115,13 +120,54 @@ export UI_LAST_DUMP_FILE=$RUN_DIR/last-dump.xml
 interrupted=false
 results=()
 suite_status=0
+E2E_SETUP_TIMEOUT_S=${E2E_SETUP_TIMEOUT_S:-240}
+TEARDOWN_PROBE_TIMEOUT_S=10
+setup_watchdog_pid=
+
+# kill_descendants PID: TERM to every process below PID (depth first), except the calling shell.
+kill_descendants() {
+    local child
+    for child in $(pgrep -P "$1"); do
+        [[ $child == "$BASHPID" ]] && continue
+        kill_descendants "$child"
+        kill -TERM "$child" 2>/dev/null
+    done
+}
+
+# setup_watchdog_start: once the lock is held, a setup that runs past E2E_SETUP_TIMEOUT_S (a hung
+# transport) is stopped: TERM to the runner, then to everything it waits on (a pipeline's reader
+# waits for its writer), so the EXIT trap runs and releases the lock.
+setup_watchdog_start() {
+    (
+        sleep "$E2E_SETUP_TIMEOUT_S"
+        echo "e2e-ui: setup still running after ${E2E_SETUP_TIMEOUT_S}s; stopping" >&2
+        kill -TERM $$ 2>/dev/null
+        kill_descendants $$
+    ) &
+    setup_watchdog_pid=$!
+}
+
+setup_watchdog_stop() {
+    [[ -n $setup_watchdog_pid ]] || return 0
+    kill "$setup_watchdog_pid" 2>/dev/null || true
+    wait "$setup_watchdog_pid" 2>/dev/null || true
+    setup_watchdog_pid=
+}
 
 suite_finish() {
     local status=$? fixture
-    trap - EXIT INT TERM
+    trap - EXIT
+    # Teardown is bounded (a quick probe, then bounded adb calls): it finishes, then frees the phone.
+    trap '' INT TERM HUP
+    setup_watchdog_stop
     current_test=teardown
     current_step=teardown
-    if [[ -n ${WIFI_SERIAL:-} ]]; then
+    # A transport that doesn't answer a quick probe (the usual reason a setup timed out) would make
+    # every teardown call wait out its own bound: skip the phone side then.
+    if [[ -n ${WIFI_SERIAL:-} ]] && ! UI_ADB_CALL_TIMEOUT_S=$TEARDOWN_PROBE_TIMEOUT_S wifi_adb_ready; then
+        log "FAIL wireless adb $WIFI_SERIAL doesn't answer; skipped the phone teardown (fixtures, the dump helper)"
+        suite_status=1
+    elif [[ -n ${WIFI_SERIAL:-} ]]; then
         use_transport wifi
         for fixture in "$RUN_DIR"/created-*; do
             [[ -e $fixture ]] || continue
@@ -140,7 +186,10 @@ suite_finish() {
     exit "$status"
 }
 trap suite_finish EXIT
-trap 'interrupted=true' INT TERM
+# During setup a signal exits (the EXIT trap releases the lock); the tests switch to a flag below.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 build_ui_server() {
     local sdk=${ANDROID_HOME:?ANDROID_HOME must point at the Android SDK} build_tools platform java_bin classes
@@ -180,6 +229,7 @@ current_test=setup
 test_started_ms=$(now_ms)
 log "tests: ${chosen[*]}"
 take_lock
+setup_watchdog_start
 USB_SERIAL=$(find_usb_serial)
 WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh "$USB_SERIAL")}
 export USB_SERIAL WIFI_SERIAL
@@ -202,6 +252,9 @@ else
 fi
 mkdir -p "$RESULTS_DIR"
 [[ -s $RESULTS_FILE ]] || echo "$RESULTS_HEADER" >"$RESULTS_FILE"
+setup_watchdog_stop
+# The tests stop between tests: the running one finishes and cleans up first.
+trap 'interrupted=true' INT TERM HUP
 log "setup done"
 
 # --- tests ---------------------------------------------------------------------------------------------

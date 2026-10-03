@@ -73,8 +73,9 @@ wait_until() {
     done
 }
 
-uadb() { adb -s "$USB_SERIAL" "$@"; }
-wadb() { adb -s "$WIFI_SERIAL" "$@"; }
+uadb() { timeout --foreground --kill-after=5 120 adb -s "$USB_SERIAL" "$@"; }
+# Wireless adb can hang on a dead transport: no call outlives the longest phone-side operation.
+wadb() { timeout --foreground --kill-after=5 120 adb -s "$WIFI_SERIAL" "$@"; }
 usb_adb_up() { [[ $(uadb get-state 2>/dev/null) == device ]]; }
 wifi_adb_up() { [[ $(wadb get-state 2>/dev/null) == device ]]; }
 
@@ -110,7 +111,9 @@ desired_lun_paths() { jq -r '[.luns[].file] | join(" ")' <<<"$1"; }
 
 cleanup() {
     local status=$?
-    trap - EXIT INT TERM
+    trap - EXIT
+    # Cleanup is bounded (every adb call is); a second signal must not stop it before the lock is released.
+    trap '' INT TERM HUP
     if $have_lock; then
         for volume in "${VOLUMES[@]}"; do
             if is_mounted "$volume"; then diskutil eject "/Volumes/$volume" >/dev/null 2>&1 || true; fi
@@ -134,6 +137,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
+trap 'exit 129' HUP
 # set -e failures outside fail() still say what broke.
 set -E
 trap 'echo "FAIL [$current_step]: \"$BASH_COMMAND\" exited $?" >&2' ERR
@@ -199,7 +203,7 @@ push_fixtures() {
 }
 
 preflight() {
-    wifi_adb_up || adb connect "$WIFI_SERIAL" >/dev/null
+    wifi_adb_up || timeout --foreground --kill-after=5 30 adb connect "$WIFI_SERIAL" >/dev/null
     wait_until 10 "wireless adb at $WIFI_SERIAL" wifi_adb_up
     local volume state paths
     for volume in "${VOLUMES[@]}"; do

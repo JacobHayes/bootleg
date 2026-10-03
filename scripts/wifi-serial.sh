@@ -5,6 +5,9 @@
 # Usage: scripts/wifi-serial.sh [usb-serial]
 set -euo pipefail
 
+# Wireless adb can hang on a dead transport: every adb call here is bounded (timeout runs the adb binary).
+adb() { timeout --foreground --kill-after=5 60 adb "$@"; }
+
 usb_serial=${1:-$(scripts/usb-serial.sh)}
 port=5555
 
@@ -15,7 +18,7 @@ if [ -z "$address" ]; then
 fi
 
 serial="$address:$port"
-if ! adb devices | grep -q "^$serial[[:space:]]*device"; then
+if ! adb devices | grep -q "^${serial}[[:space:]]*device"; then
   if [ "$(adb -s "$usb_serial" shell getprop service.adb.tcp.port | tr -d '\r')" != "$port" ]; then
     adb -s "$usb_serial" tcpip "$port" >/dev/null
     sleep 2

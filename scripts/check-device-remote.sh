@@ -85,9 +85,10 @@ wait_until() {
     done
 }
 
-wadb() { adb -s "$WIFI_SERIAL" "$@"; }
+# Wireless adb can hang on a dead transport: no call outlives the longest phone-side operation.
+wadb() { timeout --foreground --kill-after=5 120 adb -s "$WIFI_SERIAL" "$@"; }
 wifi_adb_up() { [[ $(wadb get-state 2>/dev/null) == device ]]; }
-usb_adb_up() { [[ $(adb -s "$USB_SERIAL" get-state 2>/dev/null) == device ]]; }
+usb_adb_up() { [[ $(timeout --foreground --kill-after=5 10 adb -s "$USB_SERIAL" get-state 2>/dev/null) == device ]]; }
 root() { wadb shell "su -c '$1'"; }
 
 # call METHOD [ARGS...]: the debug provider's JSON; fails on an error reply.
@@ -118,7 +119,9 @@ host_hid_absent() { (($(hid_rows) == 0)); }
 
 cleanup() {
     local status=$?
-    trap - EXIT INT TERM
+    trap - EXIT
+    # Cleanup is bounded (every adb call is); a second signal must not stop it before the lock is released.
+    trap '' INT TERM HUP
     [[ -n $holder_pid ]] && kill "$holder_pid" 2>/dev/null
     if $have_lock; then
         if is_mounted; then diskutil eject "/Volumes/$VOLUME" >/dev/null 2>&1 || true; fi
@@ -176,6 +179,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
+trap 'exit 129' HUP
 
 # ---------------------------------------------------------------------------------------------
 
@@ -233,7 +237,7 @@ fixture() {
         rm -f "$FIXTURE_DIR/tmp-remote.dmg"
         fixture_valid || fail "the freshly built $FIXTURE doesn't validate as a FAT image labelled $VOLUME"
     fi
-    wifi_adb_up || adb connect "$WIFI_SERIAL" >/dev/null
+    wifi_adb_up || timeout --foreground --kill-after=5 30 adb connect "$WIFI_SERIAL" >/dev/null
     wait_until 10 "wireless adb at $WIFI_SERIAL" wifi_adb_up
     local want
     want=$(sha256_of "$FIXTURE")

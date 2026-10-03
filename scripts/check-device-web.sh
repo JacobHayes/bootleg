@@ -46,7 +46,8 @@ fail() {
     exit 1
 }
 
-wadb() { adb -s "$WIFI_SERIAL" "$@"; }
+# Wireless adb can hang on a dead transport: no call outlives the longest phone-side operation.
+wadb() { timeout --foreground --kill-after=5 120 adb -s "$WIFI_SERIAL" "$@"; }
 root() { wadb shell "su -c '$1'"; }
 
 # call METHOD [ARGS...]: the debug provider's JSON; fails on an error reply.
@@ -65,7 +66,9 @@ hid_rows() { hidutil list 2>/dev/null | awk -v vid="$VENDOR_ID" 'tolower($1) == 
 
 cleanup() {
     local status=$?
-    trap - EXIT INT TERM
+    trap - EXIT
+    # Cleanup is bounded (every adb call is); a second signal must not stop it before the lock is released.
+    trap '' INT TERM HUP
     if $have_lock; then
         if is_mounted; then diskutil eject "/Volumes/$volume" >/dev/null 2>&1 || true; fi
         if $remote_on; then
@@ -104,6 +107,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
+trap 'exit 129' HUP
 
 # playwright-core, pinned by scripts/web-check/package.json, into build/web-check (no browser
 # download: it drives the installed Chrome).

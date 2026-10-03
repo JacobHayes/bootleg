@@ -145,14 +145,16 @@ use_transport() {
     esac
 }
 
+wifi_adb_ready() { [[ $(adb -s "$WIFI_SERIAL" get-state 2>/dev/null) == device ]]; }
+
 # wifi_adb_ok: wireless adb answers, reconnecting once when the transport went offline (Wi-Fi blips).
 wifi_adb_ok() {
-    [[ $(adb -s "$WIFI_SERIAL" get-state 2>/dev/null) == device ]] && return 0
+    wifi_adb_ready && return 0
     log "wireless adb $WIFI_SERIAL is not ready; reconnecting"
     # A stale offline transport survives `adb disconnect`; `reconnect offline` drops it.
     adb reconnect offline >/dev/null 2>&1 || true
     adb connect "$WIFI_SERIAL" >/dev/null 2>&1 || true
-    wait_until 10 bash -c "[[ \$(adb -s $WIFI_SERIAL get-state 2>/dev/null) == device ]]"
+    wait_until 10 wifi_adb_ready
 }
 
 # --- phone -----------------------------------------------------------------------------------------

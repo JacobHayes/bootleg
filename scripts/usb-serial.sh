@@ -3,6 +3,9 @@
 # Set BOOTLEG_USB_SERIAL to pick one when several are connected.
 set -euo pipefail
 
+# Wireless adb can hang on a dead transport: every adb call here is bounded (timeout runs the adb binary).
+adb() { timeout --foreground --kill-after=5 60 adb "$@"; }
+
 if [ -n "${BOOTLEG_USB_SERIAL:-}" ]; then
   echo "$BOOTLEG_USB_SERIAL"
   exit 0

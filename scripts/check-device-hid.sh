@@ -37,7 +37,8 @@ CAPTURE_SECONDS_MAX=20
 # pointer can't be restored while the scroll is still on its way; it is stopped once confirmed.
 PARKED_CAPTURE_SECONDS=60
 CAPTURE_READY_WAIT_S_MAX=10
-ADB="adb -s $WIRELESS"
+# Wireless adb can hang on a dead transport: every call is bounded.
+ADB="timeout --foreground --kill-after=5 120 adb -s $WIRELESS"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 CAPTURE_SOURCE=$ROOT/scripts/hidcapture.swift
 CAPTURE_BINARY=$ROOT/build/hidcapture
@@ -57,7 +58,9 @@ compatible_before=
 # Runs once on any exit: HID off if we turned it on, stop the capture, release the lock.
 cleanup() {
     status=$?
-    trap - EXIT INT TERM
+    trap - EXIT
+    # Cleanup is bounded (every adb call is); a second signal must not stop it before the lock is released.
+    trap '' INT TERM HUP
     if [ -n "$capture_pid" ]; then
         kill "$capture_pid" 2>/dev/null || true
         wait "$capture_pid" 2>/dev/null || true
@@ -88,6 +91,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 if [ "${BOOTLEG_DEVICE_LOCK_HELD:-0}" != 1 ]; then
     waited=0
@@ -375,7 +379,7 @@ case "$after" in *hid.bootleg*) fail "Bootleg HID functions still present: $afte
 wait_for_host absent || fail "Mac still lists the Bootleg keyboard/mouse after HID_OFF"
 
 waited=0
-until [ "$(adb -s "$USB" get-state 2>/dev/null)" = device ]; do
+until [ "$(timeout --foreground --kill-after=5 10 adb -s "$USB" get-state 2>/dev/null)" = device ]; do
     [ "$waited" -lt "$ADB_RETURN_WAIT_S_MAX" ] || fail "USB adb ($USB) did not come back within ${ADB_RETURN_WAIT_S_MAX}s"
     sleep 1
     waited=$((waited + 1))

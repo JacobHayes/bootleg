@@ -3,6 +3,9 @@
 # Usage: scripts/grant-root.sh [adb serial]
 set -eu
 
+# Wireless adb can hang on a dead transport: every adb call here is bounded (timeout runs the adb binary).
+adb() { timeout --foreground --kill-after=5 60 adb "$@"; }
+
 PACKAGE=dev.jacobhayes.bootleg
 # USB and wireless adb often both list the same phone; default to $ANDROID_SERIAL, then the first device.
 SERIAL=${1:-${ANDROID_SERIAL:-$(adb devices | awk 'NR > 1 && $2 == "device" { print $1; exit }')}}

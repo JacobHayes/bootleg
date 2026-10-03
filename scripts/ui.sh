@@ -28,6 +28,10 @@
 # moves (or clicks) its pointer. There, only tap nodes found by text (chips, keys, switches).
 
 UI_POLL_S=0.2
+# Wireless adb can hang on a dead transport, and a helper request can stall with it: both are bounded.
+# The longest single call is an install or a debug-provider call that changes the gadget.
+UI_ADB_CALL_TIMEOUT_S=${UI_ADB_CALL_TIMEOUT_S:-120}
+UI_SERVER_REQUEST_TIMEOUT_S=${UI_SERVER_REQUEST_TIMEOUT_S:-90}
 UI_DUMP_TRIES_MAX=3
 UI_ROW_DISTANCE_MAX_PX=200
 # A node is tapped once two dumps in a row put it at the same place (sheets and lists animate).
@@ -45,6 +49,16 @@ UI_SCREEN_SIZE=${UI_SCREEN_SIZE:-}
 # The latest dump, reused as the first sample when checking that a node holds still before a tap.
 UI_LAST_DUMP_FILE=${UI_LAST_DUMP_FILE:-${TMPDIR:-/tmp}/bootleg-ui-last-dump-$$.xml}
 UI_LAST_DUMP_REUSE_S=2
+
+# --- adb --------------------------------------------------------------------------------------------
+
+command -v timeout >/dev/null || { echo "ui: needs GNU timeout (brew install coreutils)" >&2; exit 1; }
+UI_ADB_BIN=${UI_ADB_BIN:-$(type -P adb)} || { echo "ui: adb not found" >&2; exit 1; }
+# --foreground keeps adb in this shell's process group (so it never stops on terminal input) and
+# signals only adb; exported so `bash -c` checks get the bounded adb too.
+adb() { timeout --foreground --kill-after=5 "$UI_ADB_CALL_TIMEOUT_S" "$UI_ADB_BIN" "$@"; }
+export UI_ADB_BIN UI_ADB_CALL_TIMEOUT_S
+export -f adb
 
 # --- helper server ---------------------------------------------------------------------------------
 
@@ -96,8 +110,10 @@ ui_server_request() {
     { exec {fd}<>"/dev/tcp/127.0.0.1/$UI_SERVER_PORT"; } 2>/dev/null || return 1
     request=$(IFS=$'\t'; echo "$*")
     printf '%s\n' "$request" >&"$fd"
-    cat <&"$fd"
+    timeout --foreground "$UI_SERVER_REQUEST_TIMEOUT_S" cat <&"$fd"
+    local status=$?
     exec {fd}<&-
+    return "$status"
 }
 
 # ui_server_recover: the forward or the server went away (re-enumeration, unused timeout).
