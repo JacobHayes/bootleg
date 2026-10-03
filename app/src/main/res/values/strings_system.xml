@@ -6,7 +6,7 @@
         <item quantity="other">%d disks exported</item>
     </plurals>
     <string name="notification_eject_all">Eject all</string>
-    <string name="eject_all_host_using">The computer is still using a drive. Eject it there first, or force eject in Bootleg.</string>
+    <string name="eject_all_host_using">In use: eject on the computer first, or force eject in the app</string>
     <string name="eject_all_failed">Eject failed: %1$s</string>
     <string name="tile_label">Bootleg</string>
     <string name="tile_subtitle_inactive">No disks</string>
