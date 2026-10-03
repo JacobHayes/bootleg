@@ -19,16 +19,24 @@ dependencies {
 }
 
 tasks.test {
-    // L3 (live network) tests are tagged "live" and run only with -Plive.
+    // L3 (live network) tests are tagged "live" and run only with -Plive; the per-feed timing report
+    // is tagged "timing" and runs only with -Ptiming.
     val live = project.hasProperty("live")
-    useJUnitPlatform { if (live) includeTags("live") else excludeTags("live") }
+    val timing = project.hasProperty("timing")
+    useJUnitPlatform {
+        when {
+            timing -> includeTags("timing")
+            live -> includeTags("live")
+            else -> excludeTags("live", "timing")
+        }
+    }
     // -Precord re-records catalog fixtures from the live sites.
     systemProperty("bootleg.record", project.hasProperty("record").toString())
     testLogging {
         events("failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         // check:catalog runs with -q; live tests print only WARN lines (tolerated transient upstream failures).
-        if (live) {
+        if (live || timing) {
             quiet {
                 events("failed", "standard_out")
                 exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL

@@ -173,6 +173,24 @@ class CommandProvider : ContentProvider() {
                                 remoteStateJson(app)
                             }
                             "REMOTE_STATE" -> remoteStateJson(app)
+                            "CATALOG_REFRESH" -> {
+                                // mode: stale (default, what opening the Catalog does), all, none (just report)
+                                when (arguments.getString("mode") ?: arg ?: "stale") {
+                                    "stale" -> app.catalog.refreshStale().join()
+                                    "all" -> app.catalog.refreshAll().join()
+                                    "none" -> app.catalog.awaitCache()
+                                    else -> throw IllegalArgumentException("mode must be stale, all or none")
+                                }
+                                catalogStateJson(app)
+                            }
+                            "CATALOG_PROFILE" ->
+                                withContext(Dispatchers.IO) {
+                                    CatalogProfiler
+                                        .profile(
+                                            dev.jacobhayes.bootleg.catalog
+                                                .catalogScrapers(),
+                                        ).toString()
+                                }
                             "REMOTE_APPROVE" -> {
                                 val nodeId =
                                     requireNotNull(arguments.getString("node") ?: arg) { "missing --extra node:s:<stable node id>" }
@@ -211,6 +229,26 @@ class CommandProvider : ContentProvider() {
                 errorJson(e.message ?: e.javaClass.simpleName, e)
             }
         return Bundle().apply { putString("json", json) }
+    }
+
+    private fun catalogStateJson(app: BootlegApp): String {
+        val state = app.catalog.state.value
+        return buildJsonObject {
+            put("offline", state.offline)
+            put("refreshing", state.refreshing)
+            put("cacheLoaded", state.cacheLoaded)
+            putJsonArray("entries") {
+                state.entries.forEach { entry ->
+                    addJsonObject {
+                        put("id", entry.distro.id)
+                        put("releases", entry.releases.size)
+                        put("fetchedAtMs", entry.fetchedAtMs)
+                        put("loading", entry.loading)
+                        put("error", entry.error)
+                    }
+                }
+            }
+        }.toString()
     }
 
     private fun hidStateJson(app: BootlegApp): String {
