@@ -549,7 +549,10 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   the remote's input barrier.
   When root drops the fds itself the session is told and reconnects without waiting for input
   (see HID fds and gadget changes). Release-all also happens on stop, on app background and on queue overflow, and resets the
-  on-screen modifier and button state. Keyboard LED output reports are polled while idle.
+  on-screen modifier and button state. Keyboard LED output reports are polled while idle. A
+  session the app's background closed (screen off, another app) is reopened when an activity
+  starts again, after that stop has finished, so the link doesn't sit at Stopped until the next
+  input.
 - Input mapping is pure (`core/hid`): `TouchpadGestures` (drag moves with acceleration, tap = left,
   two-finger tap = right, hold = drag with the left button, two-finger drag scrolls),
   `KeyboardInput` on `StickyModifiers` (held and locked modifiers go to the host at once; a
@@ -635,12 +638,18 @@ entitlement checks stay on (`exemptFromEntitlementCheck` is never set).
   next `apply`, `reinsert`, `reconcile`, `bootlegOff`, adoption at root start or tethering call first waits, at most until 10s after the
   marker was written. A verified marker is done early once Android reports the requested state and
   the HAL's switch has settled; an unverified one (no answer, or an unreadable file, which counts
-  as unverified and written now) always waits the full window. Then it is deleted. A marker from
+  as unverified and written when this root process first found it unreadable) always waits the
+  full window. Then it is deleted. A marker from
   an earlier boot has either a future `startedAtMs` (deleted unread) or a window that has passed
   (deleted after one check); at worst it costs one bounded wait. So disks are never exported into
-  a re-plug of the HAL's. Waiting out a marker inside its window closes the relay first, and
-  `hidOpen` fails while a marker is inside its window, so a new root process opens no hidg fd
-  into the re-plug a dead one left pending.
+  a re-plug of the HAL's. Waiting out a marker inside its window closes the relay first, and the
+  relay refuses opens while a marker is inside its window, so a new root process opens no hidg fd
+  into the re-plug a dead one left pending. That refusal is a wait, not a failure: the client is
+  sent `onClosed(reopenFollows = true)` (so `HidSession` waits in `Reconnecting` instead of
+  spending its reopen attempts), the window end is fixed at the first refusal, and the watch sends
+  `onReopenable` once the marker is gone or that window has passed (as does the end of the
+  tethering call, which clears its marker before returning). One predicate decides every reopen
+  notice: no gadget change, settle, pending re-plug or quarantine.
 - **Observation** (app, no polling): `TetherObserver` registers for the sticky
   `TETHER_STATE_CHANGED` broadcast in the app process (`tetherArray`: tethered interfaces; on when
   one matches `rndis\d+`/`ncm\d+`/`usb\d+`) and publishes `tether: StateFlow<Boolean?>`, null until

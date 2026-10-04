@@ -146,18 +146,36 @@ class FileTetherTransitionStore(
     private val file: File = File("/data/adb/bootleg/tether-transition.json"),
     private val clock: Clock,
 ) : TetherTransitionStore {
+    /**
+     * When this process first found the marker unreadable. An unreadable marker counts as written then,
+     * not at every load, so its window ends (HID opens wait on it too, and they load it every 50ms).
+     */
+    private var unreadableSinceMs: Long? = null
+
+    @Synchronized
     override fun load(): TetherTransition? {
-        if (!file.exists()) return null
+        if (!file.exists()) {
+            unreadableSinceMs = null
+            return null
+        }
         return runCatching { BootlegJson.decodeFromString<TetherTransition>(file.readText()) }
+            .onSuccess { unreadableSinceMs = null }
             .getOrElse {
+                val sinceMs = unreadableSinceMs ?: clock.nowMs().also { nowMs -> unreadableSinceMs = nowMs }
                 Log.w(TAG, "tethering marker at $file is unreadable; waiting it out", it)
-                TetherTransition(requestedOn = false, startedAtMs = clock.nowMs(), verified = false)
+                TetherTransition(requestedOn = false, startedAtMs = sinceMs, verified = false)
             }
     }
 
-    override fun save(transition: TetherTransition) = writeAtomically(file, BootlegJson.encodeToString(transition).toByteArray())
+    @Synchronized
+    override fun save(transition: TetherTransition) {
+        unreadableSinceMs = null
+        writeAtomically(file, BootlegJson.encodeToString(transition).toByteArray())
+    }
 
+    @Synchronized
     override fun clear() {
+        unreadableSinceMs = null
         if (!file.exists()) return
         if (!file.delete() && file.exists()) error("cannot delete $file")
         fsyncDirectory(checkNotNull(file.parentFile))

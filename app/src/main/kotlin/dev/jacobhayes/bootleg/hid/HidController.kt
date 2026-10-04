@@ -97,6 +97,10 @@ class HidController(
     private var sessionWatchers: Job? = null
     private var activeJob: Job? = null
 
+    /** Main thread only: the background closed a session, which [onForeground] reopens. */
+    private var stoppedForBackground = false
+    private var backgroundStop: Job? = null
+
     private val linkFlow = MutableStateFlow<HidLinkState>(HidLinkState.Stopped)
     private val ledsFlow = MutableStateFlow<KeyboardLeds?>(null)
     private val statsFlow = MutableStateFlow(HidSessionStats())
@@ -128,6 +132,7 @@ class HidController(
 
             override fun onActivityStarted(activity: Activity) {
                 startedCount++
+                if (startedCount == 1) onForeground()
             }
 
             override fun onActivityStopped(activity: Activity) {
@@ -335,7 +340,23 @@ class HidController(
         if (keepSessionInBackground) {
             session?.releaseAll()
         } else {
-            scope.launch { stopSession() }
+            if (session != null) stoppedForBackground = true
+            backgroundStop = scope.launch { stopSession() }
+        }
+    }
+
+    /**
+     * An activity is visible again: reopen a session the background closed (HID still on), so the link
+     * doesn't sit at Stopped until the next input. Waits for that stop to finish first, so the two
+     * sessions never hold the relay at once.
+     */
+    fun onForeground() {
+        if (!stoppedForBackground) return
+        stoppedForBackground = false
+        val stopping = backgroundStop
+        scope.launch {
+            stopping?.join()
+            ensureSession()
         }
     }
 
@@ -455,9 +476,13 @@ class HidController(
     private suspend fun stopSession() {
         val stopping = session ?: return
         session = null
-        stopping.stop()
-        sessionWatchers?.cancel()
+        // Taken before suspending: a session started meanwhile gets watchers of its own, which this stop must not cancel.
+        val watchers = sessionWatchers
         sessionWatchers = null
+        watchers?.cancel()
+        stopping.stop()
+        // A newer session publishes its own state.
+        if (session != null) return
         linkFlow.value = HidLinkState.Stopped
         keyboard.reset()
         mouse.reset()

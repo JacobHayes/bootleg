@@ -5,6 +5,7 @@ import android.util.Log
 import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.HidLimits
+import dev.jacobhayes.bootleg.core.tether.TetherLimits
 import dev.jacobhayes.bootleg.hid.FdHidEndpoint
 import dev.jacobhayes.bootleg.hid.HidWriteResult
 
@@ -39,8 +40,14 @@ class HidRelay internal constructor(
     private val gadgetBound: (Set<HidKind>) -> Boolean = { true },
     private val nowMs: () -> Long = { 0L },
     private val startWatch: (watch: () -> Boolean) -> Unit = {},
+    /**
+     * Until when ([nowMs] time) a USB tethering change may still re-plug USB (its transition marker's
+     * window), or null when none is pending. Opens wait it out: an fd opened now could be held across
+     * the HAL's rebind.
+     */
+    private val replugPendingUntilMs: () -> Long? = { null },
 ) {
-    constructor() : this(
+    constructor(replugPendingUntilMs: () -> Long?) : this(
         { kind ->
             val node = HidNodes.open(kind)
             FdRelayEndpoint(FdHidEndpoint(node.reportLengthBytes, node.descriptor), node.sysfsPath, node.sysfsInode)
@@ -51,6 +58,7 @@ class HidRelay internal constructor(
         HidNodes::gadgetBound,
         android.os.SystemClock::elapsedRealtime,
         ::watchOnThread,
+        replugPendingUntilMs,
     )
 
     /** Whether the bind an fd was opened under is still the function's current one. */
@@ -140,6 +148,9 @@ class HidRelay internal constructor(
     /** Since when the gadget has been seen bound while settling; null while it isn't. */
     private var boundSinceMs: Long? = null
 
+    /** While a tethering re-plug may still come, until when opens are refused (see [replugPendingUntilMs]); fixed at the first refusal. */
+    private var replugWaitUntilMs: Long? = null
+
     /** Raised under [lock], sent after it is released (see [locked]). */
     private val notices = mutableListOf<(ClientNotifier) -> Unit>()
 
@@ -163,6 +174,7 @@ class HidRelay internal constructor(
             reopenWaiter = clientToken
             error(if (fenced) GADGET_CHANGING_MESSAGE else SETTLING_MESSAGE)
         }
+        refuseIfReplugPending(clientToken)
         if (client !== clientToken) {
             // One recipient per client, so a late death notice from a replaced client is ignored.
             val recipient = IBinder.DeathRecipient { onClientDied(clientToken) }
@@ -189,7 +201,8 @@ class HidRelay internal constructor(
         locked {
             HidKind.entries.forEach(::current)
             advanceSettle()
-            watching = endpoints.isNotEmpty() || settlingKinds.isNotEmpty()
+            advanceReplugWait()
+            watching = endpoints.isNotEmpty() || settlingKinds.isNotEmpty() || replugWaitUntilMs != null
             watching
         }
 
@@ -231,11 +244,9 @@ class HidRelay internal constructor(
     fun endGadgetChange() =
         locked {
             fenced = false
-            // While settling, the settle's end tells the waiter instead.
-            if (settlingKinds.isNotEmpty()) return@locked
-            val waiter = reopenWaiter
-            reopenWaiter = null
-            if (waiter != null && quarantined.isEmpty()) notice { it.reopenable(waiter) }
+            // A tethering call clears its marker before it returns; if one is still pending, the watch announces its end.
+            advanceReplugWait()
+            announceReopenIfClear()
         }
 
     val quarantinedCount: Int get() = synchronized(lock) { quarantined.size }
@@ -257,11 +268,47 @@ class HidRelay internal constructor(
         settlingKinds.clear()
         boundSinceMs = null
         // Only a stable gadget is announced; at the cap the client's own wait runs out at the same time.
-        val waiter = reopenWaiter
-        if (stable && waiter != null && !fenced && quarantined.isEmpty()) {
-            reopenWaiter = null
-            notice { it.reopenable(waiter) }
-        }
+        if (stable) announceReopenIfClear()
+    }
+
+    /**
+     * Caller holds [lock]. Refuses an open while a tethering re-plug may still come: the client is told
+     * its open waits ([ClientNotifier.closed] with a reopen to follow, so it waits instead of spending its
+     * retries), and is told again when the marker is gone or its window has passed.
+     */
+    private fun refuseIfReplugPending(clientToken: IBinder) {
+        val now = nowMs()
+        val pendingUntil =
+            runCatching { replugPendingUntilMs() }
+                // An unreadable marker: wait out a full window from now, once.
+                .getOrElse { replugWaitUntilMs ?: (now + TetherLimits.TRANSITION_GATE_MS_MAX) }
+                ?.takeIf { it > now }
+                ?: return
+        check(pendingUntil - now <= TetherLimits.TRANSITION_GATE_MS_MAX) { "re-plug window ends ${pendingUntil - now}ms from now" }
+        replugWaitUntilMs = replugWaitUntilMs ?: pendingUntil
+        reopenWaiter = clientToken
+        ensureWatching()
+        notice { it.closed(clientToken, TETHER_REPLUG_MESSAGE, reopenFollows = true, restartRequired = false) }
+        error(TETHER_REPLUG_MESSAGE)
+    }
+
+    /** Caller holds [lock]. Ends a re-plug wait once the marker is gone or the window it was refused under has passed. */
+    private fun advanceReplugWait() {
+        val until = replugWaitUntilMs ?: return
+        val now = nowMs()
+        // A marker that can't be read keeps the wait going only until the window it started with ends.
+        val pending = runCatching { replugPendingUntilMs() }.getOrDefault(until)?.let { now < it } ?: false
+        if (pending && now < until) return
+        replugWaitUntilMs = null
+        announceReopenIfClear()
+    }
+
+    /** Caller holds [lock]. Tells a waiting client that opens are safe, once nothing refuses them any more. */
+    private fun announceReopenIfClear() {
+        val waiter = reopenWaiter ?: return
+        if (fenced || settlingKinds.isNotEmpty() || replugWaitUntilMs != null || quarantined.isNotEmpty()) return
+        reopenWaiter = null
+        notice { it.reopenable(waiter) }
     }
 
     /** Caller holds [lock]. */
@@ -451,5 +498,6 @@ class HidRelay internal constructor(
         const val GADGET_CHANGING_MESSAGE = "keyboard and mouse are paused while the USB gadget changes"
         const val REENUMERATED_MESSAGE = "USB was re-enumerated"
         const val SETTLING_MESSAGE = "keyboard and mouse wait for USB to settle after a re-enumeration"
+        const val TETHER_REPLUG_MESSAGE = "keyboard and mouse wait while USB tethering re-plugs USB"
     }
 }

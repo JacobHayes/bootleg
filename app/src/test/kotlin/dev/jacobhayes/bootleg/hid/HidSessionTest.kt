@@ -554,6 +554,51 @@ class HidSessionTest {
         }
 
     @Test
+    fun `an open refused while tethering re-plugs USB waits for root's word instead of giving up`() =
+        runTest {
+            val tuning = HidSessionTuning(reopenAttemptCountMax = 3, reopenBackoffInitialMs = 100, reopenBackoffMaxMs = 100)
+            lateinit var session: HidSession
+            var replugging = true
+            var refusals = 0
+            val opener =
+                object : HidEndpointOpener {
+                    val inner = FakeOpener()
+
+                    override suspend fun open(kind: HidKind): HidEndpoint {
+                        if (!replugging) return inner.open(kind)
+                        refusals++
+                        // Root refuses and tells the client a reopen follows (oneway, so it may land first).
+                        session.onRelayNotice(HidRelayNotice.Closed("waiting for tethering", reopenFollows = true, restartRequired = false))
+                        error("keyboard and mouse wait while USB tethering re-plugs USB")
+                    }
+                }
+            session = HidSession(opener, backgroundScope, bothKinds, { testScheduler.currentTime }, tuning)
+            session.start()
+            // Far longer than three refusals' backoff: the session keeps waiting, it never fails.
+            advanceTimeBy(tuning.reopenWaitMaxMs - 1)
+            runCurrent()
+            assertTrue(session.state.value is HidLinkState.Reconnecting, "${session.state.value}")
+            assertEquals(1, refusals, "no retries while root said a reopen follows")
+            replugging = false
+            session.onRelayNotice(HidRelayNotice.Reopenable)
+            runCurrent()
+            assertEquals(HidLinkState.Open(), session.state.value)
+        }
+
+    @Test
+    fun `refusals without a notice spend the reopen budget and fail - why root must send one`() =
+        runTest {
+            val opener = FakeOpener()
+            val tuning = HidSessionTuning(reopenAttemptCountMax = 3, reopenBackoffInitialMs = 100, reopenBackoffMaxMs = 100)
+            opener.failNext = 100
+            val session = session(opener, tuning)
+            session.start()
+            advanceTimeBy(1_000)
+            runCurrent()
+            assertTrue(session.state.value is HidLinkState.Failed, "${session.state.value}")
+        }
+
+    @Test
     fun `the end of a gadget change cuts a reopen backoff short`() =
         runTest {
             val opener = FakeOpener()

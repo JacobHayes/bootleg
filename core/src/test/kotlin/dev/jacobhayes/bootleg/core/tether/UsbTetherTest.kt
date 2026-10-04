@@ -284,6 +284,50 @@ class UsbTetherTest {
     }
 
     @Test
+    fun `a host slower than the interface wait (Windows 7 configures ~3-4s late) fails cleanly and leaves no marker`() {
+        // Android tethers ncm0 only once the host configured the device; a slow host misses the 5s wait.
+        val android = FakeAndroid(upDelayMs = TetherLimits.INTERFACE_WAIT_MS_MAX + 500)
+        val gadget = FakeGadget(android)
+        val guard = RecordingGuard(android)
+        val startMs = clock.nowMs
+        val result = controller(android, gadget, guard).set(on = true)
+        assertTrue(result is TetherResult.Failed, "$result")
+        assertEquals(listOf("start", "stop"), android.calls)
+        assertEquals(0, guard.closedAtCallCount.first(), "HID closed before Android was asked")
+        assertNull(transitions.marker, "nothing left to hold HID opens back")
+        assertTrue(clock.nowMs - startMs <= TetherLimits.INTERFACE_WAIT_MS_MAX * 2 + TetherLimits.TRANSITION_GATE_MS_MAX)
+        // Whatever Android does with the late start, the withdrawal's stop has the last word.
+        clock.sleepMs(60_000)
+        assertFalse(android.tethered)
+    }
+
+    @Test
+    fun `a UDC that never stays bound (a host that keeps resetting) still returns within the window, marker cleared`() {
+        val android = FakeAndroid()
+        val gadget = FakeGadget(android)
+        // Drops every 700ms for two minutes: the switch never counts as settled.
+        val flapUntilMs = clock.nowMs + 120_000
+
+        fun flap(atMs: Long) {
+            clock.schedule(atMs) {
+                android.udcBound = false
+                clock.schedule(300) { android.udcBound = true }
+                if (clock.nowMs < flapUntilMs) flap(700)
+            }
+        }
+        flap(2_000)
+        val startMs = clock.nowMs
+        val result = controller(android, gadget).set(on = true)
+        assertTrue(result is TetherResult.Changed && !result.switchSettled, "$result")
+        assertNull(transitions.marker)
+        assertTrue(
+            clock.nowMs - startMs <=
+                TetherLimits.INTERFACE_WAIT_MS_MAX + TetherLimits.SWITCH_WAIT_MS_MAX + TetherLimits.TRANSITION_GATE_MS_MAX,
+            "${clock.nowMs - startMs}ms",
+        )
+    }
+
+    @Test
     fun `a stop that never lands fails once its marker's window has passed`() {
         val android = FakeAndroid(tethered = true, downDelayMs = 60_000, switchDelayMs = 60_000)
         val startMs = clock.nowMs

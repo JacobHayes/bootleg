@@ -11,6 +11,7 @@ import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
 import dev.jacobhayes.bootleg.core.hid.HidDescriptors
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.tether.TetherLimits
 import dev.jacobhayes.bootleg.core.tether.UsbTetherController
 import dev.jacobhayes.bootleg.download.BackgroundJobScheduling
 
@@ -33,7 +34,12 @@ class BootlegRootService : RootService() {
 
     /** Serializes the privileged schedule broadcasts; never held with another lock. */
     private val scheduleBroadcastLock = Any()
-    private val hidRelay = HidRelay()
+
+    // A re-plug left pending by a tethering change (or a dead root process's) would rebind under a new fd.
+    private val hidRelay =
+        HidRelay(replugPendingUntilMs = {
+            tetherTransitions.load()?.takeIf { it.isPendingAt(clock.nowMs()) }?.let { it.startedAtMs + TetherLimits.TRANSITION_GATE_MS_MAX }
+        })
     private val hidHolders = HidNodeHolders()
 
     /** The controller's view of the relay: it closes our hidg fds before any UDC write or hid removal. */
@@ -181,13 +187,7 @@ class BootlegRootService : RootService() {
             override fun hidOpen(
                 kind: String,
                 client: IBinder,
-            ) = call(hidLock) {
-                // A re-plug left pending by a dead root process's tethering change would rebind under the new fd.
-                check(tetherTransitions.load()?.isPendingAt(clock.nowMs()) != true) {
-                    "keyboard and mouse are paused while USB tethering re-plugs USB"
-                }
-                hidRelay.open(hidKind(kind), client)
-            }
+            ) = call(hidLock) { hidRelay.open(hidKind(kind), client) }
 
             override fun hidWrite(
                 kind: String,

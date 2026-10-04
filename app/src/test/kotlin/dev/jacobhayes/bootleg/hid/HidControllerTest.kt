@@ -135,6 +135,60 @@ class HidControllerTest {
         }
     }
 
+    @Test
+    fun `a session the background closed reopens when the app comes back, not left Stopped`() {
+        runBlocking<Unit> {
+            val backend = GatedBackend()
+            val scope = CoroutineScope(main)
+            val controller = HidController(backend, scope)
+            try {
+                controller.connect()
+                withTimeout(OPEN_SETTLE_MS * 20) { while (backend.opens.get() == 0) delay(10) }
+                controller.onBackground()
+                withTimeout(OPEN_SETTLE_MS * 20) { controller.link.first { it == HidLinkState.Stopped } }
+                val opensBefore = backend.opens.get()
+                // Back right away, while the background's stop may still be running.
+                controller.onForeground()
+                withTimeout(OPEN_SETTLE_MS * 20) { while (backend.opens.get() == opensBefore) delay(10) }
+                withTimeout(OPEN_SETTLE_MS * 20) { controller.link.first { it != HidLinkState.Stopped } }
+                // A second foreground with nothing closed opens nothing more.
+                val opensAfter = backend.opens.get()
+                controller.onForeground()
+                delay(OPEN_SETTLE_MS)
+                assertEquals(opensAfter, backend.opens.get())
+            } finally {
+                backend.applied.complete(Unit)
+                controller.setSpec(HidSpec())
+                scope.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun `background then foreground with HID turned off meanwhile opens nothing`() {
+        runBlocking<Unit> {
+            val backend = GatedBackend()
+            val scope = CoroutineScope(main)
+            val controller = HidController(backend, scope)
+            try {
+                controller.connect()
+                withTimeout(OPEN_SETTLE_MS * 20) { while (backend.opens.get() == 0) delay(10) }
+                controller.onBackground()
+                backend.applied.complete(Unit)
+                controller.setSpec(HidSpec())
+                val opensBefore = backend.opens.get()
+                controller.onForeground()
+                delay(OPEN_SETTLE_MS)
+                assertEquals(opensBefore, backend.opens.get())
+                assertEquals(HidLinkState.Stopped, controller.link.value)
+            } finally {
+                backend.applied.complete(Unit)
+                controller.setSpec(HidSpec())
+                scope.cancel()
+            }
+        }
+    }
+
     private companion object {
         const val OPEN_SETTLE_MS = 100L
     }
