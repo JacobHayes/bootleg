@@ -1201,6 +1201,15 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   ejects, turns the drives and tethering off and puts HID back as it found it; if a change is
   still in flight it changes nothing and fails. It changes nothing on the
   Mac beyond what macOS does for any tethering phone (see device facts).
+- RNDIS: `go test` covers the codec and session rules (with fuzzing) and the descriptor blob as f_fs
+  6.1 parses it; core tests cover the prefix (planner properties, establishment and its crash
+  recovery, dead-daemon restart) against a configfs fake that models FunctionFS, and the tethering
+  transports; the dead-man's script and the bounded UDC write run in JVM tests. L4
+  `check:device:rndis` sets the prefix up, checks it on the phone and the Mac (`ioreg`), runs a HAL
+  round trip with HID off and no hidg fd open (restoring the original USB mode on every exit),
+  mounts a disk after it, and toggles RNDIS tethering, failing on any re-enumeration (the volume's
+  disk changes or DiskArbitration logs its removal). Cleanup acts only under its own lock and on
+  what it exported, and removes a disk only after a successful state read shows it ejected.
 - L3 tolerates upstream flakiness, not breakage: a scraper (and each image probe or sums fetch)
   that fails on a timeout, connection reset, 5xx, 425 or 429 is retried once (both scraper attempts
   share a 32s budget). At most one scraper per run may still fail that way; it is skipped with a
