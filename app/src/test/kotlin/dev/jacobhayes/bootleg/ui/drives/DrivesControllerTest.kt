@@ -2,6 +2,7 @@ package dev.jacobhayes.bootleg.ui.drives
 
 import dev.jacobhayes.bootleg.FakeBootlegBackend
 import dev.jacobhayes.bootleg.RootStatus
+import dev.jacobhayes.bootleg.core.gadget.CdromLimits
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
@@ -27,34 +28,55 @@ class DrivesControllerTest {
     @Test
     fun `desired uses dense luns, auto modes and keeps hid`() {
         val journal = Journal(desired = Desired(hid = HidSpec(keyboard = true)))
-        val desired = DrivesController.desiredFor(listOf(DraftSlot(iso), DraftSlot(img), DraftSlot(img, LunMode.CDROM)), journal)
+        val desired = DrivesController.desiredFor(listOf(DraftSlot(iso), DraftSlot(img), DraftSlot(img, LunMode.CDROM)), journal, noSizes)
         assertEquals(
-            listOf(SlotSpec(0, iso, LunMode.CDROM), SlotSpec(1, img, LunMode.DISK_RO), SlotSpec(2, img, LunMode.CDROM)),
+            listOf(
+                SlotSpec(0, iso, LunMode.CDROM, auto = true),
+                SlotSpec(1, img, LunMode.DISK_RO, auto = true),
+                SlotSpec(2, img, LunMode.CDROM),
+            ),
             desired.slots,
         )
         assertTrue(desired.hid.keyboard)
     }
 
     @Test
+    fun `auto exports an ISO too big for a CD-ROM as a read-only disk`() {
+        val sizes = mapOf(iso to CdromLimits.SIZE_BYTES_MAX + 1)
+        val desired = DrivesController.desiredFor(listOf(DraftSlot(iso)), Journal(), sizes::get)
+        assertEquals(listOf(SlotSpec(0, iso, LunMode.DISK_RO, auto = true)), desired.slots)
+        assertEquals(LunMode.CDROM, DraftSlot(iso).mode(CdromLimits.SIZE_BYTES_MAX))
+    }
+
+    @Test
     fun `a writable image can't appear in two slots`() {
         assertThrows<IllegalArgumentException> {
-            DrivesController.desiredFor(listOf(DraftSlot(img, LunMode.DISK_RW), DraftSlot(img)), Journal())
+            DrivesController.desiredFor(listOf(DraftSlot(img, LunMode.DISK_RW), DraftSlot(img)), Journal(), noSizes)
         }
     }
 
     @Test
     fun `more than eight slots is rejected`() {
         val slots = List(GadgetLimits.LUN_COUNT_MAX + 1) { DraftSlot("/data/media/0/bootleg/$it.iso") }
-        assertThrows<IllegalArgumentException> { DrivesController.desiredFor(slots, Journal()) }
+        assertThrows<IllegalArgumentException> { DrivesController.desiredFor(slots, Journal(), noSizes) }
     }
 
     @Test
     fun `journal slots round trip through the draft with auto detection`() {
-        val journal = Journal(desired = Desired(listOf(SlotSpec(0, iso, LunMode.CDROM), SlotSpec(1, img, LunMode.DISK_RW))))
+        val journal =
+            Journal(desired = Desired(listOf(SlotSpec(0, iso, LunMode.CDROM, auto = true), SlotSpec(1, img, LunMode.DISK_RW))))
         val slots = DrivesController.slotsOf(journal)
         assertEquals(listOf(DraftSlot(iso, null), DraftSlot(img, LunMode.DISK_RW)), slots)
-        assertEquals(journal.desired, DrivesController.desiredFor(slots, journal))
+        assertEquals(journal.desired, DrivesController.desiredFor(slots, journal, noSizes))
     }
+
+    @Test
+    fun `an Auto slot restored as a read-only disk stays Auto in the draft`() {
+        val journal = Journal(desired = Desired(listOf(SlotSpec(0, iso, LunMode.DISK_RO, auto = true))))
+        assertEquals(listOf(DraftSlot(iso, null)), DrivesController.slotsOf(journal))
+    }
+
+    private val noSizes: (String) -> Long? = { null }
 
     @Test
     fun `edit then apply exports through the backend`() =
@@ -66,7 +88,7 @@ class DrivesControllerTest {
             controller.apply()
             assertFalse(controller.state.value.dirty)
             assertEquals(SlotIntent.EXPORTED, backend.journal.value.slotIntents[0])
-            assertEquals(listOf(SlotSpec(0, iso, LunMode.CDROM)), backend.journal.value.desired.slots)
+            assertEquals(listOf(SlotSpec(0, iso, LunMode.CDROM, auto = true)), backend.journal.value.desired.slots)
 
             controller.eject(0, force = false)
             assertEquals(SlotIntent.USER_EJECTED, backend.journal.value.slotIntents[0])
@@ -114,7 +136,7 @@ class DrivesControllerTest {
             assertTrue(controller.state.value.dirty, "a re-added image is a change to apply")
             controller.apply()
 
-            assertEquals(listOf(SlotSpec(0, iso, LunMode.CDROM)), backend.journal.value.desired.slots)
+            assertEquals(listOf(SlotSpec(0, iso, LunMode.CDROM, auto = true)), backend.journal.value.desired.slots)
             assertEquals(SlotIntent.EXPORTED, backend.journal.value.slotIntents[0])
             assertFalse(controller.state.value.dirty)
         }

@@ -475,8 +475,12 @@ class GadgetRig(
             FakeHidDescriptors,
             hidNodes,
             newLunInstanceNonce = { NONCE },
+            fileSizeBytes = { fileSizes[it] },
         )
     }
+
+    /** Backing file sizes the controller sees (unknown when absent, as for an unreadable file). */
+    val fileSizes = mutableMapOf<String, Long>()
 
     fun state(): GadgetState = GadgetReader(fs, hal).read()
 

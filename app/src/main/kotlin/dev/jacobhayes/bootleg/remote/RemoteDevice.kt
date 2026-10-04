@@ -78,7 +78,7 @@ class RemoteDevice(
                             displayName = image.displayName,
                             sizeBytes = image.sizeBytes,
                             path = image.path,
-                            defaultMode = RemoteImage.defaultModeFor(image.path),
+                            defaultMode = RemoteImage.defaultModeFor(image.path, image.sizeBytes),
                             verified = image.verifiedSha256 != null,
                         )
                     },

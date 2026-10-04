@@ -17,7 +17,7 @@ Confirmed on device: configfs gadget `g1` on UDC `11110000.dwc3`;
 | UI | Kotlin + Jetpack Compose + Material 3 |
 | Toolchain | `mise.toml` (all `latest` + `mise.lock`, Java on 21 LTS); SDK in `.android-sdk/` |
 | Root | Magisk `su`; app's root grant pre-seeded in Magisk's DB for testing |
-| Disk mode | Auto: `.iso` → read-only CD-ROM, `.img` → read-only disk; per-slot override: CD-ROM / disk RO / disk RW |
+| Disk mode | Auto: `.iso` → read-only CD-ROM if it fits one (≤ 2.36 GB, the kernel's CD-ROM limit), else read-only disk; `.img` → read-only disk; per-slot override: CD-ROM / disk RO / disk RW. A CD-ROM the image doesn't fit is refused, never exported cut off. The mode menu says that a hybrid ISO as a read-only disk boots but Windows won't show its files |
 | Multi-disk | Up to 8 slots exposed at once (one `mass_storage` LUN each) |
 | Composite gadget | Never replace the USB function: add disks/HID next to `ffs.adb` and leave other apps' functions alone |
 | Storage | `/sdcard/bootleg/` (kernel is given the `/data/media/0/...` path, not the FUSE path); can also pick any file on the phone |

@@ -875,6 +875,30 @@ class RemoteControllerTest {
         }
 
         @Test
+        fun `an ISO too big for a CD-ROM defaults to a read-only disk, and asking for a CD-ROM is refused`() {
+            val big = RemoteHarness.image("/data/media/0/bootleg/omarchy.iso", 6_200_000_000L)
+            h.setDevice(h.device.copy(images = h.device.images + big))
+            h.connect("s1")
+            val epoch = h.take("s1")
+            assertEquals(LunMode.DISK_RO, big.defaultMode)
+            val refused =
+                h.request(
+                    "s1",
+                    "slots.apply",
+                    mapOf("slots" to JsonArray(listOf(slot(0, big.imageId, "cdrom"))), "ifRev" to num(rev())),
+                    epoch,
+                )
+            assertEquals("cdrom_too_large", refused!!.errorCode)
+            assertTrue(h.deviceCalls.isEmpty())
+            assertNull(
+                h.request("s1", "slots.apply", mapOf("slots" to JsonArray(listOf(slot(0, big.imageId))), "ifRev" to num(rev())), epoch),
+            )
+            val spec = (h.deviceCalls.single().op as DeviceOp.Apply).desired.slots.single()
+            assertEquals(LunMode.DISK_RO, spec.mode)
+            assertTrue(spec.auto)
+        }
+
+        @Test
         fun `slots apply resolves image ids, defaults modes and checks ifRev atomically`() {
             h.connect("s1")
             h.connect("s2")

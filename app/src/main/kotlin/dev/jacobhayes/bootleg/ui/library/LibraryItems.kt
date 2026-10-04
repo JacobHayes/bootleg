@@ -39,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.jacobhayes.bootleg.ImageFile
 import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.gadget.LunModes
 import dev.jacobhayes.bootleg.download.formatBytes
 import dev.jacobhayes.bootleg.storage.FileTasks
 import dev.jacobhayes.bootleg.storage.PickedFile
@@ -58,7 +59,7 @@ fun ImageCard(
         Column(Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    if (StoragePaths.autoMode(image.path) == LunMode.CDROM) Icons.Outlined.Album else Icons.Outlined.SdStorage,
+                    if (LunModes.auto(image.path, image.sizeBytes) == LunMode.CDROM) Icons.Outlined.Album else Icons.Outlined.SdStorage,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                 )

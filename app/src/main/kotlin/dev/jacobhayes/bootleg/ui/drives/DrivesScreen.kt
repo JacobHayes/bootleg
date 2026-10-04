@@ -193,6 +193,7 @@ private fun SlotList(
             SlotCard(
                 index = index,
                 slot = slot,
+                sizeBytes = controller.sizeOf(slot.path),
                 status = statuses[index],
                 busy = state.busy,
                 onModeChange = { controller.setMode(index, it) },

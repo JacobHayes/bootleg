@@ -42,8 +42,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.jacobhayes.bootleg.ImageFile
+import dev.jacobhayes.bootleg.core.gadget.CdromLimits
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.gadget.LunModes
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.download.formatBytes
 import dev.jacobhayes.bootleg.storage.StoragePaths
@@ -64,13 +66,25 @@ fun slotStatus(
 ): SlotStatus {
     if (applied.getOrNull(index) != slot) return SlotStatus(SlotStatusKind.PENDING, "Not applied")
     return when (journal.slotIntents[index]) {
-        SlotIntent.EXPORTED -> SlotStatus(SlotStatusKind.EXPORTED, "Exported")
+        SlotIntent.EXPORTED -> SlotStatus(SlotStatusKind.EXPORTED, journal.slotNotes[index]?.let { "Exported · $it" } ?: "Exported")
         SlotIntent.HOST_EJECTED -> SlotStatus(SlotStatusKind.EJECTED, "Host ejected")
         SlotIntent.USER_EJECTED -> SlotStatus(SlotStatusKind.EJECTED, "Ejected")
         SlotIntent.FAILED -> SlotStatus(SlotStatusKind.FAILED, "Failed: ${journal.slotFailures[index] ?: "unknown reason"}")
         null -> SlotStatus(SlotStatusKind.PENDING, "Not applied")
     }
 }
+
+/** Hybrid ISOs boot either way; Windows mounts only a removable drive's first partition (the ISO9660 one, which it hides). */
+const val ISO_AS_DISK_HINT =
+    "A read-only disk still boots an ISO, but Windows won't show its files in Explorer. Use CD-ROM to browse it."
+
+/** Why an image of [sizeBytes] can't be a CD-ROM, short enough for the mode menu; null when it can. */
+fun cdromProblem(sizeBytes: Long): String? =
+    when {
+        CdromLimits.fits(sizeBytes) -> null
+        sizeBytes > CdromLimits.SIZE_BYTES_MAX -> "Too big for a CD-ROM (over ${formatBytes(CdromLimits.SIZE_BYTES_MAX)})"
+        else -> "Too small for a CD-ROM"
+    }
 
 fun modeLabel(mode: LunMode): String =
     when (mode) {
@@ -83,6 +97,8 @@ fun modeLabel(mode: LunMode): String =
 fun SlotCard(
     index: Int,
     slot: DraftSlot,
+    /** The image's size, if known: whether an ISO fits a CD-ROM. */
+    sizeBytes: Long?,
     status: SlotStatus,
     busy: Boolean,
     onModeChange: (LunMode?) -> Unit,
@@ -97,7 +113,7 @@ fun SlotCard(
         Column(Modifier.padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    if (slot.mode == LunMode.CDROM) Icons.Outlined.Album else Icons.Outlined.SdStorage,
+                    if (slot.mode(sizeBytes) == LunMode.CDROM) Icons.Outlined.Album else Icons.Outlined.SdStorage,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                 )
@@ -125,7 +141,7 @@ fun SlotCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ModeChip(slot, onModeChange)
+                ModeChip(slot, sizeBytes, onModeChange)
                 Spacer(Modifier.weight(1f))
                 if (status.kind == SlotStatusKind.EXPORTED) {
                     FilledTonalButton(onClick = onEject, enabled = !busy) {
@@ -198,23 +214,45 @@ private fun SlotOverflowMenu(
 @Composable
 private fun ModeChip(
     slot: DraftSlot,
+    sizeBytes: Long?,
     onModeChange: (LunMode?) -> Unit,
 ) {
     var open by remember { mutableStateOf(false) }
     var confirmWritable by remember { mutableStateOf(false) }
-    val label = if (slot.modeOverride == null) "Auto · ${modeLabel(slot.mode)}" else modeLabel(slot.mode)
+    val mode = slot.mode(sizeBytes)
+    val label = if (slot.modeOverride == null) "Auto · ${modeLabel(mode)}" else modeLabel(mode)
+    val cdromProblem = sizeBytes?.let { cdromProblem(it) }
+    val iso = slot.path.endsWith(".iso", ignoreCase = true)
     Box {
         AssistChip(onClick = { open = true }, label = { Text(label, maxLines = 1) })
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            DropdownMenuItem(text = { Text("Auto (${modeLabel(StoragePaths.autoMode(slot.path))})") }, onClick = {
+            DropdownMenuItem(text = { Text("Auto (${modeLabel(LunModes.auto(slot.path, sizeBytes))})") }, onClick = {
                 open = false
                 onModeChange(null)
             })
-            LunMode.entries.forEach { mode ->
-                DropdownMenuItem(text = { Text(modeLabel(mode)) }, onClick = {
-                    open = false
-                    if (mode == LunMode.DISK_RW) confirmWritable = true else onModeChange(mode)
-                })
+            LunMode.entries.forEach { choice ->
+                val blocked = if (choice == LunMode.CDROM) cdromProblem else null
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(modeLabel(choice))
+                            if (blocked != null) Text(blocked, style = MaterialTheme.typography.bodySmall)
+                        }
+                    },
+                    enabled = blocked == null,
+                    onClick = {
+                        open = false
+                        if (choice == LunMode.DISK_RW) confirmWritable = true else onModeChange(choice)
+                    },
+                )
+            }
+            if (iso) {
+                Text(
+                    ISO_AS_DISK_HINT,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp).width(280.dp),
+                )
             }
         }
     }
@@ -265,7 +303,13 @@ fun ImagePickerSheetContent(
                     supportingContent = { Text("${StoragePaths.kindLabel(image.path)} · ${formatBytes(image.sizeBytes)}") },
                     leadingContent = {
                         Icon(
-                            if (StoragePaths.autoMode(image.path) == LunMode.CDROM) Icons.Outlined.Album else Icons.Outlined.SdStorage,
+                            if (LunModes.auto(image.path, image.sizeBytes) ==
+                                LunMode.CDROM
+                            ) {
+                                Icons.Outlined.Album
+                            } else {
+                                Icons.Outlined.SdStorage
+                            },
                             contentDescription = null,
                         )
                     },

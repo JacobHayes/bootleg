@@ -43,6 +43,103 @@ class DefaultGadgetControllerTest {
     }
 
     @Test
+    fun `an explicit CD-ROM too big for the kernel fails its slot and is never exported`() {
+        val rig = GadgetRig()
+        rig.fileSizes[iso(1)] = CdromLimits.SIZE_BYTES_MAX + 1
+        val result = rig.controller().apply(twoDisks)
+        val partial = assertInstanceOf(ApplyResult.Partial::class.java, result)
+        assertTrue(partial.slotFailures.getValue(0).startsWith("image1.iso is 2.36 GB; a CD-ROM holds at most"), partial.slotFailures[0])
+        assertEquals(SlotIntent.FAILED, rig.journal().slotIntents[0])
+        assertEquals(
+            "",
+            rig
+                .state()
+                .luns
+                .getValue(0)
+                .file,
+        )
+        assertEquals(
+            img(1),
+            rig
+                .state()
+                .luns
+                .getValue(1)
+                .file,
+            "the other slot is unaffected",
+        )
+        rig.assertHealthy()
+    }
+
+    @Test
+    fun `a CD-ROM that fits exactly is exported`() {
+        val rig = GadgetRig()
+        rig.fileSizes[iso(1)] = CdromLimits.SIZE_BYTES_MAX
+        assertInstanceOf(ApplyResult.Applied::class.java, rig.controller().apply(twoDisks))
+        assertEquals(
+            iso(1),
+            rig
+                .state()
+                .luns
+                .getValue(0)
+                .file,
+        )
+    }
+
+    @Test
+    fun `reconcile restores an Auto CD-ROM that no longer fits as a read-only disk and says why`() {
+        val rig = GadgetRig()
+        val controller = rig.controller()
+        val auto = Desired(listOf(SlotSpec(0, iso(1), LunMode.CDROM, auto = true)))
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(auto))
+        // A journal from before the size rule (or a file replaced since): the restore must not export it truncated.
+        rig.fileSizes[iso(1)] = 6_200_000_000L
+        rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.reconcile())
+        val journal = rig.journal()
+        assertEquals(
+            LunMode.DISK_RO,
+            journal.desired.slots
+                .single()
+                .mode,
+        )
+        assertEquals(SlotIntent.EXPORTED, journal.slotIntents[0])
+        assertTrue(journal.slotNotes.getValue(0).startsWith("Exported as a read-only disk: image1.iso is 6.20 GB"), journal.slotNotes[0])
+        val lun = rig.state().luns.getValue(0)
+        assertEquals(iso(1), lun.file)
+        assertFalse(lun.cdrom)
+        assertTrue(lun.ro)
+        rig.assertHealthy()
+    }
+
+    @Test
+    fun `reconcile fails an explicit CD-ROM that no longer fits instead of changing the user's choice`() {
+        val rig = GadgetRig()
+        val controller = rig.controller()
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(Desired(listOf(SlotSpec(0, iso(1), LunMode.CDROM)))))
+        rig.fileSizes[iso(1)] = 6_200_000_000L
+        rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)
+        assertInstanceOf(ApplyResult.Partial::class.java, controller.reconcile())
+        assertEquals(
+            LunMode.CDROM,
+            rig
+                .journal()
+                .desired.slots
+                .single()
+                .mode,
+        )
+        assertEquals(SlotIntent.FAILED, rig.journal().slotIntents[0])
+        assertEquals(
+            "",
+            rig
+                .state()
+                .luns
+                .getValue(0)
+                .file,
+            "the truncated export is ejected",
+        )
+    }
+
+    @Test
     fun `journal records each phase before the step it covers`() {
         val rig = GadgetRig()
         val phasesWithUdc = mutableListOf<Pair<TransitionPhase, String>>()

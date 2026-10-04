@@ -1,6 +1,5 @@
 package dev.jacobhayes.bootleg.storage
 
-import dev.jacobhayes.bootleg.core.gadget.LunMode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -39,13 +38,6 @@ class StoragePathsTest {
         assertEquals("/storage/emulated/0/bootleg/x.iso", StoragePaths.toFusePath(media))
         assertThrows<IllegalArgumentException> { StoragePaths.toMediaPath("/storage/emulated/01/x") }
         assertThrows<IllegalArgumentException> { StoragePaths.toFusePath("/data/media/10/x") }
-    }
-
-    @Test
-    fun `auto mode by extension`() {
-        assertEquals(LunMode.CDROM, StoragePaths.autoMode("/a/b.ISO"))
-        assertEquals(LunMode.DISK_RO, StoragePaths.autoMode("/a/b.img"))
-        assertEquals(LunMode.DISK_RO, StoragePaths.autoMode("/a/iso"))
     }
 
     @Test

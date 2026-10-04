@@ -27,7 +27,9 @@ fun createGadgetController(
     hidDescriptors: HidDescriptorProvider,
     hidNodes: HidNodeGuard,
     allowedRoots: List<String>,
-): DefaultGadgetController = DefaultGadgetController(fs, props, journalStore, deadMan, clock, hidDescriptors, hidNodes, allowedRoots)
+    fileSizeBytes: (path: String) -> Long?,
+): DefaultGadgetController =
+    DefaultGadgetController(fs, props, journalStore, deadMan, clock, hidDescriptors, hidNodes, allowedRoots, fileSizeBytes = fileSizeBytes)
 
 /** Which file a path names: two hard links to one inode are the same file. */
 data class FileIdentity(

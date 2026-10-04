@@ -6,6 +6,7 @@ import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.gadget.LunModes
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.tether.TetherResult
@@ -196,7 +197,10 @@ data class RemoteImage(
         /** A stable opaque ID for an image path. */
         fun idFor(path: String): String = sha256Hex(path).take(IMAGE_ID_HEX_LENGTH)
 
-        fun defaultModeFor(path: String): LunMode = if (path.endsWith(".iso", ignoreCase = true)) LunMode.CDROM else LunMode.DISK_RO
+        fun defaultModeFor(
+            path: String,
+            sizeBytes: Long?,
+        ): LunMode = LunModes.auto(path, sizeBytes)
     }
 }
 

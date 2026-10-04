@@ -31,6 +31,8 @@ data class SlotSpec(
     val lun: Int,
     val backingPath: String,
     val mode: LunMode,
+    /** [mode] came from the Auto rule ([LunModes.auto]), not the user's choice, so restore may pick another one. */
+    val auto: Boolean = false,
 )
 
 /**
@@ -202,6 +204,8 @@ data class Journal(
      * its `inquiry_string` still carries this nonce. Empty in journals written before the marker existed.
      */
     val lunInstanceNonce: String = "",
+    /** Per slot, why it is exported differently from what was asked (a CD-ROM restored as a read-only disk). */
+    val slotNotes: Map<Int, String> = emptyMap(),
 )
 
 /** Durable journal storage (app: a file written atomically; tests: in-memory). */

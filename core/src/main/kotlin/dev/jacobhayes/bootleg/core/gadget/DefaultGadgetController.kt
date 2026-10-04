@@ -17,6 +17,8 @@ class DefaultGadgetController(
     private val hidNodes: HidNodeGuard,
     private val allowedRoots: List<String> = GadgetInvariants.ALLOWED_ROOTS_DEFAULT,
     private val newLunInstanceNonce: () -> String = LunMarker::newNonce,
+    /** Size of the file at a kernel path (root: fstat of the confined open), or null if it can't be read. */
+    private val fileSizeBytes: (path: String) -> Long? = { null },
 ) : GadgetController {
     private val reader = GadgetReader(fs)
     private val planner = GadgetPlanner(hidDescriptors)
@@ -109,6 +111,8 @@ class DefaultGadgetController(
         val loaded = journalStore.load()
         var journal = absorbHostEjects(loaded, state).let { it.copy(udc = state.udc.ifEmpty { it.udc }) }
         if (journal != loaded) journal = save(journal)
+        // Also before the clean check: a CD-ROM exported truncated by an older version must not stay.
+        journal = failOversizedCdroms(downgradeOversizedCdroms(journal))
         val clean =
             journal.phase == TransitionPhase.IDLE &&
                 (state.udc.isNotEmpty() || state.configLinks.isEmpty()) &&
@@ -170,6 +174,8 @@ class DefaultGadgetController(
         // Each pass either converges, consumes a replan, or fails a slot for the first time.
         val passCountMax = 1 + GadgetLimits.REPLAN_COUNT_MAX + GadgetLimits.LUN_COUNT_MAX
         for (pass in 0 until passCountMax) {
+            // Before every plan, so a file that grew while being exported is caught on the next pass (and ejected).
+            journal = failOversizedCdroms(journal)
             val plan = planner.plan(state, GadgetTarget.of(journal), journal.udc, forceReenumerate)
             if (plan.ops.isEmpty()) {
                 lastProblem = null
@@ -595,6 +601,44 @@ class DefaultGadgetController(
     /** Right before removing [function]: nobody may hold its node, not even someone who opened it after quiesceHid. */
     private fun requireHidNodeFree(function: String) {
         closeHidAndFindHolders(setOf(function))?.let { throw HidNodeInUseException(it) }
+    }
+
+    /** Why each exported CD-ROM slot's file can't be a CD-ROM ([CdromLimits]); the kernel would truncate or refuse it. */
+    private fun oversizedCdroms(journal: Journal): Map<Int, String> =
+        journal.desired.slots
+            .filter { it.mode == LunMode.CDROM && (journal.slotIntents[it.lun] ?: SlotIntent.EXPORTED) == SlotIntent.EXPORTED }
+            .mapNotNull { slot ->
+                val sizeBytes = fileSizeBytes(slot.backingPath) ?: return@mapNotNull null
+                CdromLimits.problem(slot.backingPath.substringAfterLast('/'), sizeBytes)?.let { slot.lun to it }
+            }.toMap()
+
+    /** An explicit CD-ROM the file can't be fails its slot (never exported truncated). */
+    private fun failOversizedCdroms(journal: Journal): Journal {
+        val problems = oversizedCdroms(journal)
+        if (problems.isEmpty()) return journal
+        return save(
+            journal.copy(
+                slotIntents = journal.slotIntents + problems.mapValues { SlotIntent.FAILED },
+                slotFailures = journal.slotFailures + problems,
+            ),
+        )
+    }
+
+    /**
+     * Reconcile (also the restore after reboot): a CD-ROM slot Auto chose ([SlotSpec.auto]) whose file
+     * can't be one becomes a read-only disk, with a note saying why. An explicit CD-ROM is left to fail.
+     */
+    private fun downgradeOversizedCdroms(journal: Journal): Journal {
+        val autoLuns =
+            journal.desired.slots
+                .filter { it.auto }
+                .map { it.lun }
+                .toSet()
+        val problems = oversizedCdroms(journal).filterKeys { it in autoLuns }
+        if (problems.isEmpty()) return journal
+        val slots = journal.desired.slots.map { slot -> if (slot.lun in problems) slot.copy(mode = LunMode.DISK_RO) else slot }
+        val notes = problems.mapValues { (_, reason) -> "Exported as a read-only disk: ${reason.substringBefore(". Use ")}" }
+        return save(journal.copy(desired = journal.desired.copy(slots = slots), slotNotes = journal.slotNotes + notes))
     }
 
     /**

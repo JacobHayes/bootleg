@@ -330,8 +330,8 @@ class ScreenshotTest {
                 desired =
                     Desired(
                         listOf(
-                            SlotSpec(0, "$store/ubuntu-26.04-desktop-amd64.iso", LunMode.CDROM),
-                            SlotSpec(1, "$store/debian-13.2.0-amd64-netinst.iso", LunMode.CDROM),
+                            SlotSpec(0, "$store/ubuntu-26.04-desktop-amd64.iso", LunMode.DISK_RO, auto = true),
+                            SlotSpec(1, "$store/debian-13.2.0-amd64-netinst.iso", LunMode.CDROM, auto = true),
                             SlotSpec(2, "$store/scratch-fat32.img", LunMode.DISK_RW),
                             SlotSpec(3, "$store/memtest86plus-7.20.iso", LunMode.DISK_RO),
                         ),

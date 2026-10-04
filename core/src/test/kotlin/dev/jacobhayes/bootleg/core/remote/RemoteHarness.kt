@@ -481,7 +481,7 @@ class RemoteHarness(
         fun image(
             path: String,
             sizeBytes: Long,
-        ) = RemoteImage(RemoteImage.idFor(path), path.substringAfterLast('/'), sizeBytes, path, RemoteImage.defaultModeFor(path))
+        ) = RemoteImage(RemoteImage.idFor(path), path.substringAfterLast('/'), sizeBytes, path, RemoteImage.defaultModeFor(path, sizeBytes))
 
         fun str(value: String): JsonElement = JsonPrimitive(value)
 

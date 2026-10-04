@@ -1,6 +1,7 @@
 package dev.jacobhayes.bootleg.core.remote
 
 import dev.jacobhayes.bootleg.core.catalog.Release
+import dev.jacobhayes.bootleg.core.gadget.CdromLimits
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.LunMode
@@ -885,9 +886,17 @@ class RemoteController(
         val specs =
             sorted.map { slot ->
                 val path = pathsById[slot.imageId] ?: return err(ErrorCode.NOT_FOUND, "unknown imageId")
-                val mode = slot.mode?.mode ?: device.images.firstOrNull { it.path == path }?.defaultMode ?: RemoteImage.defaultModeFor(path)
+                val image = device.images.firstOrNull { it.path == path }
+                val mode = slot.mode?.mode ?: image?.defaultMode ?: RemoteImage.defaultModeFor(path, sizeBytes = null)
                 if (mode == LunMode.DISK_RW && !allowRw(session)) return err(ErrorCode.RW_NOT_ALLOWED, "writable disks are not allowed")
-                SlotSpec(slot.lun, path, mode)
+                // The phone refuses it too (the slot fails); saying so up front names the alternative.
+                if (mode == LunMode.CDROM && image != null) {
+                    CdromLimits.problem(image.displayName, image.sizeBytes)?.let { problem ->
+                        val code = if (image.sizeBytes > CdromLimits.SIZE_BYTES_MAX) ErrorCode.CDROM_TOO_LARGE else ErrorCode.BAD_REQUEST
+                        return err(code, problem)
+                    }
+                }
+                SlotSpec(slot.lun, path, mode, auto = slot.mode == null)
             }
         return startDeviceCall(session, requestId, DeviceOp.Apply(Desired(specs, device.hid)))
     }

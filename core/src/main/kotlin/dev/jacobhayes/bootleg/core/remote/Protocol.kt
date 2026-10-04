@@ -66,6 +66,10 @@ enum class ErrorCode {
     @SerialName("rw_not_allowed")
     RW_NOT_ALLOWED,
 
+    /** The image is bigger than a CD-ROM holds (the kernel would truncate it); the message names the alternative. */
+    @SerialName("cdrom_too_large")
+    CDROM_TOO_LARGE,
+
     @SerialName("release_pending")
     RELEASE_PENDING,
 

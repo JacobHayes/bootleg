@@ -222,7 +222,7 @@ object ConfinedFiles {
                 val stat = Os.fstat(file.fileDescriptor)
                 require(OsConstants.S_ISREG(stat.st_mode)) { "not a regular file: $path" }
                 require(stat.st_dev == rootDevice) { "file is on another filesystem than ${confined.root}: $path" }
-                ConfinedFile(confined.path, file, FileIdentity(stat.st_dev, stat.st_ino))
+                ConfinedFile(confined.path, file, FileIdentity(stat.st_dev, stat.st_ino), stat.st_size)
             } catch (e: Throwable) {
                 file.close()
                 throw e
@@ -384,6 +384,8 @@ class ConfinedFile(
     val descriptor: ParcelFileDescriptor,
     /** From the fstat of [descriptor], so it names the inode that was actually opened. */
     val identity: FileIdentity,
+    /** The opened file's size (fstat), which is what the kernel sees when it opens the same inode. */
+    val sizeBytes: Long,
 ) : AutoCloseable {
     /** Given to `lun.N/file`: the kernel resolves this magic link in our process to the same inode. */
     val procPath: String get() = "/proc/self/fd/${descriptor.fd}"

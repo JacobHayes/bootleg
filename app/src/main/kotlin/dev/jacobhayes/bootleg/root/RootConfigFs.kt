@@ -2,6 +2,7 @@ package dev.jacobhayes.bootleg.root
 
 import android.system.ErrnoException
 import android.system.Os
+import dev.jacobhayes.bootleg.core.gadget.CdromLimits
 import dev.jacobhayes.bootleg.core.gadget.ConfigFs
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import java.io.File
@@ -84,8 +85,14 @@ class RootConfigFs(
             } catch (e: ErrnoException) {
                 throw IOException(e.message, e)
             }
-        // The kernel resolves this magic link in our process context and keeps its own reference.
-        image.use { writeBytes(path, it.procPath.toByteArray()) }
+        image.use {
+            // The kernel would truncate (or refuse) this very inode as a CD-ROM: check the fd it is given, not a path.
+            if (read(path.substringBeforeLast('/') + "/cdrom") == "1") {
+                CdromLimits.problem(it.path.substringAfterLast('/'), it.sizeBytes)?.let { problem -> throw IOException(problem) }
+            }
+            // The kernel resolves this magic link in our process context and keeps its own reference.
+            writeBytes(path, it.procPath.toByteArray())
+        }
         val exported = read(path)
         if (exported != image.path) throw IOException("kernel exported '$exported', expected '${image.path}'")
     }

@@ -64,6 +64,10 @@ class BootlegRootService : RootService() {
                 hidDescriptors = HidDescriptors,
                 hidNodes = hidNodes,
                 allowedRoots = ImagePaths.allowedRoots,
+                // The same confined open the export uses, so the size is the exported inode's.
+                fileSizeBytes = { path ->
+                    runCatching { ConfinedFiles.openImage(path, ImagePaths.allowedRoots).use { it.sizeBytes } }.getOrNull()
+                },
             )
         runCatching { images.sweepStaleLoopDevices() }.onFailure { Log.w(TAG, "loop sweep failed", it) }
         // Without a journal, reconcile would tear down whatever Bootleg exported before; adopt it instead.

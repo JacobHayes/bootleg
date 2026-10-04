@@ -1,6 +1,5 @@
 package dev.jacobhayes.bootleg.storage
 
-import dev.jacobhayes.bootleg.core.gadget.LunMode
 import java.io.File
 import java.io.IOException
 import java.nio.file.FileAlreadyExistsException
@@ -50,9 +49,6 @@ object StoragePaths {
         if (relative.split('/').any { it == ".." || it == "." || it.isEmpty() }) return null
         return "$MEDIA_ROOT/$relative"
     }
-
-    /** Auto mode: ISO → CD-ROM, everything else → read-only disk. */
-    fun autoMode(path: String): LunMode = if (path.endsWith(".iso", ignoreCase = true)) LunMode.CDROM else LunMode.DISK_RO
 
     fun kindLabel(path: String): String =
         when (path.substringAfterLast('.', "").lowercase()) {

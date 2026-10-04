@@ -167,7 +167,8 @@ Details:
 - **`slots.apply`** carries the full desired slot list. `lun`s must be exactly `0..n-1`, n ≤ 8
   (`bad_request`). `imageId`s come from `state.images` or `state.slots` (`not_found` otherwise);
   clients never send paths. `mode`: `cdrom`, `disk_ro`, `disk_rw`; absent → the image's
-  `defaultMode`. `disk_rw` (and `slot.reinsert` of an RW slot) needs the approval's "allow
+  `defaultMode` (`cdrom` for an `.iso` that fits a CD-ROM, else `disk_ro`). `cdrom` for an image
+  bigger than a CD-ROM holds is refused (`cdrom_too_large`). `disk_rw` (and `slot.reinsert` of an RW slot) needs the approval's "allow
   writable disks" flag, set only in the app (`rw_not_allowed`). HID functions stay as they are.
 - **`ifRev`** must equal the current state `rev` in the actor step that starts the operation
   (`rev_conflict`). One device operation runs at a time (`busy`), counting one that timed out but is still running on the phone.
@@ -247,6 +248,7 @@ Details:
 | `rev_conflict` | `ifRev` is not the current state `rev`. |
 | `not_found` | Unknown image, slot, plan or boot key, or no pending takeover. |
 | `rw_not_allowed` | Writable disks are not allowed for this device. |
+| `cdrom_too_large` | `slots.apply` asked for `cdrom` with an image bigger than a CD-ROM holds (2.36 GB; the phone's kernel would cut it off). Use `disk_ro`. |
 | `release_pending` | A release-all hasn't reached the host yet. |
 | `hid_off` | The keyboard is off. |
 | `too_large` | Paste over 64 KiB. |

@@ -7,10 +7,10 @@ import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.gadget.LunModes
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
 import dev.jacobhayes.bootleg.core.tether.TetherResult
-import dev.jacobhayes.bootleg.storage.StoragePaths
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -21,16 +21,19 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * A slot as edited in the UI. [modeOverride] null means Auto (by extension). [fresh] marks an image
- * the user (re)picked in this draft: after Apply it is inserted even if the same image was ejected
- * in that slot before, because the core keeps an eject when the slot spec doesn't change.
+ * A slot as edited in the UI. [modeOverride] null means Auto ([LunModes.auto]: by extension and size).
+ * [fresh] marks an image the user (re)picked in this draft: after Apply it is inserted even if the
+ * same image was ejected in that slot before, because the core keeps an eject when the slot spec
+ * doesn't change.
  */
 data class DraftSlot(
     val path: String,
     val modeOverride: LunMode? = null,
     val fresh: Boolean = false,
 ) {
-    val mode: LunMode get() = modeOverride ?: StoragePaths.autoMode(path)
+    /** The mode it is exported with; [sizeBytes] (null if unknown) decides whether an ISO fits a CD-ROM. */
+    fun mode(sizeBytes: Long?): LunMode = modeOverride ?: LunModes.auto(path, sizeBytes)
+
     val displayName: String get() = path.substringAfterLast('/')
 }
 
@@ -69,6 +72,12 @@ class DrivesController(
 
     val canAddSlot: Boolean get() = state.value.slots.size < GadgetLimits.LUN_COUNT_MAX
 
+    /** The image's size from the library, or null for a file outside it (root's size check still guards a CD-ROM). */
+    fun sizeOf(path: String): Long? =
+        backend.images.value
+            .firstOrNull { it.path == path }
+            ?.sizeBytes
+
     fun addSlot(path: String): Boolean {
         if (!canAddSlot) return false
         editDraft { it + DraftSlot(path, fresh = true) }
@@ -102,7 +111,7 @@ class DrivesController(
     fun apply() =
         run("Applying") {
             val slots = state.value.slots
-            val result = backend.apply(desiredFor(slots, backend.journal.value))
+            val result = backend.apply(desiredFor(slots, backend.journal.value, ::sizeOf))
             if (result is ApplyResult.Applied && result.reenumerated) forceEjected.clear()
             draft.value = null
             reinsertFreshSlots(slots, result) ?: result
@@ -233,16 +242,27 @@ class DrivesController(
 
         fun slotsOf(journal: Journal): List<DraftSlot> =
             journal.desired.slots.sortedBy { it.lun }.map { spec ->
-                val auto = StoragePaths.autoMode(spec.backingPath)
-                DraftSlot(spec.backingPath, modeOverride = spec.mode.takeIf { it != auto })
+                // Journals from before the Auto flag: a mode matching the extension rule was Auto.
+                val auto = spec.auto || spec.mode == LunModes.auto(spec.backingPath, sizeBytes = null)
+                DraftSlot(spec.backingPath, modeOverride = spec.mode.takeUnless { auto })
             }
 
         fun desiredFor(
             slots: List<DraftSlot>,
             journal: Journal,
+            sizeOf: (path: String) -> Long?,
         ): Desired {
             require(slots.size <= GadgetLimits.LUN_COUNT_MAX) { "at most ${GadgetLimits.LUN_COUNT_MAX} slots, got ${slots.size}" }
-            val specs = slots.mapIndexed { lun, slot -> SlotSpec(lun, slot.path, slot.mode) }
+            val specs =
+                slots.mapIndexed { lun, slot ->
+                    SlotSpec(
+                        lun,
+                        slot.path,
+                        slot.mode(sizeOf(slot.path)),
+                        auto =
+                            slot.modeOverride == null,
+                    )
+                }
             val writable = specs.filter { it.mode == LunMode.DISK_RW }.map { it.backingPath }
             require(writable.size == writable.toSet().size) { "an image can be exported writable only once" }
             val writableExportedTwice = writable.any { path -> specs.count { it.backingPath == path } > 1 }

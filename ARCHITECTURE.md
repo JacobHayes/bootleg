@@ -17,6 +17,13 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
 - macOS can't open `/dev/rdiskN` without sudo (root:operator), so host-side checks rely on
   auto-mounted filesystems and `diskutil info`.
 - `newfs_msdos`, `mkfs.exfat`, `mke2fs` and `losetup` (toybox) are on the phone.
+- A CD-ROM LUN uses 2048-byte blocks and f_mass_storage caps it at `256*60*75 - 1` = 1,151,999
+  blocks (2,359,295,999 bytes): a bigger file is silently cut off ("file too big ... using only
+  first 1151999 blocks" in dmesg) and the host sees a broken disc; fewer than 300 blocks fails the
+  open (`fsg_lun_open`, `storage_common.c` at `2ec90535fa34`). A disk LUN has no such cap.
+- Windows mounts only the first partition of a removable disk, and a hybrid ISO's first
+  partition is its ISO9660 one, so a hybrid ISO exported as a read-only disk boots but shows no
+  files in Explorer.
 - Writing `/proc/self/fd/N` (an O_NOFOLLOW fd held by the root process) into `lun.N/file` works,
   and `file` reads back as the real path (`/data/media/0/bootleg/x.img`).
 - macOS sets prevent-removal on a mounted LUN, so a normal eject (`file=""`) fails with EBUSY.
@@ -283,6 +290,19 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   check-then-open race. Duplicate exports are rejected by `(st_dev, st_ino)` whenever any copy is
   RW: before `apply`, root opens every slot's image (confined, as below) and checks the whole set,
   so two hard links to one inode can't both be exported with one writable. `ro` is changed only while the LUN has no file, and in-place swaps require `removable=1`.
+- **CD-ROM size.** The kernel cuts a CD-ROM off at 1,151,999 blocks of 2048 bytes (see Device
+  facts), so Auto (`LunModes.auto`, shared by the app, the remote and restore) picks a CD-ROM only
+  for an `.iso` that fits (300 to 1,151,999 blocks), else a read-only disk; slots record whether
+  their mode came from Auto (`SlotSpec.auto`). Before every plan the controller checks each
+  exported CD-ROM slot's size (`fileSizeBytes`, root's confined open + `fstat`): an explicit one
+  that doesn't fit fails its slot ("<name> is 6.20 GB; a CD-ROM holds at most 2.36 GB. Use Disk
+  (read-only)"); reconcile, which is also the restore after reboot, turns an Auto one into a
+  read-only disk and records why in `Journal.slotNotes` (shown on the slot). Root checks again on
+  the fd it hands the kernel, right before writing `lun/file` on a LUN with `cdrom=1`, so the
+  inode the kernel opens is the one checked. A file that grows while exported is caught on the next
+  plan (its slot fails and the LUN is emptied, unless the host holds it); the kernel log isn't
+  parsed. The Drives mode menu disables CD-ROM for such an image with the reason, and remote
+  `slots.apply` refuses it (`cdrom_too_large`).
 - **Write safety.** `nofua=0`. While a file is exported writable, Bootleg won't let the app open
   it for writing. Sparse RW images show their allocated vs. declared size, and creating one warns
   when free space is less than the declared size (or optionally preallocates with `fallocate`).
