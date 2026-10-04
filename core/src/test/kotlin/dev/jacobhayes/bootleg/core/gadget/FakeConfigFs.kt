@@ -70,6 +70,15 @@ class FakeConfigFs(
     /** Durations of unbound windows the executor opened (unbind start) and closed (bind return) itself. */
     val executorWindowsUs = mutableListOf<Long>()
 
+    /**
+     * Windows that waited on a held or dead FunctionFS function (the config couldn't bind meanwhile, so
+     * the HAL couldn't race them): not held to the tiny-window budget, kept apart from [executorWindowsUs].
+     */
+    val unbindableWindowsUs = mutableListOf<Long>()
+
+    /** Set by the FunctionFS fake when a daemon is started or released inside an executor window. */
+    var windowUnbindable = false
+
     /** Runs before every mutation (with its actor and path), at the moment it reaches the kernel model. */
     var beforeMutation: (actor: String, path: String) -> Unit = { _, _ -> }
 
@@ -308,9 +317,14 @@ class FakeConfigFs(
         }
         setText("UDC", value)
         executorWindowStartUs?.let { startUs ->
-            if (actor == EXECUTOR) executorWindowsUs += nowUs() - startUs else bindsInExecutorWindow += actor
+            when {
+                actor != EXECUTOR -> bindsInExecutorWindow += actor
+                windowUnbindable -> unbindableWindowsUs += nowUs() - startUs
+                else -> executorWindowsUs += nowUs() - startUs
+            }
         }
         executorWindowStartUs = null
+        windowUnbindable = false
         boundSinceUs = nowUs()
         onUdcChange(true, actor)
     }
@@ -418,6 +432,8 @@ class FakeConfigFs(
 
     private fun isLinked(function: String): Boolean = nodes.values.any { it is Link && it.target == GadgetPaths.function(function) }
 
+    fun isLinkedFunction(function: String): Boolean = isLinked(function)
+
     private fun children(path: String): List<String> {
         val prefix = if (path.isEmpty()) "" else "$path/"
         return nodes.keys.filter { it.isNotEmpty() && it.startsWith(prefix) && '/' !in it.removePrefix(prefix) }
@@ -483,8 +499,14 @@ class FakeConfigFs(
         val PIXEL_FOREIGN_FUNCTIONS =
             listOf("ffs.adb", "ffs.mtp", "ffs.ptp", "hid.keyboard", "hid.touchpad", "ncm.gs4", "accessory.gs2", "midi.gs5", "rndis.gs4")
 
-        /** The Pixel 6 gadget as found on the device: ADB plus USB HID Client's functions, bound. */
-        fun pixel(hostFiles: Set<String> = emptySet()): FakeConfigFs {
+        /**
+         * The Pixel 6 gadget as found on the device: ADB, bound; with [otherAppHid], also another app's
+         * HID functions (USB HID Client), linked under their own names, which the HAL never relinks.
+         */
+        fun pixel(
+            hostFiles: Set<String> = emptySet(),
+            otherAppHid: Boolean = false,
+        ): FakeConfigFs {
             val fs = FakeConfigFs(hostFiles = hostFiles.toMutableSet())
             fs.asActor("setup") {
                 fs.attr("idVendor", "0x18d1")
@@ -499,8 +521,10 @@ class FakeConfigFs(
                     fs.writeBytes(GadgetPaths.functionAttribute(hid, "report_desc"), byteArrayOf(0x05, 0x01, 0x09, 0x06))
                 }
                 fs.symlink(GadgetPaths.function("ffs.adb"), GadgetPaths.configLink("function0"))
-                fs.symlink(GadgetPaths.function("hid.keyboard"), GadgetPaths.configLink("hid.keyboard"))
-                fs.symlink(GadgetPaths.function("hid.touchpad"), GadgetPaths.configLink("hid.touchpad"))
+                if (otherAppHid) {
+                    fs.symlink(GadgetPaths.function("hid.keyboard"), GadgetPaths.configLink("hid.keyboard"))
+                    fs.symlink(GadgetPaths.function("hid.touchpad"), GadgetPaths.configLink("hid.touchpad"))
+                }
                 fs.write("UDC", PIXEL_UDC)
             }
             return fs

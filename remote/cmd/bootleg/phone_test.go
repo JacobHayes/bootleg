@@ -26,7 +26,7 @@ type fakePhone struct {
 	epoch    uint16
 	sessions map[int64]bool
 	frames   [][]byte
-	// wheel is the phone's mouse layout: false means "Compatible mouse".
+	// wheel is the phone's hid.wheel: false stands for an older phone without scrolling.
 	wheel    bool
 	requests []map[string]any
 	pasted   []string

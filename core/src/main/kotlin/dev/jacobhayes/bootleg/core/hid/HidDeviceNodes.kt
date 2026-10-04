@@ -1,13 +1,11 @@
 package dev.jacobhayes.bootleg.core.hid
 
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 
 /**
- * One of Bootleg's two HID kinds; [wireName] is what crosses the root AIDL boundary. The mouse has
- * one function per [MouseLayout]; [functionNames] lists every function that may serve the kind.
- * [reportSizeBytes] is the size of the reports the app builds (the mouse's wheel layout); root
- * writes only the live function's `report_length` of them.
+ * One of Bootleg's two HID kinds; [wireName] is what crosses the root AIDL boundary and
+ * [functionNames] lists the function that serves the kind. [reportSizeBytes] is the size of the
+ * reports the app builds, and the function's `report_length`.
  */
 enum class HidKind(
     val wireName: String,
@@ -15,16 +13,13 @@ enum class HidKind(
     val reportSizeBytes: Int,
 ) {
     KEYBOARD("keyboard", listOf(GadgetNames.HID_KEYBOARD_FUNCTION), HidLimits.KEYBOARD_REPORT_SIZE_BYTES),
-    MOUSE("mouse", MouseLayout.entries.map { it.functionName }, HidLimits.MOUSE_REPORT_SIZE_BYTES),
+    MOUSE("mouse", listOf(GadgetNames.HID_MOUSE_FUNCTION), HidLimits.MOUSE_REPORT_SIZE_BYTES),
     ;
 
-    /** `report_length` [functionName] must have: the keyboard's, or the mouse layout's. */
+    /** `report_length` [functionName] must have. */
     fun reportLengthBytesOf(functionName: String): Int {
         require(functionName in functionNames) { "$functionName is not a $wireName function" }
-        return when (this) {
-            KEYBOARD -> HidLimits.KEYBOARD_REPORT_SIZE_BYTES
-            MOUSE -> checkNotNull(MouseLayout.ofFunction(functionName)).reportLengthBytes
-        }
+        return reportSizeBytes
     }
 
     /**

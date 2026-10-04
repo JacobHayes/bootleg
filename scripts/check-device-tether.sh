@@ -85,8 +85,7 @@ hid_types() {
     sent=$(call HID_SEND --extra sequence:s:f24)
     [[ $(jq -r '.queued == 2 and .written >= 2 and .dropped == 0' <<<"$sent") == true ]] || fail "HID_SEND f24 after the re-plug: $sent"
 }
-# The mouse function is hid.bootleg_mouse_wheel or hid.bootleg_mouse (the Settings layout).
-links_have_hid() { jq -e 'index("hid.bootleg_kbd") != null and ([.[] | select(startswith("hid.bootleg_mouse"))] | length == 1)' <<<"$1" >/dev/null; }
+links_have_hid() { jq -e 'index("hid.bootleg_kbd") != null and index("hid.bootleg_mouse_wheel") != null' <<<"$1" >/dev/null; }
 
 # The phone's interface on the Mac: one that wasn't there before tethering, with an IPv4 address.
 ncm_interface=

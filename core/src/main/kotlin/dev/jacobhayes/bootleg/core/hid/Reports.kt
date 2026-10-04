@@ -1,6 +1,5 @@
 package dev.jacobhayes.bootleg.core.hid
 
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -110,8 +109,8 @@ enum class MouseButton(
 
 /**
  * One mouse input report: button bits, relative X, relative Y (screen-down is +Y), then the
- * wheel (+ = scroll up) and AC Pan (+ = scroll right) in detents. [encode] gives the 5-byte wheel
- * layout; its first 3 bytes are the boot report ([encodeFor] with [MouseLayout.BOOT]).
+ * wheel (+ = scroll up) and AC Pan (+ = scroll right) in detents. [encode] gives the 5-byte report;
+ * its first 3 bytes are the boot report.
  */
 data class MouseReport(
     val buttonBits: Int = 0,
@@ -132,8 +131,6 @@ data class MouseReport(
 
     fun encode(): ByteArray = byteArrayOf(buttonBits.toByte(), deltaX.toByte(), deltaY.toByte(), wheel.toByte(), pan.toByte())
 
-    fun encodeFor(layout: MouseLayout): ByteArray = forLayout(encode(), layout)
-
     companion object {
         fun clamped(
             buttonBits: Int,
@@ -148,30 +145,12 @@ data class MouseReport(
             pan: Int,
         ): MouseReport = MouseReport(buttonBits, wheel = clampScroll(wheel), pan = clampScroll(pan))
 
-        /**
-         * The bytes a function with [layout] takes from a wheel-layout [report]: its first
-         * `reportLengthBytes`. The layouts share bytes 0..2 (HID 1.11 B.2), so this is exactly the
-         * boot report for [MouseLayout.BOOT].
-         */
-        fun forLayout(
-            report: ByteArray,
-            layout: MouseLayout,
-        ): ByteArray {
+        /** Inverse of [encode]. */
+        fun decode(report: ByteArray): MouseReport {
             require(report.size == HidLimits.MOUSE_REPORT_SIZE_BYTES) {
                 "mouse report must be ${HidLimits.MOUSE_REPORT_SIZE_BYTES} bytes, got ${report.size}"
             }
-            check(layout.reportLengthBytes in HidLimits.MOUSE_BOOT_REPORT_SIZE_BYTES..HidLimits.MOUSE_REPORT_SIZE_BYTES)
-            return report.copyOf(layout.reportLengthBytes)
-        }
-
-        /** Inverse of [encode]; a 3-byte boot report decodes with no scroll. */
-        fun decode(report: ByteArray): MouseReport {
-            require(report.size == HidLimits.MOUSE_REPORT_SIZE_BYTES || report.size == HidLimits.MOUSE_BOOT_REPORT_SIZE_BYTES) {
-                "mouse report must be ${HidLimits.MOUSE_REPORT_SIZE_BYTES} or ${HidLimits.MOUSE_BOOT_REPORT_SIZE_BYTES} bytes, got ${report.size}"
-            }
-            val wheel = if (report.size > 3) report[3].toInt() else 0
-            val pan = if (report.size > 4) report[4].toInt() else 0
-            return MouseReport(report[0].toInt() and 0xFF, report[1].toInt(), report[2].toInt(), wheel, pan)
+            return MouseReport(report[0].toInt() and 0xFF, report[1].toInt(), report[2].toInt(), report[3].toInt(), report[4].toInt())
         }
 
         /**

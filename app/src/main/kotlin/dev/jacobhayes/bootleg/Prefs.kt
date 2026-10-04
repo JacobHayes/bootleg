@@ -2,7 +2,6 @@ package dev.jacobhayes.bootleg
 
 import android.content.Context
 import android.content.SharedPreferences
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,7 +15,6 @@ class Prefs(
     private val wifiOnlyFlow = MutableStateFlow(preferences.getBoolean(KEY_WIFI_ONLY, false))
     private val restoreFlow = MutableStateFlow(preferences.getBoolean(KEY_RESTORE_AFTER_REBOOT, false))
     private val remoteEnabledFlow = MutableStateFlow(preferences.getBoolean(KEY_REMOTE_ENABLED, false))
-    private val mouseLayoutFlow = MutableStateFlow(mouseLayoutOf(preferences))
     private val usbTetherChoiceFlow = MutableStateFlow(preferences.getBoolean(KEY_USB_TETHER_CHOICE, false))
 
     val wifiOnlyDownloads: StateFlow<Boolean> = wifiOnlyFlow.asStateFlow()
@@ -24,14 +22,6 @@ class Prefs(
 
     /** Remote control is on (off by default; never turned on at boot). */
     val remoteEnabled: StateFlow<Boolean> = remoteEnabledFlow.asStateFlow()
-
-    /** The mouse layout HID uses: the scroll wheel unless "Compatible mouse (no wheel)" is on. */
-    val mouseLayout: StateFlow<MouseLayout> = mouseLayoutFlow.asStateFlow()
-
-    fun setMouseLayout(layout: MouseLayout) {
-        preferences.edit().putBoolean(KEY_COMPATIBLE_MOUSE, layout == MouseLayout.BOOT).apply()
-        mouseLayoutFlow.value = layout
-    }
 
     /** USB tethering as last chosen through Bootleg (see `TetherChoice`); restore after reboot turns it back on. */
     val usbTetherChoice: StateFlow<Boolean> = usbTetherChoiceFlow.asStateFlow()
@@ -82,13 +72,8 @@ class Prefs(
         const val KEY_WIFI_ONLY = "wifi_only_downloads"
         const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
         const val KEY_REMOTE_ENABLED = "remote_enabled"
-        const val KEY_COMPATIBLE_MOUSE = "compatible_mouse"
         const val KEY_USB_TETHER_CHOICE = "usb_tether_choice"
         const val KEY_CONTROL_PANE = "control_pane"
         const val KEY_RECONNECT_AFTER_DISK_CHANGE = "reconnect_after_disk_change"
-
-        /** Read by the boot path too, which has no [Prefs] instance. */
-        fun mouseLayoutOf(preferences: SharedPreferences): MouseLayout =
-            if (preferences.getBoolean(KEY_COMPATIBLE_MOUSE, false)) MouseLayout.BOOT else MouseLayout.WHEEL
     }
 }

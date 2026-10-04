@@ -729,8 +729,8 @@ function queueMove(dx, dy) {
   });
 }
 
-// The phone's mouse takes scroll frames only with its wheel layout (not the
-// "Compatible mouse" setting); older phones don't say, and get none.
+// The phone's mouse takes scroll frames when it says so (hid.wheel); older
+// phones don't say, and get none.
 function canScroll() {
   return holdsLease() && !!(app.state && app.state.hid && app.state.hid.wheel);
 }

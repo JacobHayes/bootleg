@@ -16,6 +16,7 @@ import dev.jacobhayes.bootleg.core.tether.TetherTransitionStore
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.reflect.Method
+import java.util.UUID
 
 /** Runs programs as root by argv (never through a shell string), with a timeout and bounded output; see [CommandRunner]. */
 object RootCommands {
@@ -136,7 +137,7 @@ private fun fsyncDirectory(directory: File) {
     }
 }
 
-private const val ROOT_STATE_DIRECTORY_MODE = 0b111_000_000 // 0700
+internal const val ROOT_STATE_DIRECTORY_MODE = 0b111_000_000 // 0700
 
 /**
  * The tethering transition marker next to the journal. An unreadable marker counts as unverified
@@ -190,9 +191,17 @@ class FileTetherTransitionStore(
  * Spawns a detached root shell that rebinds the UDC if it is still unbound after the delay.
  * It runs in its own session so it outlives this process; values are passed as positional
  * arguments, never interpolated into the script.
+ *
+ * Each arm writes a fresh token to [tokenFile] and the shell acts only if the token is still its own,
+ * so [disarm] (a new token) stops every watchdog of a finished transition from touching a later one.
+ * When the bind fails, an unserved RNDIS function of ours is the likely cause: unless some process
+ * holds a hidg fd (removing a HID function under it panics the kernel once it's closed), the shell
+ * unlinks all of Bootleg's functions and binds again, so ADB comes back and nothing of ours sits on
+ * another function's interface number. Every write runs under `timeout`.
  */
 class ShellDeadMan(
-    private val udcPath: String = "${GadgetNames.GADGET_ROOT}/UDC",
+    private val gadgetRoot: String = GadgetNames.GADGET_ROOT,
+    private val tokenFile: File = File("/data/adb/bootleg/deadman"),
 ) : DeadMan {
     override fun arm(
         udc: String,
@@ -200,17 +209,53 @@ class ShellDeadMan(
     ) {
         require(UDC_NAME.matches(udc)) { "invalid UDC name: '$udc'" }
         require(delaySeconds in 1..DELAY_SECONDS_MAX) { "dead-man delay out of range: $delaySeconds" }
-        ProcessBuilder("setsid", "sh", "-c", SCRIPT, "bootleg-deadman", delaySeconds.toString(), udc, udcPath)
-            .redirectInput(File("/dev/null"))
+        val token = newToken()
+        ProcessBuilder(
+            "setsid",
+            "sh",
+            "-c",
+            SCRIPT,
+            "bootleg-deadman",
+            delaySeconds.toString(),
+            udc,
+            "$gadgetRoot/UDC",
+            tokenFile.path,
+            token,
+            "$gadgetRoot/${GadgetNames.CONFIG_DIR}",
+            WRITE_TIMEOUT_SECONDS.toString(),
+            "/proc",
+        ).redirectInput(File("/dev/null"))
             .redirectOutput(File("/dev/null"))
             .redirectError(File("/dev/null"))
             .start()
     }
 
-    private companion object {
-        const val DELAY_SECONDS_MAX = 60
-        val UDC_NAME = Regex("[A-Za-z0-9._-]{1,64}")
-        const val SCRIPT = "sleep \"\$1\"; [ -z \"\$(cat \"\$3\")\" ] && echo \"\$2\" > \"\$3\""
+    override fun disarm() {
+        newToken()
+    }
+
+    private fun newToken(): String {
+        val token = UUID.randomUUID().toString()
+        writeAtomically(tokenFile, token.toByteArray())
+        return token
+    }
+
+    internal companion object {
+        private const val DELAY_SECONDS_MAX = 60
+        private const val WRITE_TIMEOUT_SECONDS = 3
+        private val UDC_NAME = Regex("[A-Za-z0-9._-]{1,64}")
+
+        // $1 delay, $2 UDC name, $3 UDC path, $4 token file, $5 token, $6 config dir, $7 write timeout, $8
+        // /proc. The token is checked again right before each change, so a disarm while this runs stops
+        // what is left. One `ls` lists every fd: a readlink per fd (~20k of them) takes minutes.
+        const val SCRIPT =
+            "sleep \"\$1\"; token_file=\$4 token=\$5; " +
+                "ours() { [ \"\$(cat \"\$token_file\")\" = \"\$token\" ]; }; ours || exit 0; " +
+                "[ -z \"\$(timeout \"\$7\" cat \"\$3\")\" ] || exit 0; ours || exit 0; " +
+                "timeout \"\$7\" sh -c 'echo \"\$1\" > \"\$2\"' bind \"\$2\" \"\$3\" && exit 0; " +
+                "ls -l \"\$8\"/[0-9]*/fd/ 2>/dev/null | grep -q ' -> /dev/hidg' && exit 0; " +
+                "ours || exit 0; for link in \"\$6\"/*bootleg*; do [ -L \"\$link\" ] && rm \"\$link\"; done; ours || exit 0; " +
+                "timeout \"\$7\" sh -c 'echo \"\$1\" > \"\$2\"' bind \"\$2\" \"\$3\""
     }
 }
 

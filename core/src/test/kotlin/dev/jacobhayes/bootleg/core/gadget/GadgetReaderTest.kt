@@ -16,7 +16,7 @@ class GadgetReaderTest {
 
     @Test
     fun `reads the Pixel gadget`() {
-        val state = GadgetReader(FakeConfigFs.pixel(), props).read()
+        val state = GadgetReader(FakeConfigFs.pixel(otherAppHid = true), props).read()
         assertEquals(
             GadgetState(
                 udc = FakeConfigFs.PIXEL_UDC,
@@ -45,7 +45,7 @@ class GadgetReaderTest {
 
     @Test
     fun `a kernel without inquiry_string reads as no marker support`() {
-        val fs = FakeConfigFs.pixel()
+        val fs = FakeConfigFs.pixel(otherAppHid = true)
         fs.mkdir("functions/mass_storage.bootleg")
         val withoutInquiry =
             object : ConfigFs by fs {
@@ -63,7 +63,7 @@ class GadgetReaderTest {
 
     @Test
     fun `an unbound gadget reads as an empty UDC`() {
-        val fs = FakeConfigFs.pixel()
+        val fs = FakeConfigFs.pixel(otherAppHid = true)
         fs.write("UDC", "")
         assertEquals("", GadgetReader(fs, props).read().udc)
     }
@@ -71,7 +71,7 @@ class GadgetReaderTest {
     @Test
     fun `garbage in a flag attribute fails loudly`() {
         val fs =
-            object : ConfigFs by FakeConfigFs.pixel() {
+            object : ConfigFs by FakeConfigFs.pixel(otherAppHid = true) {
                 override fun list(path: String) = if (path.endsWith("bootleg")) listOf("lun.0") else listOf("mass_storage.bootleg")
 
                 override fun read(path: String) = if (path.endsWith("/file")) "\n" else "yes\n"
@@ -84,7 +84,7 @@ class GadgetReaderTest {
     @Test
     fun `a link that vanishes between list and readlink reads as absent`() {
         val fs =
-            object : ConfigFs by FakeConfigFs.pixel() {
+            object : ConfigFs by FakeConfigFs.pixel(otherAppHid = true) {
                 override fun readLink(path: String): String? = if (path.endsWith("function0")) throw IOException("ENOENT") else null
             }
         assertEquals(emptyMap<String, String>(), GadgetReader(fs, props).read().configLinks)

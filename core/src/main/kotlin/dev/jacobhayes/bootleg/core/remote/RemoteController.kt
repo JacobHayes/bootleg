@@ -5,7 +5,6 @@ import dev.jacobhayes.bootleg.core.gadget.CdromLimits
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.LunMode
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
 import dev.jacobhayes.bootleg.core.hid.BootKey
 import dev.jacobhayes.bootleg.core.hid.BootKeyMasher
@@ -1237,8 +1236,8 @@ class RemoteController(
                 sendHid(session.id, HidKind.MOUSE, MouseReport(held.buttonBits).encode())
             }
             is HidFrame.Scroll -> {
-                // Not malformed: the client may not have seen the layout change yet.
-                if (!device.hid.mouse || device.hid.mouseLayout != MouseLayout.WHEEL || (frame.wheel == 0 && frame.pan == 0)) return
+                // Not malformed: the client may not have seen the mouse turn off yet.
+                if (!device.hid.mouse || (frame.wheel == 0 && frame.pan == 0)) return
                 sendHid(session.id, HidKind.MOUSE, MouseReport.scroll(held.buttonBits, frame.wheel, frame.pan).encode())
             }
             is HidFrame.ReleaseAll -> error("handled above")
@@ -1661,7 +1660,7 @@ class RemoteController(
                 HidView(
                     device.hid.keyboard,
                     device.hid.mouse,
-                    device.hid.mouse && device.hid.mouseLayout == MouseLayout.WHEEL,
+                    device.hid.mouse,
                     if (barrier?.pendingReported ==
                         true
                     ) {

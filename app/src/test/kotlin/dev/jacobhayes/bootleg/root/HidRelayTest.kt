@@ -2,10 +2,8 @@ package dev.jacobhayes.bootleg.root
 
 import android.os.IBinder
 import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.HidLimits
-import dev.jacobhayes.bootleg.core.hid.MouseButton
 import dev.jacobhayes.bootleg.core.hid.MouseReport
 import dev.jacobhayes.bootleg.core.tether.TetherLimits
 import dev.jacobhayes.bootleg.hid.HidWriteResult
@@ -99,12 +97,8 @@ class HidRelayTest {
     private val opened = mutableListOf<FakeEndpoint>()
     private val deathLink = FakeDeathLink()
 
-    /** `report_length` of the mouse function the next open finds: 5 (wheel) or 3 (compatible). */
-    private var mouseReportLengthBytes = MouseLayout.WHEEL.reportLengthBytes
-
     /** Opens the fake endpoint for [kind] with its function's report length. */
-    private fun fakeOpen(kind: HidKind): FakeEndpoint =
-        FakeEndpoint(kind, if (kind == HidKind.MOUSE) mouseReportLengthBytes else kind.reportSizeBytes).also { opened += it }
+    private fun fakeOpen(kind: HidKind): FakeEndpoint = FakeEndpoint(kind, kind.reportSizeBytes).also { opened += it }
 
     /** The fake clock and gadget the relay polls while settling. */
     private var clockMs = 0L
@@ -215,21 +209,6 @@ class HidRelayTest {
         assertTrue(opened[0].releasedAndClosed)
         assertFalse(opened[1].closed)
         assertSame(recipient, deathLink.linked.getValue(client))
-    }
-
-    @Test
-    fun `the compatible mouse gets the boot bytes of each report, release included`() {
-        mouseReportLengthBytes = MouseLayout.BOOT.reportLengthBytes
-        relay.open(HidKind.MOUSE, token())
-        val mouse = opened.single()
-        val scrollWithButton = MouseReport(MouseButton.LEFT.bit, 3, -4, wheel = 2, pan = -1).encode()
-        assertEquals(HidWriteResult.WRITTEN, relay.write(HidKind.MOUSE, scrollWithButton))
-        assertEquals(listOf<Byte>(1, 3, -4), mouse.written.single())
-        // Reports are always the wheel layout's size on the wire from the app.
-        assertThrows<IllegalArgumentException> { relay.write(HidKind.MOUSE, ByteArray(3)) }
-        relay.close(HidKind.MOUSE)
-        assertTrue(mouse.releasedAndClosed)
-        assertEquals(listOf<Byte>(0, 0, 0), mouse.written.last())
     }
 
     @Test

@@ -3,7 +3,6 @@ package dev.jacobhayes.bootleg.ui.control
 import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.hid.HidLinkState
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -18,7 +17,7 @@ class ControlStatusTest {
             luns = emptyMap(),
         )
 
-    private val both = gadget(GadgetNames.HID_KEYBOARD_FUNCTION, MouseLayout.WHEEL.functionName)
+    private val both = gadget(GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_MOUSE_FUNCTION)
 
     private fun status(
         link: HidLinkState,
@@ -42,6 +41,6 @@ class ControlStatusTest {
     fun `nothing read, or the only linked endpoint not read, says the computer isn't reading`() {
         val notReading = ControlStatus("Computer not reading input (asleep, off or unplugged?)", StatusTone.PROBLEM)
         assertEquals(notReading, status(HidLinkState.Open(setOf(HidKind.KEYBOARD, HidKind.MOUSE))))
-        assertEquals(notReading, status(HidLinkState.Open(setOf(HidKind.MOUSE)), gadget(MouseLayout.WHEEL.functionName)))
+        assertEquals(notReading, status(HidLinkState.Open(setOf(HidKind.MOUSE)), gadget(GadgetNames.HID_MOUSE_FUNCTION)))
     }
 }

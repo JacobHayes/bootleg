@@ -55,16 +55,6 @@ class BootlegService : Service() {
         startForeground(NOTIFICATION_ID, buildNotification(null, tethering = false), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
     }
 
-    /** The journal holds the mouse layout of the last apply; the restore follows the setting. */
-    private suspend fun restoreMouseLayout() {
-        runCatching {
-            backend.refreshGadget()
-            val app = BootlegApp.from(this@BootlegService)
-            val hid = backend.journal.value.desired.hid
-            if (hid.mouse && hid.mouseLayout != app.prefs.mouseLayout.value) app.hid.setSpec(hid)
-        }.onFailure { Log.w(TAG, "applying the mouse layout setting failed", it) }
-    }
-
     override fun onStartCommand(
         intent: Intent?,
         flags: Int,
@@ -79,8 +69,6 @@ class BootlegService : Service() {
                     // Tethering first, while no disk is exposed yet; its reconcile (and the USB_STATE one after it)
                     // brings back the journal's disks and HID.
                     restoreUsbTethering()
-                    // Then the mouse layout: its apply exports the journal's disks, after which tethering is refused.
-                    restoreMouseLayout()
                     watchUsbState()
                 }
             ACTION_FORGET ->

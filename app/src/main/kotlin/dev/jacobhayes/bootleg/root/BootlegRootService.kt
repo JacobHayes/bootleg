@@ -9,11 +9,15 @@ import dev.jacobhayes.bootleg.BlankImageFormat
 import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
+import dev.jacobhayes.bootleg.core.gadget.RndisState
+import dev.jacobhayes.bootleg.core.gadget.TransitionPhase
 import dev.jacobhayes.bootleg.core.hid.HidDescriptors
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.tether.TetherLimits
 import dev.jacobhayes.bootleg.core.tether.UsbTetherController
 import dev.jacobhayes.bootleg.download.BackgroundJobScheduling
+import java.io.File
+import kotlin.concurrent.thread
 
 /**
  * Root side of the app (libsu RootService, daemon mode: it outlives the app's process).
@@ -58,11 +62,28 @@ class BootlegRootService : RootService() {
     // Lazy: a device without the tethering service still serves disks and HID.
     private val tether by lazy { UsbTetherController(RootTetherPort(this), controller, tetherTransitions, clock, hidNodes) }
 
+    private lateinit var rndisDaemons: RndisDaemons
+
+    // A UDC write stuck behind the RNDIS daemon's ep0 kills the daemon; RNDIS recovery restarts it.
+    private val configFs =
+        RootConfigFs(onUdcStuck = {
+            Log.w(TAG, "a UDC write is stuck; killing the RNDIS daemon")
+            runCatching { rndisDaemons.kill() }.onFailure { Log.w(TAG, "killing the RNDIS daemon failed", it) }
+        })
+
     override fun onCreate() {
         super.onCreate()
+        rndisDaemons =
+            RndisDaemons(
+                apkBinary = File(applicationInfo.nativeLibraryDir, RndisDaemons.APK_BINARY_NAME),
+                // The adapters' MAC addresses derive from it: a computer keeps one adapter and lease for the phone.
+                macSeed = RootCommands.runChecked(listOf("getprop", "ro.serialno")).trim().ifEmpty { "unknown" },
+                clock = clock,
+                onExit = ::onRndisDaemonExit,
+            )
         controller =
             createGadgetController(
-                fs = RootConfigFs(),
+                fs = configFs,
                 props = RootUsbProps(),
                 journalStore = journalStore,
                 deadMan = ShellDeadMan(),
@@ -74,6 +95,9 @@ class BootlegRootService : RootService() {
                 fileSizeBytes = { path ->
                     runCatching { ConfinedFiles.openImage(path, ImagePaths.allowedRoots).use { it.sizeBytes } }.getOrNull()
                 },
+                rndisDaemon = rndisDaemons,
+                // Without it the prefix is refused (and reported), never set up blind.
+                usbFunctions = runCatching { RootUsbFunctions(this) }.onFailure { Log.w(TAG, "no UsbManager functions", it) }.getOrNull(),
             )
         runCatching { images.sweepStaleLoopDevices() }.onFailure { Log.w(TAG, "loop sweep failed", it) }
         // Without a journal, reconcile would tear down whatever Bootleg exported before; adopt it instead.
@@ -86,6 +110,10 @@ class BootlegRootService : RootService() {
                     }
                 }.onFailure { Log.w(TAG, "adopting live gadget state failed", it) }
             }
+        } else if (runCatching { journalStore.load().phase != TransitionPhase.IDLE }.getOrDefault(true)) {
+            // The last root process died mid-transition: its dead-man only brings ADB back, and nothing
+            // else would finish what the journal wants (HID alone keeps no service watching USB).
+            thread(name = "bootleg-resume") { reconcileHere("a root process died mid-transition") }
         }
     }
 
@@ -226,12 +254,39 @@ class BootlegRootService : RootService() {
             }
         }
 
-    /** Runs a controller call that may close the relay; HID opens are allowed again once it has returned. */
+    /**
+     * A daemon that died by itself (not stopped or replaced by a gadget change, which leaves it absent
+     * or alive) leaves the function dead, and nothing else would reconcile: do it now. The controller
+     * restarts it only while no disk has media, at most once per 30s.
+     */
+    private fun onRndisDaemonExit() = reconcileHere("the RNDIS daemon exited") { rndisDaemons.state() == RndisState.DEAD }
+
+    /** A reconcile nobody asked for, under the gadget lock, when [wanted] still holds there. */
+    private fun reconcileHere(
+        cause: String,
+        wanted: () -> Boolean = { true },
+    ) {
+        synchronized(gadgetLock) {
+            if (!wanted()) return
+            runCatching {
+                gadgetChange {
+                    awaitTetherTransition()
+                    controller.reconcile()
+                }
+            }.onSuccess { Log.i(TAG, "$cause; reconcile: ${it::class.simpleName}") }
+                .onFailure { Log.w(TAG, "reconciling after $cause failed", it) }
+        }
+    }
+
+    /**
+     * Runs a controller call that may close the relay; HID opens are allowed again once it has returned,
+     * unless a UDC write is still pending (an fd opened now could cross the unbind it is part of).
+     */
     private fun <T> gadgetChange(block: () -> T): T =
         try {
             block()
         } finally {
-            hidRelay.endGadgetChange()
+            if (!configFs.udcWriteStuck) hidRelay.endGadgetChange()
         }
 
     /**

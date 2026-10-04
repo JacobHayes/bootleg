@@ -207,13 +207,19 @@ class GadgetSimulationTest {
     @Test
     fun `HAL switch while unbound mid-transition forces a fresh enumeration`() {
         val rig = GadgetRig()
-        val controller = rig.controller()
+        assertTrue(rig.controller().apply(Desired(prefix = true)) is ApplyResult.Applied)
+        val switchesBefore = rig.hal.switchCount
+        val armsBefore = rig.deadMan.arms.size
         val desired = Desired(listOf(SlotSpec(0, GadgetRig.iso(1), LunMode.CDROM)), HidSpec(keyboard = true))
         val interfering =
             ScriptedConfigFs(rig.fs) { call ->
-                // Between the executor's pre-op check and its last link, the HAL switches functions and
-                // rebinds: the host enumerates without our last function, yet the gadget then looks as desired.
-                if (call == "symlink configs/b.1/hid.bootleg_kbd" && rig.hal.switchCount == 0) rig.hal.setFunctions("mtp,adb")
+                // Between the executor's pre-op check and its link, the HAL switches functions and
+                // rebinds: the host enumerates without our disks, yet the gadget then looks as desired.
+                if (call == "symlink configs/b.1/mass_storage.bootleg" &&
+                    rig.hal.switchCount == switchesBefore
+                ) {
+                    rig.hal.setFunctions("mtp,adb")
+                }
             }
         val result =
             DefaultGadgetController(
@@ -224,12 +230,15 @@ class GadgetSimulationTest {
                 rig.clock,
                 FakeHidDescriptors,
                 rig.hidNodes,
+                rndisDaemon = rig.rndisDaemon,
+                usbFunctions = rig.usbFunctions,
             ).apply(desired)
         assertTrue(result is ApplyResult.Applied, "$result")
-        assertEquals(1, rig.hal.switchCount)
+        assertEquals(switchesBefore + 1, rig.hal.switchCount)
         // The kernel refused our link into the HAL-bound gadget; the controller unbound, linked and rebound.
-        assertEquals(listOf("${FakeConfigFs.EXECUTOR} configs/b.1/hid.bootleg_kbd"), rig.fs.boundSymlinkRejections)
-        assertEquals(2, rig.deadMan.arms.size, "unbound again after the HAL's bind")
+        assertEquals(listOf("${FakeConfigFs.EXECUTOR} configs/b.1/mass_storage.bootleg"), rig.fs.boundSymlinkRejections)
+        assertEquals(2, rig.deadMan.arms.size - armsBefore, "unbound again after the HAL's bind")
+        assertTrue(LinkOrder.prefixFirst(rig.state().configLinks), "the HAL's switch only appends after the prefix")
         assertTrue((result as ApplyResult.Applied).reenumerated)
         rig.assertConverged("HAL mid-transition")
     }

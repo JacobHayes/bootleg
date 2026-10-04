@@ -87,7 +87,7 @@ class BootlegApp : Application() {
     }
     val drives by lazy { DrivesController(backend, appScope) }
     val hid by lazy {
-        HidController(backend, appScope, mouseLayout = { prefs.mouseLayout.value }).also {
+        HidController(backend, appScope).also {
             registerActivityLifecycleCallbacks(it.backgroundWatcher)
         }
     }

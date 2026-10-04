@@ -231,12 +231,9 @@ preflight() {
     if [[ -n $paths && $paths != *"$KERNEL_DIR/"* ]]; then
         fail "Bootleg is exporting someone's media ($paths); turn it off before running L4"
     fi
-    # Leftovers from an interrupted run: media in a LUN, or mass storage without HID. Empty LUNs while
-    # HID is on are the placeholder that keeps the HID interface numbers (not a disk; hosts may list an
-    # empty drive), so they stay.
-    if [[ -n ${paths// /} ]] ||
-        jq -e '(.functions | index("mass_storage.bootleg")) and ([.configLinks[] | select(startswith("hid.bootleg"))] | length == 0)' \
-            <<<"$state" >/dev/null; then
+    # Leftovers from an interrupted run: media in a LUN, or Bootleg's mass storage function at all
+    # (it only exists while a slot is exposed).
+    if [[ -n ${paths// /} ]] || jq -e '.functions | index("mass_storage.bootleg")' <<<"$state" >/dev/null; then
         expect_applied OFF
     fi
 }

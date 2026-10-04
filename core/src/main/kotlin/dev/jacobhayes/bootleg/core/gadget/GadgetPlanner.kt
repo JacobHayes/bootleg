@@ -1,9 +1,13 @@
 package dev.jacobhayes.bootleg.core.gadget
 
 /**
- * The only ops that run while the UDC is unbound: [Op.Unbind], then [unlinks], [unlinkedOps] and
- * [links], then [bind]. The Pixel USB HAL rebinds the UDC a few hundred ms after any unbind, so this
- * window must stay tiny.
+ * The only ops that run while the UDC is unbound: [Op.Unbind], then [unlinks], [unlinkedOps],
+ * [links] and [afterLinks], then [bind]. The Pixel USB HAL rebinds the UDC a few hundred ms after any
+ * unbind, so this window must stay tiny, unless the config can't bind meanwhile.
+ *
+ * [afterLinks] ([Op.StartRndis], [Op.RelinkForeign], then [Op.ReleaseRndis]) run while a held or dead
+ * RNDIS function is linked: nothing can bind such a config (ENODEV), so the window may take seconds
+ * without the HAL rebinding into it.
  *
  * [unlinkedOps] is empty unless nothing at all is linked after [unlinks]. The kernel refuses to bind a
  * config without functions (EINVAL), so with nothing to keep bound the reconfiguration that normally
@@ -17,8 +21,9 @@ data class Switch(
     val links: List<Op.Symlink>,
     val bind: Op.Bind?,
     val unlinkedOps: List<Op> = emptyList(),
+    val afterLinks: List<Op> = emptyList(),
 ) {
-    val ops: List<Op> get() = listOf(Op.Unbind) + unlinks + unlinkedOps + links + listOfNotNull(bind)
+    val ops: List<Op> get() = listOf(Op.Unbind) + unlinks + unlinkedOps + links + afterLinks + listOfNotNull(bind)
 }
 
 /**
@@ -53,6 +58,9 @@ object HidFunctionSpec {
     const val KEYBOARD_PROTOCOL = 1
     const val KEYBOARD_REPORT_LENGTH_BYTES = 8
     const val MOUSE_PROTOCOL = 2
+
+    /** Buttons, X, Y, then Wheel and AC Pan appended to the boot report (HID 1.11 B.2). */
+    const val MOUSE_REPORT_LENGTH_BYTES = 5
 }
 
 /**
@@ -77,11 +85,112 @@ class GadgetPlanner(
         udc: String = current.udc,
     ): Plan = plan(current, GadgetTarget.of(desired), udc)
 
+    /**
+     * [repairRndis]: a linked RNDIS function whose daemon died is restarted (one re-plug) even when
+     * nothing else needs a switch; the controller turns it off while disks have media. A plan that
+     * switches anyway always repairs first, since a dead function makes every bind fail.
+     */
     fun plan(
         current: GadgetState,
         target: GadgetTarget,
         udc: String = current.udc,
         forceReenumerate: Boolean = false,
+        repairRndis: Boolean = true,
+    ): Plan {
+        val roundTrip = Op.RelinkForeign.takeIf { target.usbRoundTrip }
+        val plan =
+            when {
+                !target.prefix -> ordinaryPlan(current, target, udc, forceReenumerate)
+                !LinkOrder.prefixFirst(current.configLinks) -> Plan(listOf(establishment(current, target, udc)))
+                // A root process died mid-establishment with the links in place: finish it.
+                current.rndis == RndisState.HELD -> switchOnly(udc, listOfNotNull(roundTrip, Op.ReleaseRndis))
+                current.rndis != RndisState.READY -> {
+                    // Dead: restarted (a pending round trip finished first) when allowed, or when anything switches anyway.
+                    val ordinary = ordinaryPlan(current, target, udc, forceReenumerate)
+                    if (repairRndis ||
+                        ordinary.reenumerates
+                    ) {
+                        switchOnly(udc, listOfNotNull(Op.StartRndis, roundTrip, Op.ReleaseRndis))
+                    } else {
+                        ordinary
+                    }
+                }
+                else -> ordinaryPlan(current, target, udc, forceReenumerate)
+            }
+        checkPlan(current, target, plan)
+        return plan
+    }
+
+    /** A switch that only runs [afterLinks] (which keep the config unbindable until the last), then binds. */
+    private fun switchOnly(
+        udc: String,
+        afterLinks: List<Op>,
+    ) = Plan(listOf(Stage(emptyList(), Switch(emptyList(), emptyList(), bind(udc), afterLinks = afterLinks), emptyList())))
+
+    /**
+     * Links the prefix ahead of every foreign link. Configfs only appends, so: unlink ours, link the
+     * prefix with the RNDIS function held (the config can't bind), have the HAL relink its functions
+     * (they land after ours), release the daemon, bind. Only a fresh daemon starts held: a serving or
+     * dead one is replaced by [Op.StartRndis], while bound if its function is unlinked, else right after
+     * the relink (the old one's function is bindable only for the relink itself, like any switch). Mass
+     * storage comes back in the next plan, after the HAL's links.
+     */
+    private fun establishment(
+        state: GadgetState,
+        target: GadgetTarget,
+        udc: String,
+    ): Stage {
+        val rndis = GadgetNames.RNDIS_FUNCTION
+        val prepare = mutableListOf<Op>()
+        val restartLinked = state.rndis != RndisState.HELD && rndis in state.configLinks.values
+        if (rndis !in state.functions) prepare += Op.Mkdir(GadgetPaths.function(rndis))
+        if (state.rndis != RndisState.HELD && !restartLinked) prepare += Op.StartRndis
+        for (function in LinkOrder.PREFIX - rndis) {
+            // An unlinked HID function may be half-written (crash before link): rebuilt.
+            if (function in state.configLinks.values) continue
+            if (function in state.functions) prepare += Op.Rmdir(GadgetPaths.function(function))
+            prepare += Op.Mkdir(GadgetPaths.function(function))
+            planHidAttributes(function, prepare)
+        }
+        val unlinks =
+            state.configLinks.keys
+                .filter(GadgetPaths::isOwnedName)
+                .map { Op.Unlink(GadgetPaths.configLink(it)) }
+        val links = LinkOrder.PREFIX.map { Op.Symlink(GadgetPaths.function(it), GadgetPaths.configLink(it)) }
+        val foreignLinked = state.configLinks.keys.any { !GadgetPaths.isOwnedName(it) }
+        val afterLinks =
+            listOfNotNull(
+                Op.StartRndis.takeIf { restartLinked },
+                Op.RelinkForeign.takeIf { foreignLinked || target.usbRoundTrip },
+                Op.ReleaseRndis,
+            )
+        // Mass storage is linked again by the next plan; anything else of ours that isn't wanted goes.
+        val unwanted = state.functions.filter { GadgetPaths.isOwnedName(it) && it !in target.functions }
+        val cleanup = unwanted.sorted().flatMap { removal(state, it) }
+        return withinWindowIfUnbindable(state, Stage(prepare, Switch(unlinks, links, bind(udc), afterLinks = afterLinks), cleanup))
+    }
+
+    /** Ops that remove an unlinked owned [function]: its LUNs, its daemon, then the function. */
+    private fun removal(
+        state: GadgetState,
+        function: String,
+    ): List<Op> =
+        buildList {
+            if (function == GadgetNames.MASS_STORAGE_FUNCTION) {
+                state.luns.keys
+                    .filter { it > 0 }
+                    .sortedDescending()
+                    .forEach { add(Op.Rmdir(GadgetPaths.lunDir(it))) }
+            }
+            if (function == GadgetNames.RNDIS_FUNCTION) add(Op.StopRndis)
+            add(Op.Rmdir(GadgetPaths.function(function)))
+        }
+
+    private fun ordinaryPlan(
+        current: GadgetState,
+        target: GadgetTarget,
+        udc: String,
+        forceReenumerate: Boolean,
     ): Plan {
         val detach = detachStage(current, target, udc)
         val afterDetach = detach?.let { GadgetSimulation.apply(current, it.ops) } ?: current
@@ -104,9 +213,7 @@ class GadgetPlanner(
             } else {
                 listOfNotNull(detach, withinWindowIfUnbindable(afterDetach, main))
             }
-        val plan = Plan(stages.filter { it.ops.isNotEmpty() })
-        checkPlan(current, plan)
-        return plan
+        return Plan(stages.filter { it.ops.isNotEmpty() })
     }
 
     /**
@@ -216,16 +323,7 @@ class GadgetPlanner(
             }
 
         val linkedAfterSwitch = (state.configLinks - wrongLinks.toSet()).values.toSet()
-        val cleanup = mutableListOf<Op>()
-        for (function in ownedFunctions.filter { it !in wanted && it !in linkedAfterSwitch }.sorted()) {
-            if (function == massStorage) {
-                state.luns.keys
-                    .filter { it > 0 }
-                    .sortedDescending()
-                    .forEach { cleanup += Op.Rmdir(GadgetPaths.lunDir(it)) }
-            }
-            cleanup += Op.Rmdir(GadgetPaths.function(function))
-        }
+        val cleanup = ownedFunctions.filter { it !in wanted && it !in linkedAfterSwitch }.sorted().flatMap { removal(state, it) }
         return Stage(prepare, switch, cleanup)
     }
 
@@ -241,6 +339,7 @@ class GadgetPlanner(
      */
     private fun checkPlan(
         current: GadgetState,
+        target: GadgetTarget,
         plan: Plan,
     ) {
         check(plan.ops.flatMap(GadgetPaths::touchedPaths).all(GadgetPaths::isMutableByBootleg)) { "plan touches a foreign path: $plan" }
@@ -248,6 +347,7 @@ class GadgetPlanner(
 
         fun reconfigure(op: Op) {
             check(op !is Op.Unbind && op !is Op.Bind && op !is Op.Symlink && op !is Op.Unlink) { "relinking outside a switch: $op" }
+            check(op !is Op.RelinkForeign && op !is Op.ReleaseRndis) { "$op outside a switch's unbindable window" }
             val function = GadgetPaths.functionOf(GadgetPaths.touchedPaths(op).single())
             if (function != null && function in state.configLinks.values) {
                 check(op is Op.Write && GadgetPaths.lunOf(op.path) != null && op.path.substringAfterLast('/') in IN_PLACE_LUN_ATTRIBUTES) {
@@ -261,6 +361,14 @@ class GadgetPlanner(
             check(state.configLinks.isNotEmpty()) { "bound-phase op with nothing linked, so the UDC can't be bound: $op" }
             reconfigure(op)
         }
+
+        // A slow step in a window: only while a linked RNDIS function keeps the config unbindable.
+        fun unbindable(op: Op) {
+            check(GadgetNames.RNDIS_FUNCTION in state.configLinks.values) { "$op without the RNDIS function linked" }
+            // A start replaces the daemon, making the function unbindable; everything after it needs that.
+            check(op == Op.StartRndis || state.rndis != RndisState.READY) { "$op while the config could bind" }
+            state = GadgetSimulation.apply(state, op)
+        }
         for (stage in plan.stages) {
             stage.prepare.forEach(::bound)
             stage.switch?.let { switch ->
@@ -269,9 +377,22 @@ class GadgetPlanner(
                 check(switch.unlinkedOps.size <= UNLINKED_OP_COUNT_MAX) { "${switch.unlinkedOps.size} ops inside one window" }
                 switch.unlinkedOps.forEach(::reconfigure)
                 state = GadgetSimulation.apply(state, switch.links)
+                check(
+                    switch.afterLinks.isEmpty() || switch.afterLinks.last() is Op.ReleaseRndis,
+                ) { "a release must end the window: $switch" }
+                switch.afterLinks.forEach(::unbindable)
                 check((switch.bind != null) == state.configLinks.isNotEmpty()) { "a switch binds iff something is linked: $switch" }
                 // Every configuration the host can see keeps each function on its interface number.
                 check(LinkOrder.isCanonical(state.configLinks)) { "links out of order at a bind: ${LinkOrder.owned(state.configLinks)}" }
+                if (switch.bind != null) {
+                    val ours = LinkOrder.owned(state.configLinks)
+                    check(
+                        !target.prefix || ours.isEmpty() || LinkOrder.prefixFirst(state.configLinks),
+                    ) { "the prefix isn't first at a bind: $state" }
+                    check(
+                        GadgetNames.RNDIS_FUNCTION !in ours || state.rndis == RndisState.READY,
+                    ) { "binding with the RNDIS function ${state.rndis}" }
+                }
                 switch.bind?.let { state = GadgetSimulation.apply(state, it) }
             }
             stage.cleanup.forEach(::bound)
@@ -364,13 +485,12 @@ class GadgetPlanner(
         function: String,
         ops: MutableList<Op>,
     ) {
-        val mouseLayout = MouseLayout.ofFunction(function)
         val (protocol, reportLengthBytes, descriptor) =
-            when {
-                function == GadgetNames.HID_KEYBOARD_FUNCTION ->
+            when (function) {
+                GadgetNames.HID_KEYBOARD_FUNCTION ->
                     Triple(HidFunctionSpec.KEYBOARD_PROTOCOL, HidFunctionSpec.KEYBOARD_REPORT_LENGTH_BYTES, hidDescriptors.keyboard())
-                mouseLayout != null ->
-                    Triple(HidFunctionSpec.MOUSE_PROTOCOL, mouseLayout.reportLengthBytes, hidDescriptors.mouse(mouseLayout))
+                GadgetNames.HID_MOUSE_FUNCTION ->
+                    Triple(HidFunctionSpec.MOUSE_PROTOCOL, HidFunctionSpec.MOUSE_REPORT_LENGTH_BYTES, hidDescriptors.mouse())
                 else -> return
             }
         require(descriptor.isNotEmpty()) { "$function: empty HID report descriptor" }
@@ -422,6 +542,7 @@ object GadgetSimulation {
                 when {
                     lun != null -> state.copy(luns = state.luns - lun)
                     function == GadgetNames.MASS_STORAGE_FUNCTION -> state.copy(functions = state.functions - function, luns = emptyMap())
+                    function == GadgetNames.RNDIS_FUNCTION -> state.copy(functions = state.functions - function, rndis = RndisState.ABSENT)
                     function != null -> state.copy(functions = state.functions - function)
                     else -> state
                 }
@@ -436,6 +557,16 @@ object GadgetSimulation {
                 }
             }
             is Op.WriteBytes -> state
+            Op.StartRndis -> state.copy(rndis = RndisState.HELD)
+            Op.ReleaseRndis -> state.copy(rndis = RndisState.READY)
+            Op.StopRndis -> state.copy(rndis = RndisState.ABSENT)
+            // The HAL unlinks its functions and links them again after ours.
+            Op.RelinkForeign ->
+                state.copy(
+                    configLinks =
+                        state.configLinks.filterKeys(GadgetPaths::isOwnedName) +
+                            state.configLinks.filterKeys { !GadgetPaths.isOwnedName(it) },
+                )
             is Op.Symlink ->
                 state.copy(
                     configLinks =

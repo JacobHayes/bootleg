@@ -617,7 +617,7 @@ func scrollCommand(ctx context.Context, call *invocation, c *client) error {
 		return &deviceError{errors.New("the mouse is off; run bootleg hid on")}
 	}
 	if !state.Hid.Wheel {
-		return &deviceError{errors.New("the phone's mouse has no scroll wheel (\"Compatible mouse\" is on in its Settings, or the app is too old)")}
+		return &deviceError{errors.New("the phone doesn't report a scroll wheel (its app is too old)")}
 	}
 	pace := newPacer()
 	for remaining != 0 {

@@ -124,6 +124,11 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
   without a Union descriptor also assumes interfaces 0/1. Windows keeps each composite child's
   driver per interface number (`USB\VID_18D1&PID_4EEC&MI_nn`) across class changes too: RNDIS at
   MI_04 got the old keyboard driver until that device node was uninstalled in Device Manager.
+- `UsbManager.setCurrentFunctions` with *other* functions (`svc usb setFunctions mtp`) makes the
+  HAL unbind, unlink its `functionN` links, link the new ones after any links that stay (ours) and
+  bind once its FunctionFS functions are ready; the same functions again is a no-op. With an
+  unready FunctionFS function of ours linked the HAL still relinks at once, its pull-up fails until
+  our daemon writes its descriptors, and the host sees only the final layout.
 - A TAP interface (`/dev/tun`, `TUNSETIFF` with `IFF_TAP | IFF_NO_PI`) carries Ethernet frames and
   is gone with the last fd. Measured over RNDIS, one frame per USB transfer: 6-7 MiB/s phone to PC.
 
@@ -158,11 +163,12 @@ rndis/     Go: the RNDIS device (control messages, PACKET_MSG framing, FunctionF
 
 ## USB gadget
 
-- **Ownership.** Bootleg owns only names containing `bootleg`: `functions/mass_storage.bootleg`,
-  `functions/hid.bootleg_kbd`, `functions/hid.bootleg_mouse_wheel` or `functions/hid.bootleg_mouse`
-  (see HID), and same-named links in
-  `configs/b.1`. It never writes any other path except `UDC` (unbind/rebind). It does not
-  snapshot or restore foreign state.
+- **Ownership.** Bootleg owns only names containing `bootleg`: `functions/ffs.bootleg_rndis` (and
+  its FunctionFS mount, `/dev/bootleg-rndis`), `functions/hid.bootleg_kbd`,
+  `functions/hid.bootleg_mouse_wheel`, `functions/mass_storage.bootleg`, and same-named links in
+  `configs/b.1`. It never writes any other path except `UDC` (unbind/rebind). It does not snapshot
+  or restore foreign state; the one thing it asks of the HAL is a round trip through another USB
+  mode and back (see Prefix).
 - **Planner** (pure): `plan(current, desired) -> Plan`, a list of stages built from Ops (`Unbind`,
   `Mkdir`, `Write`, `Symlink`, `Unlink`, `Rmdir`, `Bind`). Because the HAL rebinds a few hundred ms
   after any unbind, each stage keeps the unbound window down to relinking:
@@ -176,24 +182,44 @@ rndis/     Go: the RNDIS device (control messages, PACKET_MSG framing, FunctionF
   A linked `mass_storage.bootleg` whose LUN set, `ro`/`cdrom`, `removable` or `nofua` must change
   needs reconfiguring while unlinked, so the plan has two stages: a detach switch (unbind → unlink
   → bind; the host sees the gadget without disks, which also clears the host's prevent-removal),
-  then prepare reconfigures it while bound and unlinked, and a second switch relinks it. The detach
-  also unlinks our links after mass storage (the keyboard and mouse), and the second switch relinks
-  them after it.
+  then prepare reconfigures it while bound and unlinked, and a second switch relinks it. Mass
+  storage is the last link of ours, so nothing else of ours moves with it.
 
-  **Link order** (`LinkOrder`): Bootleg's links are always in one order, mass storage, keyboard,
-  mouse (either layout in the same place), so each function keeps its interface number (see Device
-  facts). The reader keeps the kernel's link order (`ConfigFs.listInLinkOrder`, readdir reversed).
-  Links that stay and already start the wanted order are never touched; the first one that doesn't,
-  and every link of ours after it, is relinked in order in the same switch, so a gadget left out of
-  order (by an older version) is put back in order with one re-enumeration. The planner asserts the
-  order at every bind of the plan, and the post-apply invariants check it. While HID is on with no
-  disk, mass storage stays linked with one empty read-only LUN (the placeholder: no slot, no
-  intent, never exposed media), so adding a disk doesn't shift the keyboard's and mouse's numbers;
-  a first disk that is a read-only disk image goes in place, other modes detach as above. Hosts
-  may show an empty removable drive meanwhile (Windows "USB Drive" with no media; some boot menus
-  list it). Numbers still shift when the HAL links its own functions around ours (tethering's
-  `ncm` link), when only the mouse is on (it takes the keyboard's place), and between HID on and
-  off; Bootleg can't prevent those.
+  **Prefix** (`LinkOrder.PREFIX`): `ffs.bootleg_rndis`, `hid.bootleg_kbd`, `hid.bootleg_mouse_wheel`,
+  linked ahead of every foreign link, so RNDIS is interfaces 0-1 (where Windows starts it, and the
+  IAD's `bFirstInterface` is always 0), the keyboard 2 and the mouse 3. Mass storage follows
+  wherever configfs appends it (after the HAL's links); its and ADB's numbers may shift. The
+  journal's `desired.prefix` is set by Bootleg's first use and cleared only by Bootleg-off; while it
+  is set the prefix stays linked whatever HID and tethering do (HID off relays no input, tethering
+  off reports the cable unplugged). The planner never unlinks a prefix link except in Bootleg-off
+  and establishment, and never relinks one (configfs would append it after the HAL's links). The
+  reader keeps the kernel's link order (`ConfigFs.listInLinkOrder`, readdir reversed); the planner
+  asserts at every bind that ours are in order, the prefix first and its RNDIS function served.
+
+  **Establishment** (prefix wanted but not first). Configfs only appends, so Bootleg links the
+  prefix with the RNDIS function *held* (its daemon has ep0 open but no descriptors, so the config
+  can't bind, the HAL's own binds included), has the HAL relink its functions after ours with a
+  round trip through another USB mode, then releases the daemon and binds: the host sees only the
+  final layout. Refused up front while any LUN has media, while Android's USB tethering is on (the
+  mode change would end it), and while a foreign link that isn't the HAL's `functionN` is linked
+  (it would stay ahead of ours). Steps, under the gadget lock and HID fence:
+  1. Journal `usbFunctionsToRestore` (`getCurrentFunctions`, root, `UsbManager` by reflection).
+  2. Prepare (bound): mkdir and mount the RNDIS function, start its daemon held (a start replaces
+     any daemon); build HID.
+  3. Switch: unbind, unlink ours, link the prefix (a linked function's daemon is replaced only now,
+     so the config is bindable just for the relink, as in any switch); then `setCurrentFunctions(other)` (MTP, or PTP
+     from MTP) and back to the journaled mode, each waiting (≤ 5s, 50ms polls) until the HAL's links
+     have changed and come after ours; then release the daemon and bind. A root process that died
+     after the first mode change finds the mode journaled and the daemon held: it skips the first
+     step and restores the mode before releasing (a dead daemon's restart does too).
+  4. The journal entry is cleared once the prefix is first and served (every plan that releases
+     with a round trip pending restores the mode first).
+
+  A failed step sets the journaled mode back (unverified) and fails; the gadget can't bind with the
+  held function, so the automatic teardown unlinks everything of ours and binds (ADB back),
+  keeping `desired.prefix`. Such a failure isn't retried by itself (each attempt re-plugs USB
+  twice): reconcile reports it until the next apply. With nothing foreign linked step 3 has no
+  round trip. After establishment the prefix stays first through the HAL's own re-plugs.
 
   **Nothing linked.** The kernel can't bind a config without functions, so when nothing at all is
   linked during a switch (USB debugging off, no other functions) the UDC can't be bound for
@@ -203,9 +229,9 @@ rndis/     Go: the RNDIS device (control messages, PACKET_MSG framing, FunctionF
   builds its functions there, and a teardown that leaves nothing linked removes them there and
   stays unbound. The host sees no device meanwhile and the HAL's rebind can't bind an empty config.
 
-  Changes that re-enumerate: LUN count, HID function set, any `cdrom` or `ro` change (two switches
-  each for the mass-storage ones, one when nothing else is linked). Changes done in place, without
-  re-enumerating: swapping media on a LUN whose type stays the same, or ejecting. The planner
+  Changes that re-enumerate: establishment, LUN count, any `cdrom` or `ro` change (two switches
+  each for the mass-storage ones, one when nothing else is linked). HID and RNDIS tethering on or
+  off never touch the gadget. Changes done in place, without re-enumerating: swapping media on a LUN whose type stays the same, or ejecting. The planner
   asserts that no bound-phase op relinks, touches a linked function beyond a media swap, or is
   planned while nothing is linked, and that window ops run only while nothing is linked.
 - **Ejection.** A normal eject writes `file=""`. If the host prevents removal, Bootleg tells the
@@ -338,11 +364,47 @@ rndis/     Go: the RNDIS device (control messages, PACKET_MSG framing, FunctionF
 - **Dead-man UDC rebind.** Before every unbind (including a re-unbind after a HAL rebind), the
   executor starts a detached root shell (`sleep 15; [ -z "$(cat UDC)" ] && echo <udc> > UDC`) that
   runs independently of the executor process. If the executor dies mid-transition, the gadget
-  still comes back (ADB included); in practice the HAL usually rebinds first.
+  still comes back (ADB included); in practice the HAL usually rebinds first. Each arm writes a
+  token to `/data/adb/bootleg/deadman` that the end of the transition replaces; the shell acts only
+  while its token is current (checked again before each write), and each write is bounded
+  (`timeout 3`). If its bind fails (an unserved RNDIS function makes the config unbindable) and no
+  process holds a `/dev/hidg*` fd, it unlinks every link of ours and binds again: ADB comes back and
+  nothing of ours sits on another function's interface number; the next reconcile establishes the
+  prefix again. With a hidg fd open it leaves the gadget unbound.
+- **Bounded UDC writes.** A UDC write can hang in the kernel (see Device facts), so the executor
+  writes `UDC` on a worker thread: after 3s it SIGKILLs the RNDIS daemon (ending its hold on the
+  f_fs mutex), and the write has 5s in total. One still pending then is left behind (nothing
+  interrupts uninterruptible sleep), every configfs access fails at once (`UdcStuckException`)
+  until it returns, and the HID fence stays up.
+- **RNDIS function** (`ffs.bootleg_rndis`, mounted `no_disconnect=1` at `/dev/bootleg-rndis`). The
+  mount and the daemon live in init's mount namespace (`nsenter -t 1 -m`): the root process's own
+  is the app's, which the next root process (after an APK update, say) can't see. The root service runs one `bootleg-rndis` daemon per mount, copied from the APK to the root-owned
+  `/data/adb/bootleg/rndis/bootleg-rndis` (so a root process after an APK update still recognizes
+  it by `/proc/<pid>/cmdline`). It is its own process (`setsid`, stdio on files), holds a lock file
+  for its life, owns ep0 (nonblocking, `ppoll`, one thread; a control data stage the host doesn't
+  finish in 500ms is interrupted), the endpoints and the TAP `bootleg_rndis`. Starting one first
+  stops any daemon on the mount (two ep0 holders can wedge the kernel's unbind). Control is one
+  level-triggered command file (`{release, media}`, written atomically, then SIGUSR1) and one status
+  file the daemon rewrites on every change (pid, released, last USB event, host initialized, media,
+  drained); root waits ≤ 2s for the status to match. The daemon starts held and disconnected.
+  Every USB event (FunctionFS coalesces them), HALT and INITIALIZE end the host's session (its
+  filter and queued responses and notifications); frames pass only in an initialized session with
+  a filter and the media connected. MAC addresses (the host adapter's and the TAP's) are derived
+  from the device serial, locally administered and stable.
+  - The reader reports the daemon with the functions: absent, held, ready, or dead (no daemon; a
+    linked dead function makes every bind fail). Apply and reconcile skip their stable-bound wait
+    while a linked one isn't ready.
+  - **Recovery** of a linked dead function (reconcile) is a switch: start a new daemon held
+    (reopening ep0 unbinds the gadget, links in place), release it, bind. It waits while any LUN
+    has media (the disks keep working; Drives says "eject every disk to restart it"), and runs at
+    most once per 30s, so a daemon that keeps dying is left dead and reported. A daemon's death
+    sends no USB broadcast, so the root process that started it (it is that process's child) waits
+    on it and reconciles when it exits by itself (it is dead, not stopped or replaced).
 - **ADB contract.** USB ADB drops for a few seconds on every re-enumeration. Recovery is bounded
   (dead-man ≤ 15s). Wireless ADB is the debugging path during that window.
-- **Reconcile.** Triggered by `ACTION_USB_STATE`, service start, or a user action, with no
-  periodic polling while idle. It waits (≤ 10s) for the HAL to go quiet: `sys.usb.config`
+- **Reconcile.** Triggered by `ACTION_USB_STATE`, service start, a user action, or (root side)
+  the RNDIS daemon exiting or a root process starting with the journal mid-transition (the last
+  one died in it; the dead-man only brings ADB back), with no periodic polling while idle. It waits (≤ 10s) for the HAL to go quiet: `sys.usb.config`
   unchanged for 1s, and equal to `sys.usb.state` when that is set (the Pixel 6 leaves
   `sys.usb.state` empty; a stable empty config with an empty state also counts as quiet). The UDC
   then gets the stable-bound wait, so the HAL rebinds rather than us; if it won't stay bound,
@@ -538,35 +600,17 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   needed. Keyboard LEDs (output report) are read. The descriptor is HID 1.11 appendix B.1 except
   that the key array spans usages 0x00–0xFF (B.1 stops at 0x65), so report-protocol hosts accept
   F13–F24 (used by the L4 harmless-input test), Intl/Lang and media keys.
-- Mouse: two layouts, both subclass 1 / protocol 2 with no report ID, each in its own function so
-  a layout change is an ordinary function swap:
-  - **Wheel** (default, `hid.bootleg_mouse_wheel`): 5-byte report (buttons, X, Y, Wheel = Generic
-    Desktop 0x38, AC Pan = Consumer 0x0238; all int8 -127..127). HID 1.11 appendix B.2 lets a boot
-    device append data after the 3 boot bytes, and a boot-protocol host (BIOS, boot menus) reads
-    only bytes 0–2. f_hid (6.1, also android14-6.1) answers `SET_PROTOCOL` itself, keeps the value
-    in the kernel (`GET_PROTOCOL` reads it back) and never tells userspace, so Bootleg can't know
-    the mode and doesn't need to: the same report serves both, with no negotiation and no delay.
-    `report_length` 5 also sets the IN endpoint's wMaxPacketSize; a write longer than
-    `report_length` is truncated by the kernel.
-  - **Compatible** (Settings "Compatible mouse (no wheel)", `hid.bootleg_mouse`): the 3-byte boot
-    mouse (buttons, X, Y), for firmware that mishandles a longer boot report.
-
-  Reports are built in the 5-byte wheel layout everywhere; root learns the live layout at
-  `hidOpen` (the linked mouse function, or the only one if none is linked; two candidates and
-  nothing to choose by is refused and retried; its `report_length` must match the layout) and
-  writes the first `report_length` bytes, which is exactly the boot report for the compatible
-  layout. A stale or mismatched layout therefore never writes a malformed report. The keyboard's
-  descriptor and link never change with the setting, but the whole composite device re-enumerates.
-
-  Changing the setting while the mouse is on re-applies HID through `HidController.setSpec`
-  (session closed with release-all, one switch: the new function is built unlinked, the old link
-  replaced by the new one, the old function removed in cleanup; one re-enumeration, same as
-  turning HID on), then reopens the session; no session opens while the change is applied. The
-  swap needs a third f_hid instance for a moment (the kernel has 4 HID minors, shared with other
-  apps' `hid.*` functions); if none is free the prepare fails, the old layout stays and the app
-  says so. While HID is off only the preference changes. The
-  journal records the layout with the HID spec; the restore after reboot applies the setting's
-  layout if the journal's differs. Remote `hid.set` keeps the current layout.
+- Mouse (`hid.bootleg_mouse_wheel`): subclass 1 / protocol 2, no report ID, a 5-byte report
+  (buttons, X, Y, Wheel = Generic Desktop 0x38, AC Pan = Consumer 0x0238; all int8 -127..127). HID
+  1.11 appendix B.2 lets a boot device append data after the 3 boot bytes, and a boot-protocol host
+  (BIOS, boot menus) reads only bytes 0–2. f_hid (6.1, also android14-6.1) answers `SET_PROTOCOL`
+  itself, keeps the value in the kernel (`GET_PROTOCOL` reads it back) and never tells userspace, so
+  Bootleg can't know the mode and doesn't need to: the same report serves both, with no negotiation
+  and no delay. `report_length` 5 also sets the IN endpoint's wMaxPacketSize; a write longer than
+  `report_length` is truncated by the kernel.
+- Both functions are in the prefix (see USB gadget) and stay linked while HID is off: off closes
+  the relay's session after a release-all and refuses input, so the host keeps an idle keyboard and
+  mouse and HID on or off never re-enumerates.
 - Nonblocking writes with a 50ms deadline, a bounded queue (256), and release-all on
   overflow, disconnect, or controller change.
 - `HidSession` (app) owns both relay endpoints and writes from one coroutine. A report the host doesn't take
@@ -618,7 +662,6 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   held key every 200ms, so a host that resets USB while booting still sees it.
 - Debug builds expose only fixed harmless sequences to adb (`HID_SEND`: `f24`, `shift`, `mouse`
   cancelling move, `scroll` one detent up and back); there is no arbitrary typing from adb.
-  `MOUSE_LAYOUT` flips the Settings switch through the same path as the UI.
 
 ## USB tethering
 
@@ -704,8 +747,7 @@ entitlement checks stay on (`exemptFromEntitlementCheck` is never set).
   ignored respectively: the next reboot may then turn tethering back on, or not.
 - **Restore after reboot** (same opt-in as the disks, real reboots only via `BOOT_COUNT`):
   `BootlegService` on `ACTION_RESTORE`, before registering for `USB_STATE`, calls
-  `setUsbTethering(true)` when the choice is on, then applies the Settings mouse layout if the
-  journal's HID differs (that apply exports the journal's disks, so it comes after tethering). Nothing in Bootleg exports disks that early (no
+  `setUsbTethering(true)` when the choice is on. Nothing in Bootleg exports disks that early (no
   reconcile has run, Remote isn't started at boot); only a user acting within those seconds
   could, and then root refuses the toggle and tethering is not restored (logged). The call's own
   reconcile re-exports the journal's slots and HID, so a restore costs two re-plugs (the HAL's for
@@ -889,7 +931,7 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   - `02 uu` key up.
   - `03 dx dy` mouse move (int8).
   - `04 bb` mouse buttons (low 3 bits).
-  - `06 wheel pan` scroll (int8 each); ignored while the mouse uses the compatible layout.
+  - `06 wheel pan` scroll (int8 each).
   - `05` release-all. It's coalesced and exempt from rate limits, for the lease holder only.
   - Limits: 200 frames/s, paste ≤ 64 KiB and ≤ 5 min, boot keys within BootKeyMasher limits.
 - **Connections:** at most 8, with at most 4 pending.
@@ -1090,6 +1132,9 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
 | hidg holder scan | ≤ 4096 processes, ≤ 262144 fds, 2s (incomplete counts as held) |
 | Quarantined hidg fds | ≤ 1 per function (the first blocks HID opens and hid rebinds until reboot) |
 | WebSocket message | ≤ 64 KiB |
+| RNDIS daemon | one per mount; start ≤ 3s, stop ≤ 2s then SIGKILL (≤ 2s), command ≤ 2s; ≤ 16 queued control responses; control data stage 500ms; ≤ 16 KiB per host transfer; recovery ≤ 1 per 30s; stderr ≤ 200 lines |
+| Prefix establishment | each USB mode step ≤ 5s (50ms polls); after a failure, none until the next apply |
+| UDC write | SIGKILL of the RNDIS daemon after 3s, 5s in total; then every configfs access fails until it returns |
 | Tethering | start answer 2s (2 attempts, transient errors only), interface 5s, HAL switch 5s, marker 10s; whole call ≈ 60s worst case, remote `tether.set` deadline 75s |
 
 ## Verification notes
@@ -1116,8 +1161,7 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   the pointer is warped back at the end or on SIGTERM), sends one detent up and one down, and
   asserts exactly those wheel values arrived. The scroll is sent only once parked and capturing: a
   parking or capture error fails the check, and without Input Monitoring the scroll is skipped.
-  It then flips "Compatible mouse" with HID on (one re-enumeration) and expects a 3-byte mouse
-  without Wheel, and flips it back. Without Input Monitoring for the terminal the helper prints SKIP (it only calls
+  HID off must leave both devices enumerated (idle) without a re-enumeration. Without Input Monitoring for the terminal the helper prints SKIP (it only calls
   `IOHIDCheckAccess`, never anything that prompts) and the check falls back to enumeration plus
   written-report counts. A device another app has seized (Karabiner-Elements seizes keyboards)
   can't be opened; that device's capture is skipped the same way. An EXIT/INT/TERM trap turns HID

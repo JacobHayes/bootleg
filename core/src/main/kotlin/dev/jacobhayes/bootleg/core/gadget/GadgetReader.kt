@@ -10,6 +10,7 @@ import java.io.IOException
 class GadgetReader(
     private val fs: ConfigFs,
     private val props: UsbProps? = null,
+    private val rndisDaemon: RndisDaemon? = null,
 ) {
     fun read(): GadgetState {
         val udc = readUdc()
@@ -32,6 +33,8 @@ class GadgetReader(
             luns = luns,
             usbState = props?.usbState().orEmpty(),
             usbConfig = props?.usbConfig().orEmpty(),
+            // A function nobody here can serve is dead.
+            rndis = if (GadgetNames.RNDIS_FUNCTION in functions) rndisDaemon?.state() ?: RndisState.DEAD else RndisState.ABSENT,
         )
     }
 

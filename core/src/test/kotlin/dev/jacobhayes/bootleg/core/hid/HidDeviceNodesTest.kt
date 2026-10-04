@@ -63,32 +63,26 @@ class HidDeviceNodesTest {
     @Test
     fun `kinds map to our functions and release everything`() {
         assertEquals(listOf(GadgetNames.HID_KEYBOARD_FUNCTION), HidKind.fromWireName("keyboard")?.functionNames)
-        assertEquals(
-            setOf(GadgetNames.HID_WHEEL_MOUSE_FUNCTION, GadgetNames.HID_MOUSE_FUNCTION),
-            HidKind.fromWireName("mouse")?.functionNames?.toSet(),
-        )
+        assertEquals(listOf(GadgetNames.HID_MOUSE_FUNCTION), HidKind.fromWireName("mouse")?.functionNames)
         assertEquals(null, HidKind.fromWireName("hid.usb0"))
         assertArrayEquals(ByteArray(8), HidKind.KEYBOARD.releaseAllReport)
         assertArrayEquals(ByteArray(5), HidKind.MOUSE.releaseAllReport)
         assertEquals(8, HidKind.KEYBOARD.reportLengthBytesOf(GadgetNames.HID_KEYBOARD_FUNCTION))
-        assertEquals(5, HidKind.MOUSE.reportLengthBytesOf(GadgetNames.HID_WHEEL_MOUSE_FUNCTION))
-        assertEquals(3, HidKind.MOUSE.reportLengthBytesOf(GadgetNames.HID_MOUSE_FUNCTION))
+        assertEquals(5, HidKind.MOUSE.reportLengthBytesOf(GadgetNames.HID_MOUSE_FUNCTION))
         assertThrows<IllegalArgumentException> { HidKind.MOUSE.reportLengthBytesOf(GadgetNames.HID_KEYBOARD_FUNCTION) }
         assertThrows<IllegalArgumentException> { HidKind.KEYBOARD.reportLengthBytesOf("hid.usb0") }
     }
 
     @Test
-    fun `the linked mouse function wins, and an ambiguous or missing one is refused`() {
-        val wheel = GadgetNames.HID_WHEEL_MOUSE_FUNCTION
-        val boot = GadgetNames.HID_MOUSE_FUNCTION
+    fun `each kind opens its own function, linked or not, and refuses when it is missing`() {
+        val mouse = GadgetNames.HID_MOUSE_FUNCTION
         val keyboard = GadgetNames.HID_KEYBOARD_FUNCTION
-        // Mid-swap: the new function is prepared while the old one is still linked, then the reverse.
-        assertEquals(boot, HidKind.MOUSE.resolveFunction(setOf(wheel, boot, keyboard), linked = setOf(boot, keyboard, "ffs.adb")))
-        assertEquals(wheel, HidKind.MOUSE.resolveFunction(setOf(wheel, boot), linked = setOf(wheel)))
-        assertEquals(wheel, HidKind.MOUSE.resolveFunction(setOf(wheel, "hid.usb0"), linked = emptySet()))
-        assertEquals(keyboard, HidKind.KEYBOARD.resolveFunction(setOf(keyboard, wheel), linked = setOf(wheel)))
-        assertThrows<IllegalStateException> { HidKind.MOUSE.resolveFunction(setOf(wheel, boot), linked = emptySet()) }
-        assertThrows<IllegalStateException> { HidKind.MOUSE.resolveFunction(setOf(wheel, boot), linked = setOf(wheel, boot)) }
+        assertEquals(
+            mouse,
+            HidKind.MOUSE.resolveFunction(setOf(mouse, keyboard, "hid.bootleg_mouse"), linked = setOf(mouse, keyboard, "ffs.adb")),
+        )
+        assertEquals(mouse, HidKind.MOUSE.resolveFunction(setOf(mouse, "hid.usb0"), linked = emptySet()))
+        assertEquals(keyboard, HidKind.KEYBOARD.resolveFunction(setOf(keyboard, mouse), linked = setOf(mouse)))
         assertThrows<IllegalStateException> { HidKind.MOUSE.resolveFunction(setOf(keyboard, "hid.mouse"), linked = setOf("hid.mouse")) }
     }
 }

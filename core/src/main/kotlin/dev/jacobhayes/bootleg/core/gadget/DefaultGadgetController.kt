@@ -19,11 +19,25 @@ class DefaultGadgetController(
     private val newLunInstanceNonce: () -> String = LunMarker::newNonce,
     /** Size of the file at a kernel path (root: fstat of the confined open), or null if it can't be read. */
     private val fileSizeBytes: (path: String) -> Long? = { null },
+    /** The RNDIS function's daemon; without it the prefix can't be established. */
+    private val rndisDaemon: RndisDaemon? = null,
+    /** Android's USB functions, which the HAL relinks after ours when the prefix is established. */
+    private val usbFunctions: UsbFunctions? = null,
 ) : GadgetController {
-    private val reader = GadgetReader(fs)
+    private val reader = GadgetReader(fs, rndisDaemon = rndisDaemon)
+    private var lastRndisRepairMs: Long? = null
     private val planner = GadgetPlanner(hidDescriptors)
     private var lastReconcileMs: Long? = null
     private var reconcileAttemptCount = 0
+
+    /**
+     * Why the last prefix establishment failed. Each attempt may re-plug USB (twice, through the HAL),
+     * so it is not retried by itself: reconcile reports it until the next [apply] or [bootlegOff].
+     */
+    private var establishmentFailure: String? = null
+
+    /** The plan being executed got as far as asking the HAL for its USB mode round trip. */
+    private var roundTripAttempted = false
 
     /**
      * When this controller last bound the UDC, until a stable-bound wait confirms the HAL's post-bind
@@ -35,14 +49,19 @@ class DefaultGadgetController(
         GadgetInvariants.requireAllowedRoots(allowedRoots)
     }
 
-    override fun read(): GadgetState = GadgetReader(fs, props).read()
+    override fun read(): GadgetState = GadgetReader(fs, props, rndisDaemon).read()
 
-    /** Applies [desired]. Slots that were host- or user-ejected and are unchanged stay ejected; use [reinsert]. */
+    /**
+     * Applies [desired]. Slots that were host- or user-ejected and are unchanged stay ejected; use
+     * [reinsert]. Once Bootleg has been used the prefix stays wanted whatever [desired] says (only
+     * [bootlegOff] forgets it), so turning everything off leaves the prefix idle, not removed.
+     */
     override fun apply(desired: Desired): ApplyResult {
         GadgetInvariants.requireValid(desired, allowedRoots)
         reconcileAttemptCount = 0
+        establishmentFailure = null
         val quiet = awaitHalQuiet() ?: return halBusy()
-        settleBound(knownUdc(), quiet.boundSinceMs)?.let { return it.result() }
+        if (!rndisBlocksBind()) settleBound(knownUdc(), quiet.boundSinceMs)?.let { return it.result() }
         val state = reader.read()
         val previous = absorbHostEjects(journalStore.load(), state)
         val intents =
@@ -51,7 +70,18 @@ class DefaultGadgetController(
                 val keepEjected = previousIntent in EJECTED_INTENTS && previous.desired.slots.getOrNull(slot.lun) == slot
                 slot.lun to if (keepEjected) previousIntent else SlotIntent.EXPORTED
             }
-        val journal = Journal(desired, intents, emptyMap(), previous.phase, state.udc.ifEmpty { previous.udc }, previous.lunInstanceNonce)
+        val kept = if (previous.desired.wantsPrefix) desired.copy(prefix = true) else desired
+        val udc = state.udc.ifEmpty { previous.udc }
+        val journal =
+            Journal(
+                kept,
+                intents,
+                emptyMap(),
+                previous.phase,
+                udc,
+                previous.lunInstanceNonce,
+                usbFunctionsToRestore = previous.usbFunctionsToRestore,
+            )
         return converge(journal, state, foreignBefore = state, allowEmergencyOff = true)
     }
 
@@ -148,7 +178,8 @@ class DefaultGadgetController(
         val quiet = awaitHalQuiet() ?: return halBusy()
         // An unbound UDC is usually the HAL mid-cycle: settling lets it rebind rather than binding against
         // it, and binds only if it doesn't. A UDC that won't stay bound is reported, not reconciled against.
-        settleBound(knownUdc(), quiet.boundSinceMs)?.let { return it.result() }
+        // A held or dead RNDIS function keeps the config unbindable: the plan below has to fix it first.
+        if (!rndisBlocksBind()) settleBound(knownUdc(), quiet.boundSinceMs)?.let { return it.result() }
         val state = reader.read()
         val loaded = journalStore.load()
         var journal = absorbHostEjects(loaded, state).let { it.copy(udc = state.udc.ifEmpty { it.udc }) }
@@ -158,9 +189,11 @@ class DefaultGadgetController(
         val clean =
             journal.phase == TransitionPhase.IDLE &&
                 (state.udc.isNotEmpty() || state.configLinks.isEmpty()) &&
-                planner.plan(state, GadgetTarget.of(journal), journal.udc).ops.isEmpty()
+                planner.plan(state, GadgetTarget.of(journal), journal.udc, repairRndis = rndisRepairAllowed(state)).ops.isEmpty()
         if (clean) {
             reconcileAttemptCount = 0
+            // A dead RNDIS daemon waits while disks have media (restarting it unbinds the gadget).
+            if (rndisBlocksBind(state)) return ApplyResult.NeedsAttention(RNDIS_STOPPED_REASON)
             return result(state, journal, reenumerated = false)
         }
         if (reconcileAttemptCount >= GadgetLimits.RECONCILE_ATTEMPT_COUNT_MAX) {
@@ -182,11 +215,40 @@ class DefaultGadgetController(
         return if (journal != loaded) save(journal) else loaded
     }
 
+    /**
+     * Sets up the prefix, if the journal wants it and it isn't in place, without exporting any disk:
+     * Android's USB tethering is about to start, and its re-plug may not happen with disks exposed,
+     * while the prefix can't be set up once tethering is on. The journal's slots stay as they are; the
+     * reconcile after tethering exports them. Null when there is nothing to do.
+     */
+    override fun establishPrefix(): ApplyResult? {
+        val journal = journalStore.load()
+        if (!journal.desired.wantsPrefix) return null
+        val current = reader.read()
+        if (LinkOrder.prefixFirst(current.configLinks) && current.rndis == RndisState.READY && current.udc.isNotEmpty()) return null
+        if (current.luns.values.any { it.file.isNotEmpty() }) return null
+        val quiet = awaitHalQuiet() ?: return halBusy()
+        if (!rndisBlocksBind()) settleBound(knownUdc(), quiet.boundSinceMs)?.let { return it.result() }
+        val state = reader.read()
+        val udcJournal = journal.copy(udc = state.udc.ifEmpty { journal.udc })
+        return converge(udcJournal, state, foreignBefore = state, allowEmergencyOff = true, withoutDisks = true)
+    }
+
     override fun bootlegOff(): ApplyResult {
         reconcileAttemptCount = 0
+        establishmentFailure = null
         val state = reader.read()
         val loaded = journalStore.load()
-        val journal = Journal(udc = state.udc.ifEmpty { loaded.udc }, lunInstanceNonce = loaded.lunInstanceNonce)
+        // An unfinished establishment round trip: give Android its USB mode back (the HAL appends its
+        // links), and keep the record if that fails.
+        val original = loaded.usbFunctionsToRestore
+        val restoreFailed = original != null && runCatching { checkNotNull(usbFunctions).set(original) }.isFailure
+        val journal =
+            Journal(
+                udc = state.udc.ifEmpty { loaded.udc },
+                lunInstanceNonce = loaded.lunInstanceNonce,
+                usbFunctionsToRestore = original.takeIf { restoreFailed },
+            )
         return converge(journal, state, foreignBefore = state, allowEmergencyOff = false)
     }
 
@@ -200,7 +262,10 @@ class DefaultGadgetController(
         foreignBefore: GadgetState,
         allowEmergencyOff: Boolean,
         reenumerate: Boolean = false,
+        withoutDisks: Boolean = false,
     ): ApplyResult {
+        // Without disks: the journal's slots are kept for the next converge, just not exported by this one.
+        val target = { j: Journal -> GadgetTarget.of(j).let { if (withoutDisks) it.copy(luns = emptyList()) else it } }
         if (initialJournal.udc.isEmpty()) return ApplyResult.NeedsAttention("UDC is unbound and no UDC name is recorded")
         // Journals from before the LUN marker get a nonce here, so the LUNs this converge configures carry it.
         var journal = initialJournal
@@ -214,19 +279,34 @@ class DefaultGadgetController(
         var forceReenumerate = reenumerate
         var reenumerated = false
         var lastProblem: String? = null
+        // After a round trip Android's links are whatever its mode has; they are what must survive from then on.
+        var foreignReference = foreignBefore
         // Each pass either converges, consumes a replan, or fails a slot for the first time.
         val passCountMax = 1 + GadgetLimits.REPLAN_COUNT_MAX + GadgetLimits.LUN_COUNT_MAX
         for (pass in 0 until passCountMax) {
             // Before every plan, so a file that grew while being exported is caught on the next pass (and ejected).
             journal = failOversizedCdroms(journal)
-            val plan = planner.plan(state, GadgetTarget.of(journal), journal.udc, forceReenumerate)
+            val plan = planner.plan(state, target(journal), journal.udc, forceReenumerate, rndisRepairAllowed(state))
             if (plan.ops.isEmpty()) {
                 lastProblem = null
                 break
             }
+            prefixRefusal(plan, state)?.let { reason ->
+                lastProblem = reason
+                break
+            }
+            val establishes = plan.ops.any { it is Op.RelinkForeign }
+            if (establishes && establishmentFailure != null) {
+                lastProblem = "$PREFIX_FAILED_REASON: $establishmentFailure"
+                break
+            }
+            if (Op.StartRndis in plan.ops && GadgetNames.RNDIS_FUNCTION in state.configLinks.values) lastRndisRepairMs = clock.nowMs()
             if (pass > 0 && lastProblem != SLOT_FAILED) replanCount++
             if (replanCount > GadgetLimits.REPLAN_COUNT_MAX) break
-            journal = save(journal.copy(phase = TransitionPhase.MUTATING))
+            // The mode to come back to is journaled before the round trip leaves it (never inside a window).
+            val original = journal.usbFunctionsToRestore ?: if (establishes) usbFunctions?.current() else null
+            journal = save(journal.copy(phase = TransitionPhase.MUTATING, usbFunctionsToRestore = original))
+            roundTripAttempted = false
             val outcome = execute(plan, state, journal)
             when (outcome) {
                 is Outcome.Completed -> {
@@ -258,6 +338,7 @@ class DefaultGadgetController(
                     lastProblem = outcome.reason
                 }
             }
+            if (roundTripAttempted && outcome !is Outcome.Completed) establishmentFailure = lastProblem
             // Replanning won't make a holder let go of a hidg node; the refused op changed nothing, so report it now.
             if (outcome is Outcome.Refused) break
             // Wait out the HAL's post-bind drop before reading back; if it won't settle, finish reports it.
@@ -269,11 +350,12 @@ class DefaultGadgetController(
                 }
             }
             state = reader.read()
+            if (roundTripAttempted && outcome is Outcome.Completed) foreignReference = state
             // Someone (HAL, dead-man) bound the UDC mid-transition: the host may have enumerated a
             // half-built gadget, so the next plan re-enumerates even if the topology now looks right.
             if (outcome !is Outcome.Completed && outcome.expectedUdc.isEmpty() && state.udc.isNotEmpty()) forceReenumerate = true
         }
-        return finish(journal, lastProblem, reenumerated, foreignBefore, allowEmergencyOff)
+        return finish(journal, lastProblem, reenumerated, foreignReference, allowEmergencyOff, target).also { deadMan.disarm() }
     }
 
     private fun finish(
@@ -282,6 +364,7 @@ class DefaultGadgetController(
         reenumerated: Boolean,
         foreignBefore: GadgetState,
         allowEmergencyOff: Boolean,
+        target: (Journal) -> GadgetTarget,
     ): ApplyResult {
         var journal = initialJournal
         var state = reader.read()
@@ -298,7 +381,13 @@ class DefaultGadgetController(
             }
             state = reader.read()
         }
-        val violations = GadgetInvariants.violations(state, GadgetTarget.of(journal), allowedRoots)
+        // A served prefix in place means the round trip (verified before the release) is over.
+        if (LinkOrder.prefixFirst(state.configLinks) &&
+            state.rndis == RndisState.READY
+        ) {
+            journal = journal.copy(usbFunctionsToRestore = null)
+        }
+        val violations = GadgetInvariants.violations(state, target(journal), allowedRoots)
         // A non-IDLE phase tells reconcile that empty LUNs are ours, not host ejects. Lost foreign links
         // are not ours to fix, so they leave the phase IDLE but still fail the operation.
         journal = save(journal.copy(phase = if (violations.isEmpty()) TransitionPhase.IDLE else TransitionPhase.MUTATING))
@@ -307,7 +396,7 @@ class DefaultGadgetController(
         }
         val foreignViolations = GadgetInvariants.foreignViolations(state, foreignBefore)
         if (foreignViolations.isNotEmpty()) return ApplyResult.NeedsAttention(foreignViolations.joinToString("; "))
-        return result(state, journal, reenumerated)
+        return result(state, journal, reenumerated, target(journal))
     }
 
     private fun emergencyOff(
@@ -322,6 +411,12 @@ class DefaultGadgetController(
                 foreignBefore,
                 allowEmergencyOff = false,
             )
+        // Only the user's Bootleg-off forgets the prefix: the next reconcile sets it up again (no disks).
+        if (journal.desired.wantsPrefix) {
+            save(
+                journalStore.load().copy(desired = Desired(prefix = true), usbFunctionsToRestore = journal.usbFunctionsToRestore),
+            )
+        }
         return ApplyResult.Failed(if (off is ApplyResult.Applied) "$reason; Bootleg-off performed" else "$reason; Bootleg-off failed: $off")
     }
 
@@ -589,6 +684,15 @@ class DefaultGadgetController(
                 }
             }
             switch.links.forEach { op -> relink(op)?.let { return it } }
+            // With a held or dead RNDIS function linked nothing can bind, so these may take seconds.
+            for (op in switch.afterLinks) {
+                try {
+                    if (op == Op.RelinkForeign) relinkForeign(checkNotNull(journal.usbFunctionsToRestore)) else run(op)
+                    expected = GadgetSimulation.apply(expected, op)
+                } catch (e: IOException) {
+                    return Outcome.OpFailed(journal, "", "$op failed: ${e.message}")
+                }
+            }
             val bind = switch.bind ?: return slotFailure
             // Already bound means the HAL bound after our last relink, so the host saw the finished gadget.
             if (reader.readUdc().isEmpty()) {
@@ -638,7 +742,113 @@ class DefaultGadgetController(
             is Op.WriteBytes -> fs.writeBytes(op.path, op.bytes)
             is Op.Symlink -> fs.symlink(op.target, op.link)
             is Op.Unlink -> fs.unlink(op.link)
+            Op.StartRndis -> requireRndisDaemon().start()
+            Op.ReleaseRndis -> requireRndisDaemon().release()
+            Op.StopRndis -> requireRndisDaemon().stop()
+            Op.RelinkForeign -> error("the round trip runs in its switch")
         }
+    }
+
+    private fun requireRndisDaemon(): RndisDaemon = rndisDaemon ?: throw IOException("no RNDIS daemon support")
+
+    /** A held or dead RNDIS function is linked: no bind can succeed until a plan releases or restarts it. */
+    private fun rndisBlocksBind(state: GadgetState = reader.read()): Boolean =
+        GadgetNames.RNDIS_FUNCTION in state.configLinks.values && state.rndis != RndisState.READY
+
+    /**
+     * Restarting a dead RNDIS daemon unbinds the gadget, so it waits while any LUN has media (with the
+     * gadget still bound the disks keep working), and runs at most once per [RNDIS_REPAIR_INTERVAL_MS_MIN].
+     */
+    private fun rndisRepairAllowed(state: GadgetState): Boolean {
+        if (state.luns.values.any { it.file.isNotEmpty() }) return false
+        val lastMs = lastRndisRepairMs ?: return true
+        return clock.nowMs() - lastMs >= RNDIS_REPAIR_INTERVAL_MS_MIN
+    }
+
+    /**
+     * Why [plan] may not run now: establishing the prefix re-plugs USB through the HAL, so it waits for
+     * every disk to be ejected and for Android's own USB tethering to be off (changing the USB mode
+     * would end it). Null when it may run.
+     */
+    private fun prefixRefusal(
+        plan: Plan,
+        state: GadgetState,
+    ): String? {
+        if (Op.RelinkForeign !in plan.ops) return null
+        val exposed =
+            state.luns
+                .filterValues { it.file.isNotEmpty() }
+                .keys
+                .sorted()
+        if (exposed.isNotEmpty()) return "$PREFIX_DISKS_EXPOSED_REASON (LUNs ${exposed.joinToString()})"
+        // The HAL relinks only its own functionN links; another app's link would stay ahead for good,
+        // so trying would only re-plug USB again and again.
+        val stuck =
+            GadgetInvariants
+                .foreignLinks(state)
+                .keys
+                .filterNot { HAL_LINK.matches(it) }
+                .sorted()
+        if (stuck.isNotEmpty()) return "$PREFIX_FOREIGN_AHEAD_REASON: ${stuck.joinToString()}"
+        val functions = usbFunctions ?: return "no access to Android's USB functions"
+        if (functions.current() and UsbFunctions.TETHERING != 0L) return PREFIX_TETHERING_REASON
+        return null
+    }
+
+    /**
+     * Has the HAL relink its functions after ours: a round trip through another USB mode (MTP, or PTP
+     * from MTP) and back to [original], each step waiting until the HAL's links have changed and come
+     * after ours. A root process that died in between left [original] journaled; if the mode has
+     * already changed, the first step is skipped. A failed step gives Android its mode back
+     * (unverified) and throws.
+     */
+    private fun relinkForeign(original: Long) {
+        val functions = usbFunctions ?: throw IOException("no access to Android's USB functions")
+        roundTripAttempted = true
+        try {
+            if (functions.current() ==
+                original
+            ) {
+                setAndAwaitRelink(functions, if (original == UsbFunctions.MTP) UsbFunctions.PTP else UsbFunctions.MTP)
+            }
+            setAndAwaitRelink(functions, original)
+        } catch (e: IOException) {
+            runCatching { functions.set(original) }
+            throw e
+        }
+    }
+
+    /**
+     * Sets [mode] and polls until the HAL's links differ from before and all come after ours, or Android
+     * reports another mode (someone else changed it, and their links count). Already in [mode] with
+     * the links after ours (setting it again would change nothing) counts as done.
+     */
+    private fun setAndAwaitRelink(
+        functions: UsbFunctions,
+        mode: Long,
+    ) {
+        val before = foreignAfterOurs()
+        if (functions.current() == mode && before != null) return
+        functions.set(mode)
+        val deadlineMs = clock.nowMs() + RELINK_WAIT_MS_MAX
+        repeat(RELINK_POLL_COUNT_MAX) {
+            val foreign = foreignAfterOurs()
+            if (foreign != null && (foreign != before || functions.current() != mode)) return
+            if (clock.nowMs() >= deadlineMs) throw IOException("Android didn't apply USB functions $mode within ${RELINK_WAIT_MS_MAX}ms")
+            clock.sleepMs(RELINK_POLL_INTERVAL_MS)
+        }
+        throw IOException("Android didn't apply USB functions $mode within ${RELINK_WAIT_MS_MAX}ms")
+    }
+
+    /** The foreign links' targets when there are some and all come after ours, else null. */
+    private fun foreignAfterOurs(): Set<String>? {
+        val links = reader.read().configLinks
+        val afterOurs = links.keys.indexOfFirst { !GadgetPaths.isOwnedName(it) } > links.keys.indexOfLast(GadgetPaths::isOwnedName)
+        return links
+            .filterKeys { !GadgetPaths.isOwnedName(it) }
+            .values
+            .toSet()
+            .takeIf { afterOurs && it.isNotEmpty() }
     }
 
     /** Right before removing [function]: nobody may hold its node, not even someone who opened it after quiesceHid. */
@@ -719,8 +929,9 @@ class DefaultGadgetController(
         state: GadgetState,
         journal: Journal,
         reenumerated: Boolean,
+        target: GadgetTarget = GadgetTarget.of(journal),
     ): ApplyResult {
-        val violations = GadgetInvariants.violations(state, GadgetTarget.of(journal), allowedRoots)
+        val violations = GadgetInvariants.violations(state, target, allowedRoots)
         return when {
             violations.isNotEmpty() -> ApplyResult.NeedsAttention(violations.joinToString("; "))
             journal.slotFailures.isNotEmpty() -> ApplyResult.Partial(state, journal.slotFailures)
@@ -844,6 +1055,23 @@ class DefaultGadgetController(
         const val SETTLE_POLL_INTERVAL_MS = 50L
         const val EJECT_PREVENTED_REASON = "host prevents removal; force eject?"
         const val HID_NODE_HELD_REASON = "a keyboard/mouse device node is held open, so the USB gadget was left as it was"
+        const val PREFIX_DISKS_EXPOSED_REASON = "Eject every disk first: setting up Bootleg's USB functions re-plugs USB"
+        const val PREFIX_FOREIGN_AHEAD_REASON = "Another app's USB function is linked where Bootleg's must go first"
+        const val RNDIS_STOPPED_REASON = "The USB network adapter stopped; eject every disk to restart it"
+
+        /** The HAL's link names; any other foreign link belongs to another app. */
+        private val HAL_LINK = Regex("function[0-9]+")
+        const val PREFIX_FAILED_REASON = "Setting up Bootleg's USB functions failed; change something to try again"
+        const val PREFIX_TETHERING_REASON =
+            "Turn off Android's USB tethering first: setting up Bootleg's USB functions changes the USB mode"
+
+        /** How long the HAL gets to relink its functions after each USB mode change. */
+        const val RELINK_WAIT_MS_MAX = 5_000L
+        const val RELINK_POLL_INTERVAL_MS = 50L
+        const val RELINK_POLL_COUNT_MAX = (RELINK_WAIT_MS_MAX / RELINK_POLL_INTERVAL_MS).toInt() + 1
+
+        /** A dead RNDIS daemon is restarted at most this often; one that keeps dying is left and reported. */
+        const val RNDIS_REPAIR_INTERVAL_MS_MIN = 30_000L
         private const val SLOT_FAILED = "slot failed"
         private val EJECTED_INTENTS = setOf(SlotIntent.HOST_EJECTED, SlotIntent.USER_EJECTED)
     }

@@ -1,9 +1,9 @@
 #!/bin/sh
 # L4 HID check (< 45s): enable Bootleg's keyboard + mouse, confirm the Mac enumerates them, send
 # only harmless input (F24 tap, Shift tap, a mouse move that cancels out, and one scroll detent up
-# and back with the Mac's pointer parked on the menu bar), check the mouse layout the Mac parsed
-# (the wheel mouse, then "Compatible mouse" after turning HID off and on again), then turn HID off
-# and confirm our functions are gone while ADB and foreign links are untouched.
+# and back with the Mac's pointer parked on the menu bar), check the Mac parsed the wheel mouse,
+# then turn HID off and confirm the keyboard and mouse stay attached and idle at the front of the
+# configuration (Bootleg's fixed prefix) while ADB and foreign links are untouched.
 #
 # Needs the debug app installed (`mise run deploy`) and the Mac as the USB host. Uses wireless adb
 # because enabling HID re-enumerates USB. Takes the device lock unless BOOTLEG_DEVICE_LOCK_HELD=1
@@ -53,7 +53,6 @@ step() { echo "check-device-hid: $*"; }
 hid_enabled=0
 lock_taken=0
 capture_pid=
-compatible_before=
 
 # Runs once on any exit: HID off if we turned it on, stop the capture, release the lock.
 cleanup() {
@@ -70,7 +69,7 @@ cleanup() {
             [ "$status" != 0 ] || status=1
         fi
     fi
-    # Debug calls are synchronous and the app serializes gadget changes (HID apply, layout swap), so
+    # Debug calls are synchronous and the app serializes gadget changes, so
     # this HID_OFF runs only after any change an interrupted call left running on the phone.
     if [ "$hid_enabled" = 1 ]; then
         echo "check-device-hid: cleanup: turning HID off" >&2
@@ -78,11 +77,6 @@ cleanup() {
         *ApplyResult.Applied*) hid_enabled=0 ;;
         *) echo "check-device-hid: WARN: cleanup HID_OFF failed; turn keyboard + mouse off in the app" >&2 ;;
         esac
-    fi
-    # Put the user's "Compatible mouse" setting back, only with HID off so it just stores the setting
-    # (with HID on it would swap the mouse function).
-    if [ -n "$compatible_before" ] && [ "$hid_enabled" = 0 ]; then
-        call MOUSE_LAYOUT --extra "compatible:b:$compatible_before" >/dev/null 2>&1 || true
     fi
     rm -f "$CAPTURE_OUTPUT"
     if [ "$lock_taken" = 1 ]; then rmdir "$LOCK"; fi
@@ -110,6 +104,13 @@ call() {
     $ADB shell content call --uri content://dev.jacobhayes.bootleg.debug --method "$method" "$@" |
         tr -d '\r' | sed -n 's/^Result: Bundle\[{json=\(.*\)}\]$/\1/p'
 }
+
+# The first three links of configs/b.1 in link order (STATE lists them in that order), comma-separated.
+leading_links() {
+    printf '%s\n' "$1" | grep -o '"configLinks":{[^}]*}' | grep -o '"[^"]*":"[^"]*"' |
+        sed 's/^"\([^"]*\)":.*$/\1/' | head -3 | paste -sd, -
+}
+PREFIX_LINKS=ffs.bootleg_rndis,hid.bootleg_kbd,hid.bootleg_mouse_wheel
 
 # Links in configs/b.1 that aren't ours, as sorted "target" lines (the HAL renumbers functionN).
 foreign_links() {
@@ -232,13 +233,6 @@ expect_host_mouse() {
     done
 }
 
-# Flips the Settings switch through the debug provider while HID is off, so it only stores the
-# setting (the functions are never rebuilt while HID is on here).
-set_compatible_mouse() {
-    flipped=$(call MOUSE_LAYOUT --extra "compatible:b:$1")
-    case "$flipped" in *unchanged*) ;; *) fail "MOUSE_LAYOUT compatible=$1 with HID off: $flipped" ;; esac
-}
-
 hid_on() {
     hid_enabled=1
     enabled=$(call HID_ENABLE --extra keyboard:b:true --extra mouse:b:true)
@@ -251,7 +245,7 @@ hid_off() {
     case "$off" in *ApplyResult.Applied*) hid_enabled=0 ;; *) fail "HID_OFF: $off" ;; esac
     # A hidg fd still open on a removed function is a use-after-free in this kernel (f_hid).
     stale=$($ADB shell su -c "'ls -l /proc/*/fd 2>/dev/null'" | tr -d '\r' | grep 'hidg.*(deleted)' || true)
-    [ -z "$stale" ] || fail "a /dev/hidg fd is still open after HID_OFF removed its function: $stale"
+    [ -z "$stale" ] || fail "a /dev/hidg fd is still open on a removed function after HID_OFF: $stale"
 }
 
 # One detent up and one down, only with the pointer parked on the menu bar and the capture running.
@@ -310,11 +304,10 @@ build_capture || fail "could not build $CAPTURE_SOURCE (Xcode command line tools
 before=$(call STATE)
 case "$before" in *'"udc":"'[!\"]*) ;; *) fail "gadget not bound before the test: $before" ;; esac
 foreign_before=$(foreign_links "$before")
-wait_for_host absent || fail "a $VENDOR_ID keyboard/mouse is already enumerated; is another HID app active?"
-
-compatible_before=$(call HID_STATE | sed -n 's/.*"compatibleMouse":\([a-z]*\).*/\1/p')
-case "$compatible_before" in true | false) ;; *) fail "HID_STATE has no compatibleMouse" ;; esac
-set_compatible_mouse false
+# Once Bootleg's prefix is set up, its idle keyboard and mouse stay enumerated; before that, any is another app's.
+if [ "$(leading_links "$before")" != "$PREFIX_LINKS" ]; then
+    wait_for_host absent || fail "a $VENDOR_ID keyboard/mouse is already enumerated; is another HID app active?"
+fi
 
 step "enabling keyboard + mouse, waiting for the Mac to enumerate them (vendor $VENDOR_ID)"
 hid_on
@@ -362,21 +355,12 @@ else
     step "SKIP scroll: no host capture, so no scroll was sent"
 fi
 
-step "compatible mouse: HID off, setting on, HID on"
-hid_off
-wait_for_host absent || fail "Mac still lists the Bootleg keyboard/mouse after HID_OFF"
-set_compatible_mouse true
-hid_on
-expect_host_mouse "3 0"
-step "the Mac parsed the compatible mouse: 3-byte boot reports, no wheel"
-send_sequence mouse
-
 step "turning HID off"
 hid_off
 after=$(call STATE)
-case "$after" in *hid.bootleg*) fail "Bootleg HID functions still present: $after" ;; esac
+[ "$(leading_links "$after")" = "$PREFIX_LINKS" ] || fail "the prefix isn't linked first after HID_OFF: $after"
 [ "$(foreign_links "$after")" = "$foreign_before" ] || fail "foreign links changed: before [$foreign_before] after [$(foreign_links "$after")]"
-wait_for_host absent || fail "Mac still lists the Bootleg keyboard/mouse after HID_OFF"
+wait_for_host present || fail "the Mac dropped the idle keyboard/mouse after HID_OFF (off must not re-enumerate)"
 
 waited=0
 until [ "$(timeout --foreground --kill-after=5 10 adb -s "$USB" get-state 2>/dev/null)" = device ]; do
@@ -385,7 +369,7 @@ until [ "$(timeout --foreground --kill-after=5 10 adb -s "$USB" get-state 2>/dev
     waited=$((waited + 1))
 done
 if [ "$capturing" = 1 ]; then
-    step "PASS: enumerated, harmless input written and received by the Mac ($captured_kinds captured), HID removed, USB adb and foreign links intact"
+    step "PASS: enumerated, harmless input written and received by the Mac ($captured_kinds captured), HID idle in the prefix, USB adb and foreign links intact"
 else
-    step "PASS (host capture skipped): enumerated, harmless input written, HID removed, USB adb and foreign links intact"
+    step "PASS (host capture skipped): enumerated, harmless input written, HID idle in the prefix, USB adb and foreign links intact"
 fi

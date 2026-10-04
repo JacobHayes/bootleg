@@ -282,13 +282,16 @@ class UsbTetherController(
 
     private fun change(on: Boolean): TetherResult {
         awaitPendingTransition()
-        val gadgetState = gadget.read()
+        var gadgetState = gadget.read()
         when (val decision = TetherPolicy.decide(on, port.usbTethered(), gadgetState)) {
             TetherDecision.AlreadyDone -> return TetherResult.Unchanged(port.usbTethered())
             is TetherDecision.RefuseDisksExposed ->
                 return TetherResult.Refused(port.usbTethered(), decision.exposedLuns, TetherPolicy.DISKS_EXPOSED_REASON)
             TetherDecision.Proceed -> Unit
         }
+        // Once tethering is on, changing the USB mode would end it, so the prefix can't be set up after.
+        // Tethering doesn't depend on it: a failure is left for the reconcile below to report.
+        if (on && gadget.establishPrefix() != null) gadgetState = gadget.read()
         // The HAL's re-plug rebinds every linked hid function: no hidg fd (ours or anyone's) may be open across it.
         hidNodes.closeAll()
         val holders = hidNodes.holders((HidFunctions.linked(gadgetState) + HidFunctions.owned(gadgetState)).sorted())

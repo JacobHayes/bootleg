@@ -30,7 +30,7 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
 | `mise run check` | L0–L2 | ktlint, compile with warnings as errors, unit + property + deterministic gadget simulation, UI screenshot goldens (offline) |
 | `mise run check:catalog` | L3 | live distro metadata/checksum/URL smoke test (network) |
 | `mise run check:device` | L4 | real phone end to end, `scripts/check-device.sh` (local only, not CI; takes the device lock) |
-| `mise run check:device:hid` | L4 | HID only: Mac enumerates keyboard + mouse (wheel and compatible layouts), harmless input incl. a parked scroll, off again (<45s) |
+| `mise run check:device:hid` | L4 | HID only: Mac enumerates keyboard + mouse, harmless input incl. a parked scroll, off again (idle, still enumerated) (<45s) |
 | `mise run check:device:remote` | L4 | Remote: the real `bootleg` CLI over the tailnet (pending, approve, RO mount, harmless HID, revoke) |
 | `mise run check:device:tether` | L4 | USB tethering (manual, not in `check:all`): on with the HID session open (no hidg fd crosses the re-plug, F24 still works), the Mac's NCM interface reaches the internet, a disk mounts alongside, switching refused while it's exposed, then off |
 | `mise run check:device:web` | L4 | Remote web UI in Chrome (playwright-core, local install; manual, not in `check:all`): pending → approve, RO mount + eject, F24, release on tab switch, paste prepare/cancel, takeover, revoke; screenshots in `build/web-check/shots` |

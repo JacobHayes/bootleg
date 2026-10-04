@@ -10,11 +10,12 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
 import dev.jacobhayes.bootleg.core.gadget.HidDescriptorProvider
 import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
-import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.JournalStore
+import dev.jacobhayes.bootleg.core.gadget.LinkOrder
 import dev.jacobhayes.bootleg.core.gadget.LunMode
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
+import dev.jacobhayes.bootleg.core.gadget.RndisDaemon
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
+import dev.jacobhayes.bootleg.core.gadget.UsbFunctions
 import dev.jacobhayes.bootleg.core.gadget.UsbProps
 
 /** The single construction point for the gadget controller used by the root service. */
@@ -28,8 +29,22 @@ fun createGadgetController(
     hidNodes: HidNodeGuard,
     allowedRoots: List<String>,
     fileSizeBytes: (path: String) -> Long?,
+    rndisDaemon: RndisDaemon,
+    usbFunctions: UsbFunctions?,
 ): DefaultGadgetController =
-    DefaultGadgetController(fs, props, journalStore, deadMan, clock, hidDescriptors, hidNodes, allowedRoots, fileSizeBytes = fileSizeBytes)
+    DefaultGadgetController(
+        fs,
+        props,
+        journalStore,
+        deadMan,
+        clock,
+        hidDescriptors,
+        hidNodes,
+        allowedRoots,
+        fileSizeBytes = fileSizeBytes,
+        rndisDaemon = rndisDaemon,
+        usbFunctions = usbFunctions,
+    )
 
 /** Which file a path names: two hard links to one inode are the same file. */
 data class FileIdentity(
@@ -65,20 +80,11 @@ fun canonicalizeDesired(
  * can't be expressed (an empty LUN has no backing path to put in a slot).
  */
 fun adoptableDesired(state: GadgetState): Desired? {
-    // A linked mouse function's name says its layout; with both linked (a crash mid-swap) keep the wheel.
-    val mouseLayouts = MouseLayout.entries.filter { it.functionName in state.configLinks }
-    val hid =
-        HidSpec(
-            keyboard = GadgetNames.HID_KEYBOARD_FUNCTION in state.configLinks,
-            mouse = mouseLayouts.isNotEmpty(),
-            mouseLayout = mouseLayouts.firstOrNull() ?: MouseLayout.WHEEL,
-        )
-    val linkedLuns = if (GadgetNames.MASS_STORAGE_FUNCTION in state.configLinks) state.luns else emptyMap()
-    // One empty LUN next to HID is the placeholder that keeps HID's interface numbers, not a slot.
-    val placeholder = (hid.keyboard || hid.mouse) && linkedLuns.size == 1 && linkedLuns[0]?.file == ""
-    val luns = if (placeholder) emptyMap() else linkedLuns
+    // HID input can't be told from the links (the prefix keeps them linked while off): it starts off.
+    val prefix = LinkOrder.PREFIX.any { it in state.configLinks }
+    val luns = if (GadgetNames.MASS_STORAGE_FUNCTION in state.configLinks) state.luns else emptyMap()
     if (luns.keys.sorted() != luns.keys.indices.toList() || luns.values.any { it.file.isEmpty() }) return null
-    if (luns.isEmpty() && !hid.keyboard && !hid.mouse) return null
+    if (luns.isEmpty() && !prefix) return null
     val slots =
         luns.toSortedMap().map { (lun, lunState) ->
             val mode =
@@ -89,5 +95,5 @@ fun adoptableDesired(state: GadgetState): Desired? {
                 }
             SlotSpec(lun, lunState.file, mode)
         }
-    return Desired(slots = slots, hid = hid)
+    return Desired(slots = slots, prefix = true)
 }

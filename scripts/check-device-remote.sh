@@ -115,7 +115,6 @@ is_mounted() { mount | grep -q " on /Volumes/$VOLUME ("; }
 is_unmounted() { ! is_mounted; }
 hid_rows() { hidutil list 2>/dev/null | awk -v vid="$VENDOR_ID" 'tolower($1) == vid && $4 == 1 && ($5 == 6 || $5 == 2) && $7 == "USB"' | wc -l | tr -d ' '; }
 host_hid_present() { (($(hid_rows) >= 2)); }
-host_hid_absent() { (($(hid_rows) == 0)); }
 
 cleanup() {
     local status=$?
@@ -138,23 +137,12 @@ cleanup() {
         if $remote_on; then
             [[ -n $approved_node ]] && wadb shell content call --uri "$PROVIDER" --method REMOTE_REVOKE --extra "node:s:$approved_node" >/dev/null 2>&1
         fi
-        # HID goes first (its own path closes the session before the functions go), and must be
-        # gone from the Mac before the drives' OFF re-enumerates the gadget.
+        # HID goes first: its own path closes the session before the functions go.
         if wadb shell "su -c 'ls $GADGET/functions'" 2>/dev/null | grep -q 'hid\.bootleg'; then
             case "$(wadb shell content call --uri "$PROVIDER" --method HID_OFF 2>&1)" in
             *ApplyResult.Applied*) ;;
             *) echo "WARN: cleanup HID_OFF failed; turn keyboard + mouse off in the app" >&2 ;;
             esac
-        fi
-        if [[ -n ${VENDOR_ID:-} ]]; then
-            local deadline_ms=$(($(now_ms) + ENUMERATE_WAIT_S * 1000))
-            until host_hid_absent; do
-                if (($(now_ms) >= deadline_ms)); then
-                    echo "WARN: the Mac still lists a $VENDOR_ID keyboard/mouse after cleanup HID_OFF" >&2
-                    break
-                fi
-                sleep "$POLL_S"
-            done
         fi
         if $remote_on; then
             wadb shell content call --uri "$PROVIDER" --method REMOTE_OFF >/dev/null 2>&1 || true
@@ -292,7 +280,6 @@ mount_read_only() {
 }
 
 harmless_hid() {
-    host_hid_absent || fail "a $VENDOR_ID keyboard/mouse is already enumerated; is another HID app active?"
     cli 0 hid on >/dev/null
     wait_until "$ENUMERATE_WAIT_S" "the Mac to enumerate the keyboard and mouse" host_hid_present
     local before after
@@ -303,8 +290,10 @@ harmless_hid() {
     written() { after=$(call HID_STATE | jq '.written'); ((after - before >= 4)); }
     wait_until 5 "the phone to write the key reports" written
     echo "    $((after - before)) HID reports written"
+    # The keyboard and mouse stay enumerated, idle, in Bootleg's prefix.
     cli 0 hid off >/dev/null
-    wait_until "$ENUMERATE_WAIT_S" "the Mac to drop the keyboard and mouse" host_hid_absent
+    hid_idle() { [[ $(call HID_STATE | jq -r '.keyboard or .mouse') == false ]]; }
+    wait_until 5 "the phone to turn the keyboard and mouse off" hid_idle
 }
 
 revoke_closes_session() {

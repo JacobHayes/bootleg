@@ -43,65 +43,76 @@ object LunMarker {
 }
 
 /**
- * The order Bootleg links its functions in. The kernel numbers a config's interfaces in link order,
+ * Where Bootleg's functions sit in the config. The kernel numbers a config's interfaces in link order,
  * and Windows binds each child driver by interface number (`USB\VID_x&PID_y&MI_nn`), so a function
- * must never move to another function's number: mass storage first, then the keyboard, then the mouse
- * (either layout, same place).
+ * must never move to another function's number. The [PREFIX] is linked ahead of every foreign link
+ * and never relinked: RNDIS (interfaces 0-1, the only place Windows starts it), the keyboard (2) and
+ * the mouse (3). Disks follow it ([DISKS]).
  */
 object LinkOrder {
-    val CANONICAL =
+    val PREFIX =
         listOf(
-            GadgetNames.MASS_STORAGE_FUNCTION,
+            GadgetNames.RNDIS_FUNCTION,
             GadgetNames.HID_KEYBOARD_FUNCTION,
-            GadgetNames.HID_WHEEL_MOUSE_FUNCTION,
             GadgetNames.HID_MOUSE_FUNCTION,
         )
+
+    /**
+     * The one rule for disk placement: mass storage is the last link of ours, after the prefix, wherever
+     * configfs appends it (after the HAL's links); relinked as needed, so its and the HAL's interface
+     * numbers may shift. Replace this to give disks fixed numbers.
+     */
+    const val DISKS = GadgetNames.MASS_STORAGE_FUNCTION
+
+    val CANONICAL = PREFIX + DISKS
 
     /** Bootleg's linked functions in link order ([configLinks] is in link order), by target. */
     fun owned(configLinks: Map<String, String>): List<String> = configLinks.filterKeys(GadgetPaths::isOwnedName).values.toList()
 
+    /** Ours are a subsequence of [CANONICAL] in that order, each linked under its own name. */
     fun isCanonical(configLinks: Map<String, String>): Boolean {
         val owned = owned(configLinks)
-        return owned.all { it in CANONICAL } && owned == owned.sortedBy(CANONICAL::indexOf)
+        val ownedNames = configLinks.keys.filter(GadgetPaths::isOwnedName)
+        return owned == ownedNames && owned.all { it in CANONICAL } && owned == owned.sortedBy(CANONICAL::indexOf)
     }
+
+    /** The prefix is the first three links of the whole config, foreign ones included. */
+    fun prefixFirst(configLinks: Map<String, String>): Boolean =
+        configLinks.entries.take(PREFIX.size).map { it.key to it.value } == PREFIX.map { it to it }
 }
 
 /**
- * The concrete state the planner drives toward: [Desired] with slot intents applied. [lunMarker], if
- * set, is the `inquiry_string` every LUN must carry (see [LunMarker]).
+ * The concrete state the planner drives toward: [Desired] with slot intents applied. [prefix] links
+ * the prefix ([LinkOrder.PREFIX]); HID on or off doesn't change the gadget. [usbRoundTrip]: an
+ * establishment's USB mode round trip is unfinished ([Journal.usbFunctionsToRestore]). [lunMarker], if set, is
+ * the `inquiry_string` every LUN must carry (see [LunMarker]).
  */
 data class GadgetTarget(
     val luns: List<LunTarget>,
-    val hid: HidSpec,
+    val prefix: Boolean,
     val lunMarker: String? = null,
+    val usbRoundTrip: Boolean = false,
 ) {
     init {
         require(luns.size <= GadgetLimits.LUN_COUNT_MAX) { "at most ${GadgetLimits.LUN_COUNT_MAX} LUNs, got ${luns.size}" }
         require(lunMarker == null || lunMarker.length == LunMarker.INQUIRY_STRING_LENGTH) { "bad LUN marker: '$lunMarker'" }
+        require(prefix || luns.isEmpty()) { "disks need the prefix" }
     }
 
     /** Owned functions to expose, in creation and link order ([LinkOrder]). */
     val functions: List<String>
         get() =
             buildList {
-                if (luns.isNotEmpty()) add(GadgetNames.MASS_STORAGE_FUNCTION)
-                if (hid.keyboard) add(GadgetNames.HID_KEYBOARD_FUNCTION)
-                if (hid.mouse) add(hid.mouseLayout.functionName)
+                if (prefix) addAll(LinkOrder.PREFIX)
+                if (luns.isNotEmpty()) add(LinkOrder.DISKS)
             }
 
     companion object {
-        val EMPTY = GadgetTarget(emptyList(), HidSpec())
+        val EMPTY = GadgetTarget(emptyList(), prefix = false)
 
         fun of(desired: Desired): GadgetTarget = of(Journal(desired = desired))
 
-        /**
-         * While HID is on without a disk, mass storage stays linked with one empty LUN ([PLACEHOLDER_LUN]):
-         * the keyboard and mouse keep their interface numbers whether or not disks are added.
-         */
-        val PLACEHOLDER_LUN = LunTarget("", LunMode.DISK_RO)
-
         fun of(journal: Journal): GadgetTarget {
-            val hid = journal.desired.hid
             val slotLuns =
                 journal.desired.slots.sortedBy { it.lun }.map { slot ->
                     when (journal.slotIntents[slot.lun] ?: SlotIntent.EXPORTED) {
@@ -111,9 +122,10 @@ data class GadgetTarget(
                     }
                 }
             return GadgetTarget(
-                luns = slotLuns.ifEmpty { if (hid.keyboard || hid.mouse) listOf(PLACEHOLDER_LUN) else emptyList() },
-                hid = hid,
+                luns = slotLuns,
+                prefix = journal.desired.wantsPrefix,
                 lunMarker = journal.lunInstanceNonce.takeIf { it.isNotEmpty() }?.let(LunMarker::inquiryString),
+                usbRoundTrip = journal.usbFunctionsToRestore != null,
             )
         }
     }

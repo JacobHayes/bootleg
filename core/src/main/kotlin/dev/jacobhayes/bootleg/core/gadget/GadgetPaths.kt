@@ -61,5 +61,8 @@ object GadgetPaths {
             is Op.WriteBytes -> listOf(op.path)
             is Op.Symlink -> listOf(op.link)
             is Op.Unlink -> listOf(op.link)
+            Op.StartRndis, Op.ReleaseRndis, Op.StopRndis -> listOf(function(GadgetNames.RNDIS_FUNCTION))
+            // The HAL relinks its own functions; Bootleg writes nothing of its.
+            Op.RelinkForeign -> emptyList()
         }
 }

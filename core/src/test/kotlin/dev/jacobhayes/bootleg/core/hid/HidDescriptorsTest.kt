@@ -1,6 +1,5 @@
 package dev.jacobhayes.bootleg.core.hid
 
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -36,12 +35,6 @@ class HidDescriptorsTest {
         """
 
     @Test
-    fun `compatible mouse descriptor is appendix B2 byte for byte`() {
-        assertArrayEquals(hex(bootMouseAppendixB2), HidDescriptors.mouse(MouseLayout.BOOT))
-        assertEquals(50, HidDescriptors.mouse(MouseLayout.BOOT).size)
-    }
-
-    @Test
     fun `wheel mouse descriptor is appendix B2 with wheel and AC Pan appended after X and Y`() {
         // Bytes 0..2 keep B.2's layout; Wheel (GD 0x38) and AC Pan (Consumer 0x0238) follow as
         // relative int8 fields inside the same physical collection.
@@ -52,17 +45,15 @@ class HidDescriptorsTest {
             """
         val boot = hex(bootMouseAppendixB2)
         val expected = boot.copyOf(boot.size - 2) + hex(appended) + hex("C0 C0")
-        assertArrayEquals(expected, HidDescriptors.mouse(MouseLayout.WHEEL))
-        assertEquals(50 + 27, HidDescriptors.mouse(MouseLayout.WHEEL).size)
+        assertArrayEquals(expected, HidDescriptors.mouse())
+        assertEquals(50 + 27, HidDescriptors.mouse().size)
     }
 
     @Test
-    fun `the descriptors match the layouts' report lengths`() {
-        // Input bits per descriptor: buttons 3 + padding 5 + X/Y 16 (+ wheel 8 + pan 8).
-        assertEquals(3, MouseLayout.BOOT.reportLengthBytes)
-        assertEquals(5, MouseLayout.WHEEL.reportLengthBytes)
-        assertEquals(HidLimits.MOUSE_REPORT_SIZE_BYTES, MouseLayout.entries.maxOf { it.reportLengthBytes })
-        assertEquals(HidLimits.MOUSE_BOOT_REPORT_SIZE_BYTES, MouseLayout.entries.minOf { it.reportLengthBytes })
+    fun `the descriptor matches the report length`() {
+        // Input bits: buttons 3 + padding 5 + X/Y 16 + wheel 8 + pan 8.
+        assertEquals(5, HidLimits.MOUSE_REPORT_SIZE_BYTES)
+        assertEquals(HidLimits.MOUSE_REPORT_SIZE_BYTES, dev.jacobhayes.bootleg.core.gadget.HidFunctionSpec.MOUSE_REPORT_LENGTH_BYTES)
     }
 
     @Test

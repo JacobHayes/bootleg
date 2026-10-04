@@ -68,8 +68,6 @@ internal fun PaneSelector(
 internal fun PointerPane(
     hid: HidController,
     wide: Boolean,
-    /** The wheel mouse is linked: the touchpad's hint offers two-finger scrolling. */
-    scrolling: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val buttons: @Composable (Modifier) -> Unit = { buttonModifier ->
@@ -86,7 +84,7 @@ internal fun PointerPane(
     }
     if (wide) {
         Row(modifier, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Touchpad(onActions = hid::touchpad, scrolling = scrolling, modifier = Modifier.weight(1f).fillMaxHeight())
+            Touchpad(onActions = hid::touchpad, modifier = Modifier.weight(1f).fillMaxHeight())
             Column(
                 Modifier.widthIn(max = PANE_SIDE_WIDTH_MAX).fillMaxHeight().verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(KEY_GAP, Alignment.Bottom),
@@ -97,7 +95,7 @@ internal fun PointerPane(
         }
     } else {
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Touchpad(onActions = hid::touchpad, scrolling = scrolling, modifier = Modifier.weight(1f).fillMaxWidth())
+            Touchpad(onActions = hid::touchpad, modifier = Modifier.weight(1f).fillMaxWidth())
             buttons(Modifier)
             KeyRow(listOf(escapeKey, leftKey, upKey, downKey, rightKey, enterKey), hid)
         }

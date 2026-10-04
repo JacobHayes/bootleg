@@ -1,7 +1,6 @@
 package dev.jacobhayes.bootleg.core.hid
 
 import dev.jacobhayes.bootleg.core.gadget.HidDescriptorProvider
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 
 /**
  * Boot-protocol report descriptors (HID 1.11 appendix B.1 / B.2), no report IDs.
@@ -57,7 +56,7 @@ object HidDescriptors : HidDescriptorProvider {
             }
         }
 
-    override fun mouse(layout: MouseLayout): ByteArray =
+    override fun mouse(): ByteArray =
         descriptor {
             usagePage(USAGE_PAGE_GENERIC_DESKTOP)
             usage(USAGE_MOUSE)
@@ -85,23 +84,21 @@ object HidDescriptors : HidDescriptorProvider {
                     reportSize(8)
                     reportCount(2)
                     input(DATA_VARIABLE_RELATIVE)
-                    if (layout == MouseLayout.WHEEL) {
-                        // Byte 3: vertical wheel, detents (+ = away from the user, scroll up).
-                        usage(USAGE_WHEEL)
-                        logicalMinimum(-HidLimits.MOUSE_DELTA_MAX)
-                        logicalMaximum(HidLimits.MOUSE_DELTA_MAX)
-                        reportSize(8)
-                        reportCount(1)
-                        input(DATA_VARIABLE_RELATIVE)
-                        // Byte 4: horizontal scroll (+ = right).
-                        usagePage(USAGE_PAGE_CONSUMER)
-                        usage(USAGE_AC_PAN)
-                        logicalMinimum(-HidLimits.MOUSE_DELTA_MAX)
-                        logicalMaximum(HidLimits.MOUSE_DELTA_MAX)
-                        reportSize(8)
-                        reportCount(1)
-                        input(DATA_VARIABLE_RELATIVE)
-                    }
+                    // Byte 3: vertical wheel, detents (+ = away from the user, scroll up).
+                    usage(USAGE_WHEEL)
+                    logicalMinimum(-HidLimits.MOUSE_DELTA_MAX)
+                    logicalMaximum(HidLimits.MOUSE_DELTA_MAX)
+                    reportSize(8)
+                    reportCount(1)
+                    input(DATA_VARIABLE_RELATIVE)
+                    // Byte 4: horizontal scroll (+ = right).
+                    usagePage(USAGE_PAGE_CONSUMER)
+                    usage(USAGE_AC_PAN)
+                    logicalMinimum(-HidLimits.MOUSE_DELTA_MAX)
+                    logicalMaximum(HidLimits.MOUSE_DELTA_MAX)
+                    reportSize(8)
+                    reportCount(1)
+                    input(DATA_VARIABLE_RELATIVE)
                 }
             }
         }

@@ -74,23 +74,12 @@ cleanup() {
         if $remote_on; then
             wadb shell content call --uri "$PROVIDER" --method REMOTE_REVOKE --extra "node:s:$MAC_NODE" >/dev/null 2>&1 || true
         fi
-        # HID first (its own path closes the session before the functions go), and gone from the
-        # Mac before the drives' OFF re-enumerates the gadget.
+        # HID first: its own path closes the session before the functions go.
         if wadb shell "su -c 'ls $GADGET/functions'" 2>/dev/null | grep -q 'hid\.bootleg'; then
             case "$(wadb shell content call --uri "$PROVIDER" --method HID_OFF 2>&1)" in
             *ApplyResult.Applied*) ;;
             *) echo "WARN: cleanup HID_OFF failed; turn keyboard + mouse off in the app" >&2 ;;
             esac
-        fi
-        if [[ -n ${VENDOR_ID:-} ]]; then
-            local deadline_ms=$(($(now_ms) + ENUMERATE_WAIT_S * 1000))
-            until (($(hid_rows) == 0)); do
-                if (($(now_ms) >= deadline_ms)); then
-                    echo "WARN: the Mac still lists a $VENDOR_ID keyboard/mouse after cleanup" >&2
-                    break
-                fi
-                sleep "$POLL_S"
-            done
         fi
         if $remote_on; then
             wadb shell content call --uri "$PROVIDER" --method REMOTE_OFF >/dev/null 2>&1 || true

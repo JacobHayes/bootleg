@@ -265,7 +265,6 @@ async function ejectFromPage(page) {
 }
 
 async function hidOnF24Off(page) {
-  if (hostHidCount() !== 0) fail(`a ${VENDOR_ID} keyboard/mouse is already enumerated`);
   await page.check("#hid-keyboard");
   await page.check("#hid-mouse");
   await page.click("#hid-apply");
@@ -317,7 +316,8 @@ async function hidOff(page) {
   await page.uncheck("#hid-keyboard");
   await page.uncheck("#hid-mouse");
   await page.click("#hid-apply");
-  await until("the Mac to drop the keyboard and mouse", () => hostHidCount() === 0);
+  // The keyboard and mouse stay enumerated, idle, in Bootleg's prefix.
+  await until("the phone to turn the keyboard and mouse off", () => !hidState().keyboard && !hidState().mouse, 5000);
   await until("the page to show HID off", async () => !(await page.locator("#hid-keyboard").isChecked()), UI_WAIT_MS);
 }
 
@@ -399,7 +399,7 @@ try {
   await step("Mac unmounts, page (force) ejects → LUN empty", () => ejectFromPage(first));
   await step("HID on from the page, F24 from More keys → reports written", () => hidOnF24Off(first));
   await step("switching tabs releases all (HID_STATE)", () => releaseOnBlur(contextA, first));
-  await step("HID off from the page → Mac drops it", () => hidOff(first));
+  await step("HID off from the page → idle on the phone", () => hidOff(first));
   await step("paste prepare shows the plan → cancel, nothing typed", () => pastePrepareCancel(first));
   await step("takeover from a second session: decline keeps, allow moves", () => takeover(first, second));
   await step("revoke (hook) → both pages revoked, sockets closed, no re-ask", () => revoke(first, second));

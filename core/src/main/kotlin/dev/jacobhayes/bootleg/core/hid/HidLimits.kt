@@ -17,11 +17,8 @@ object HidLimits {
     const val KEYBOARD_REPORT_SIZE_BYTES = 8
     const val KEYBOARD_REPORT_KEY_COUNT_MAX = 6
 
-    /** Reports are built in the wheel layout (buttons, X, Y, wheel, pan); see [dev.jacobhayes.bootleg.core.gadget.MouseLayout]. */
+    /** Buttons, X, Y, wheel, pan; a boot-protocol host reads the first 3 bytes (HID 1.11 B.2). */
     const val MOUSE_REPORT_SIZE_BYTES = 5
-
-    /** The boot part of a mouse report: buttons, X, Y. */
-    const val MOUSE_BOOT_REPORT_SIZE_BYTES = 3
 
     /** Boot mouse X/Y are int8; -128 is excluded so motion is symmetric (HID B.2 logical min is -127). */
     const val MOUSE_DELTA_MAX = 127

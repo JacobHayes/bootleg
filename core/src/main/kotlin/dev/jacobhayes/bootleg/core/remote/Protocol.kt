@@ -516,7 +516,7 @@ data class ImageView(
 data class HidView(
     val keyboard: Boolean,
     val mouse: Boolean,
-    /** The mouse is on with the scroll-wheel layout, so scroll frames work. */
+    /** The mouse is on, so scroll frames work (kept for clients that check it). */
     val wheel: Boolean,
     /** [HID_STATUS_RELEASE_PENDING] once release-all hasn't reached the host for 60 s; input is refused. */
     val status: String? = null,

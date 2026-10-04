@@ -7,8 +7,10 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
+import dev.jacobhayes.bootleg.core.gadget.LinkOrder
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.LunState
+import dev.jacobhayes.bootleg.core.gadget.RndisState
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.tether.TetherPolicy
@@ -169,14 +171,15 @@ class FakeBootlegBackend(
                         nofua = false,
                     )
             }
-        val hidFunctions =
-            listOfNotNull(
-                GadgetNames.HID_KEYBOARD_FUNCTION.takeIf { journal.desired.hid.keyboard },
-                journal.desired.hid.mouseLayout.functionName
-                    .takeIf { journal.desired.hid.mouse },
-            )
-        val functions = (if (luns.isEmpty()) setOf("ffs.adb") else setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION)) + hidFunctions
-        return GadgetState(udc = FAKE_UDC, functions = functions, configLinks = hidFunctions.associateWith { it }, luns = luns)
+        val prefix = if (journal.desired.wantsPrefix) LinkOrder.PREFIX else emptyList()
+        val functions = (if (luns.isEmpty()) setOf("ffs.adb") else setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION)) + prefix
+        return GadgetState(
+            udc = FAKE_UDC,
+            functions = functions,
+            configLinks = prefix.associateWith { it },
+            luns = luns,
+            rndis = if (prefix.isEmpty()) RndisState.ABSENT else RndisState.READY,
+        )
     }
 
     companion object {

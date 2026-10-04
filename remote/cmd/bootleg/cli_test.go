@@ -349,7 +349,7 @@ func TestCLIScroll(t *testing.T) {
 		t.Fatalf("wheel %v pan %v", wheel, pan)
 	}
 	phone.phone.read(func(p *fakePhone) { p.wheel, p.state.Hid.Wheel = false, false })
-	if code, _, stderr := phone.run(t, "", "scroll", "1"); code != exitDevice || !strings.Contains(stderr, "no scroll wheel") {
+	if code, _, stderr := phone.run(t, "", "scroll", "1"); code != exitDevice || !strings.Contains(stderr, "doesn't report a scroll wheel") {
 		t.Fatalf("scroll without a wheel: %d %s", code, stderr)
 	}
 }

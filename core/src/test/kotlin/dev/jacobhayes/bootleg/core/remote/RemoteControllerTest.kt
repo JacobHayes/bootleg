@@ -2,7 +2,6 @@ package dev.jacobhayes.bootleg.core.remote
 
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.LunMode
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.KeyUsage
@@ -319,18 +318,6 @@ class RemoteControllerTest {
             )
             assertNull(h.request("s1", "hid.set", mapOf("keyboard" to bool(true), "mouse" to bool(false)), epoch))
             assertEquals(DeviceOp.SetHid(HidSpec(keyboard = true, mouse = false)), h.deviceCalls.single().op)
-        }
-
-        @Test
-        fun `hid set keeps the phone's mouse layout`() {
-            h.setDevice(h.device.copy(hid = HidSpec(keyboard = true, mouse = true, mouseLayout = MouseLayout.BOOT)))
-            h.connect("s1")
-            val epoch = h.take("s1")
-            assertNull(h.request("s1", "hid.set", mapOf("keyboard" to bool(false), "mouse" to bool(true)), epoch))
-            assertEquals(
-                DeviceOp.SetHid(HidSpec(keyboard = false, mouse = true, mouseLayout = MouseLayout.BOOT)),
-                h.deviceCalls.single().op,
-            )
         }
 
         @Test
@@ -740,13 +727,10 @@ class RemoteControllerTest {
         }
 
         @Test
-        fun `scroll frames are ignored, not malformed, with the compatible mouse or the mouse off`() {
+        fun `scroll frames are ignored, not malformed, with the mouse off`() {
             h.connect("s1")
             val epoch = h.take("s1")
-            for (hid in listOf(
-                HidSpec(keyboard = true, mouse = true, mouseLayout = MouseLayout.BOOT),
-                HidSpec(keyboard = true, mouse = false),
-            )) {
+            for (hid in listOf(HidSpec(keyboard = true, mouse = false))) {
                 h.setDevice(h.device.copy(hid = hid))
                 h.frame("s1", HidFrame.Scroll(epoch, 1, 0))
                 assertTrue(h.hidHost.sent.isEmpty())

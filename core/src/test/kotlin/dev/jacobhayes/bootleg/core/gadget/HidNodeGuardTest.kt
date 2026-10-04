@@ -13,9 +13,12 @@ import org.junit.jupiter.api.assertThrows
 class HidNodeGuardTest {
     private val udc = FakeConfigFs.PIXEL_UDC
     private val keyboard = GadgetNames.HID_KEYBOARD_FUNCTION
-    private val mouse = GadgetNames.HID_WHEEL_MOUSE_FUNCTION
+    private val mouse = GadgetNames.HID_MOUSE_FUNCTION
     private val hid = HidSpec(keyboard = true, mouse = true)
     private val disk = SlotSpec(0, img(1), LunMode.DISK_RO)
+
+    /** A change that re-enumerates (mass storage is detached for the mode change) with HID kept on. */
+    private val reenumerating = Desired(listOf(SlotSpec(0, img(1), LunMode.DISK_RW)), hid)
 
     /** HID on with the session open, as after the app's HidController turned it on. */
     private fun GadgetRig.hidOnAndOpen(desired: Desired = Desired(listOf(disk), hid)): DefaultGadgetController {
@@ -65,8 +68,8 @@ class HidNodeGuardTest {
         rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)
         val reconciled = controller.reconcile()
         rig.assertNoHazards()
-        // HID off (or any re-enumeration) would have to rebind or remove them: refused, named.
-        val off = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.apply(Desired(listOf(disk))))
+        // Any re-enumeration would have to rebind them: refused, named.
+        val off = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.apply(reenumerating))
         assertTrue(off.reason.contains(FakeHidNodes.RELAY), off.reason)
         assertTrue(keyboard in rig.state().configLinks.values)
         assertEquals(setOf(keyboard, mouse), rig.hidNodes.quarantined, "kept open, never closed")
@@ -103,7 +106,7 @@ class HidNodeGuardTest {
                 when (random.nextInt(5)) {
                     0 -> controller.apply(Desired(listOf(disk), hid))
                     1 -> controller.apply(Desired(listOf(disk)))
-                    4 -> controller.apply(Desired(listOf(disk), hid.copy(mouseLayout = MouseLayout.BOOT)))
+                    4 -> controller.apply(Desired(listOf(disk, SlotSpec(1, iso(1), LunMode.CDROM)), hid))
                     2 -> rig.hal.setFunctions(listOf("adb", "ptp,adb", "mtp,adb").random(random))
                     else -> {
                         rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)
@@ -118,15 +121,25 @@ class HidNodeGuardTest {
     }
 
     @Test
-    fun `turning HID off releases and closes the relay while bound, then removes the functions`() {
+    fun `turning HID off keeps the functions linked and the gadget untouched`() {
         val rig = GadgetRig()
         val controller = rig.hidOnAndOpen()
+        val closesBefore = rig.hidNodes.closeAllCount
         val result = assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(Desired(listOf(disk))))
-        assertTrue(result.reenumerated)
+        assertFalse(result.reenumerated)
+        rig.assertNoHazards()
+        assertEquals(closesBefore, rig.hidNodes.closeAllCount, "nothing to fence: no UDC write, no removal")
+        assertTrue(listOf(keyboard, mouse).all { it in rig.state().configLinks.values })
+    }
+
+    @Test
+    fun `a re-enumerating change releases and closes the relay while bound before the unbind`() {
+        val rig = GadgetRig()
+        val controller = rig.hidOnAndOpen()
+        assertTrue(assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(reenumerating)).reenumerated)
         rig.assertNoHazards()
         assertEquals(0, rig.hidNodes.relayOpenCount())
         assertEquals(listOf(true, true), rig.hidNodes.releasesWhileBound, "release-all reached the host before the unbind")
-        assertTrue(rig.state().functions.none(HidFunctions::isOwnedHid))
         assertTrue(rig.hidNodes.fenced, "no reopen until the call is over")
     }
 
@@ -139,23 +152,6 @@ class HidNodeGuardTest {
         rig.assertNoHazards()
         rig.hidNodes.reopen()
         assertEquals(2, rig.hidNodes.relayOpenCount(), "the session reopens once the call is over")
-    }
-
-    @Test
-    fun `swapping the mouse layout with the session open closes the relay first and removes the old function`() {
-        val rig = GadgetRig()
-        val controller = rig.hidOnAndOpen()
-        for (layout in listOf(MouseLayout.BOOT, MouseLayout.WHEEL)) {
-            val swapped = Desired(listOf(disk), hid.copy(mouseLayout = layout))
-            assertTrue(assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(swapped)).reenumerated, "$layout")
-            rig.assertNoHazards()
-            assertEquals(0, rig.hidNodes.relayOpenCount(), "$layout: closed for the swap")
-            val linked = rig.state().configLinks.values
-            assertTrue(layout.functionName in linked, "$layout linked")
-            MouseLayout.entries.filter { it != layout }.forEach { assertFalse(it.functionName in linked, "$it unlinked") }
-            rig.hidNodes.reopen()
-            assertEquals(2, rig.hidNodes.relayOpenCount(), "$layout: the session reopens on the new function")
-        }
     }
 
     @Test
@@ -176,7 +172,7 @@ class HidNodeGuardTest {
         rig.fs.openHidFd(keyboard, "pid 4242 (old root daemon)")
         val mutationsBefore = rig.scripted.mutationCount
         val armsBefore = rig.deadMan.arms.size
-        val refused = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.apply(Desired(listOf(disk))))
+        val refused = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.apply(reenumerating))
         assertTrue(refused.reason.contains("pid 4242 (old root daemon)"), refused.reason)
         assertTrue(refused.reason.contains(DefaultGadgetController.HID_NODE_HELD_REASON), refused.reason)
         assertEquals(mutationsBefore, rig.scripted.mutationCount, "nothing changed")
@@ -186,8 +182,15 @@ class HidNodeGuardTest {
 
         rig.fs.exitHidHolder("pid 4242 (old root daemon)")
         rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)
-        assertInstanceOf(ApplyResult.Applied::class.java, rig.controller().reconcile())
-        assertTrue(rig.state().functions.none(HidFunctions::isOwnedHid))
+        assertInstanceOf(ApplyResult.Applied::class.java, rig.controller().apply(reenumerating))
+        assertEquals(
+            false,
+            rig
+                .state()
+                .luns
+                .getValue(0)
+                .ro,
+        )
         rig.assertNoHazards()
     }
 
@@ -195,8 +198,15 @@ class HidNodeGuardTest {
     fun `another app's open hid node blocks re-enumerating, since a rebind would poison its fd too`() {
         val rig = GadgetRig()
         val controller = rig.controller()
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(Desired(listOf(disk))))
+        // Another app links its keyboard after ours and opens it.
+        rig.fs.asActor("usb hid client") {
+            rig.fs.write(GadgetPaths.UDC, "")
+            rig.fs.symlink(GadgetPaths.function("hid.keyboard"), GadgetPaths.configLink("hid.keyboard"))
+            rig.fs.write(GadgetPaths.UDC, udc)
+        }
         rig.fs.openHidFd("hid.keyboard", "pid 777 (usb hid client)")
-        val refused = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.apply(Desired(listOf(disk))))
+        val refused = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.apply(reenumerating))
         assertTrue(refused.reason.contains("pid 777"), refused.reason)
         assertEquals(udc, rig.fs.udc)
         rig.assertNoHazards()
@@ -206,6 +216,7 @@ class HidNodeGuardTest {
     fun `a holder that shows up after the first scan stops the rmdir itself`() {
         val rig = GadgetRig()
         rig.hidOnAndOpen()
+        rig.hidNodes.closeAll()
         var scans = 0
         val lateHolder =
             object : HidNodeGuard by rig.hidNodes {
@@ -216,11 +227,21 @@ class HidNodeGuardTest {
                 }
             }
         val controller =
-            DefaultGadgetController(rig.scripted, rig.hal, rig.journalStore, rig.deadMan, rig.clock, FakeHidDescriptors, lateHolder)
-        val refused = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.apply(Desired(listOf(disk))))
+            DefaultGadgetController(
+                rig.scripted,
+                rig.hal,
+                rig.journalStore,
+                rig.deadMan,
+                rig.clock,
+                FakeHidDescriptors,
+                lateHolder,
+                rndisDaemon = rig.rndisDaemon,
+                usbFunctions = rig.usbFunctions,
+            )
+        // Only Bootleg-off removes the hid functions now.
+        val refused = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.bootlegOff())
         assertTrue(refused.reason.contains("pid 99 (late opener)"), refused.reason)
         assertTrue(keyboard in rig.state().functions, "the held function was not removed")
-        assertEquals(udc, rig.fs.udc)
         rig.assertNoHazards()
     }
 

@@ -138,7 +138,7 @@ when the request is admitted and again in the same actor step that dispatches it
 | `slots.apply` | `slots: [{lun, imageId, mode?}]`, `ifRev` | M | `slotFailures` (deferred) |
 | `slot.eject` | `lun`, `force`? (false), `ifRev`? | M | `slotFailures` (deferred) |
 | `slot.reinsert` | `lun`, `ifRev`? | M | `slotFailures` (deferred) |
-| `hid.set` | `keyboard`, `mouse`, `ifRev`? | M | `slotFailures` (deferred); the mouse layout stays the phone's setting |
+| `hid.set` | `keyboard`, `mouse`, `ifRev`? | M | `slotFailures` (deferred) |
 | `tether.set` | `on`, `ifRev`? | M | `tether: Tether`, `warning`? (deferred) |
 | `bootkey.run` | `vendor`, `action`, `keyIndex`? (0), `durationMs`? (20000) | M | `durationMs` (when the keys finish) |
 | `bootkey.cancel` | — | M | `cancelled` |
@@ -304,9 +304,8 @@ the last refresh's error for that distro (its entries are then the last good one
 started on the phone shows up too. All strings are untrusted display text.
 
 `imageId` is opaque (16 hex characters), stable for a path; a slot exposing a file outside the
-image library still has one, so `slots.apply` can keep it. `hid.wheel` is true when the mouse is on with the scroll-wheel layout
-(false with the phone's "Compatible mouse (no wheel)" setting, or when an older phone omits it):
-clients send `06` frames only when it is true. `hid.status` is `release_pending` once
+image library still has one, so `slots.apply` can keep it. `hid.wheel` is true when the mouse is on (it always has
+a scroll wheel; an older phone may omit the field): clients send `06` frames only when it is true. `hid.status` is `release_pending` once
 release-all retries have failed for 60 s; input is refused until the HID node reopens or HID is
 turned off. `hid.link` (present while the keyboard or mouse is on) is the phone's HID session:
 `stopped` until input opens it, `reconnecting` while the phone reopens its devices (after a USB

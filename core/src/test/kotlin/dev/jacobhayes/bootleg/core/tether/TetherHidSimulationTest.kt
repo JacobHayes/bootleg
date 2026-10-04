@@ -9,6 +9,10 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetPaths
 import dev.jacobhayes.bootleg.core.gadget.GadgetRig
 import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
+import dev.jacobhayes.bootleg.core.gadget.Journal
+import dev.jacobhayes.bootleg.core.gadget.LinkOrder
+import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.gadget.SlotSpec
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -100,7 +104,7 @@ class TetherHidSimulationTest {
                 assertTrue(FakeHidNodes.RELAY_FUNCTIONS.none { rig.fs.isPoisoned(it, FakeHidNodes.RELAY) }, context)
                 assertTrue(rig.hidNodes.fenced, "$context: no reopen until the call is over")
                 assertEquals(on, NCM_FUNCTION in rig.state().configLinks.values, context)
-                val ours = listOf(GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_WHEEL_MOUSE_FUNCTION)
+                val ours = listOf(GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_MOUSE_FUNCTION)
                 assertTrue(
                     rig
                         .state()
@@ -113,6 +117,27 @@ class TetherHidSimulationTest {
                 assertEquals(2, rig.hidNodes.relayOpenCount(), context)
             }
         }
+    }
+
+    @Test
+    fun `a boot restore sets the prefix up before tethering starts, then exports the journal's disk`() {
+        val rig = GadgetRig()
+        val disk = SlotSpec(0, GadgetRig.img(1), LunMode.DISK_RO)
+        rig.journalStore.save(Journal(desired = Desired(listOf(disk), prefix = true), udc = FakeConfigFs.PIXEL_UDC))
+        val result = rig.tether().set(on = true)
+        assertTrue(result is TetherResult.Changed && result.active, "$result")
+        val links = rig.state().configLinks
+        assertEquals(LinkOrder.PREFIX, links.keys.take(3), "the prefix went first, ahead of the HAL's links")
+        assertTrue(NCM_FUNCTION in links.values)
+        assertEquals(
+            GadgetRig.img(1),
+            rig
+                .state()
+                .luns
+                .getValue(0)
+                .file,
+            "the tethering call's reconcile exported the disk",
+        )
     }
 
     @Test

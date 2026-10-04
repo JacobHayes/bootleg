@@ -16,9 +16,13 @@ object GadgetNames {
     const val GADGET_ROOT = "/config/usb_gadget/g1"
     const val CONFIG_DIR = "configs/b.1"
     const val MASS_STORAGE_FUNCTION = "mass_storage.bootleg"
+
+    /** The RNDIS network function: FunctionFS, served by the `bootleg-rndis` daemon. */
+    const val RNDIS_FUNCTION = "ffs.bootleg_rndis"
     const val HID_KEYBOARD_FUNCTION = "hid.bootleg_kbd"
-    const val HID_MOUSE_FUNCTION = "hid.bootleg_mouse"
-    const val HID_WHEEL_MOUSE_FUNCTION = "hid.bootleg_mouse_wheel"
+
+    /** The scroll-wheel mouse (see [HidFunctionSpec.MOUSE_REPORT_LENGTH_BYTES]). */
+    const val HID_MOUSE_FUNCTION = "hid.bootleg_mouse_wheel"
     const val OWNED_MARKER = "bootleg"
 }
 
@@ -35,42 +39,36 @@ data class SlotSpec(
     val auto: Boolean = false,
 )
 
-/**
- * The mouse function's report layout. Each layout lives in its own function, so switching layouts is
- * a function swap (configfs refuses HID attribute writes while a function is linked).
- */
-@Serializable
-enum class MouseLayout(
-    val functionName: String,
-    val reportLengthBytes: Int,
-) {
-    /** Boot mouse plus Wheel and AC Pan bytes appended (HID 1.11 B.2): boot hosts read bytes 0..2 only. */
-    WHEEL(GadgetNames.HID_WHEEL_MOUSE_FUNCTION, 5),
-
-    /** The plain 3-byte boot mouse, for firmware that mishandles a longer boot report. */
-    BOOT(GadgetNames.HID_MOUSE_FUNCTION, 3),
-    ;
-
-    companion object {
-        fun ofFunction(functionName: String): MouseLayout? = entries.firstOrNull { it.functionName == functionName }
-    }
-}
-
 @Serializable
 data class HidSpec(
     val keyboard: Boolean = false,
     val mouse: Boolean = false,
-    val mouseLayout: MouseLayout = MouseLayout.WHEEL,
 )
 
-/** What the user wants exposed. LUNs must be dense: 0 until slots.size. */
+/**
+ * What the user wants exposed. LUNs must be dense: 0 until slots.size. [prefix] keeps Bootleg's fixed
+ * prefix (RNDIS, keyboard, mouse; see [LinkOrder]) linked while nothing else is wanted; any slot or
+ * HID input also wants it. Only Bootleg-off clears it.
+ */
 @Serializable
 data class Desired(
     val slots: List<SlotSpec> = emptyList(),
     val hid: HidSpec = HidSpec(),
+    val prefix: Boolean = false,
 ) {
-    val isEmpty: Boolean get() = slots.isEmpty() && !hid.keyboard && !hid.mouse
+    val isEmpty: Boolean get() = slots.isEmpty() && !hid.keyboard && !hid.mouse && !prefix
+
+    /** Whether Bootleg's prefix should be linked. */
+    val wantsPrefix: Boolean get() = !isEmpty
 }
+
+/**
+ * The RNDIS function's daemon: [ABSENT] (not mounted), [HELD] (ep0 open, no descriptors: a config with
+ * the function linked can't bind), [READY] (serving), or [DEAD] (mounted, nobody holds ep0: linked, it
+ * makes every bind fail).
+ */
+@Serializable
+enum class RndisState { ABSENT, HELD, READY, DEAD }
 
 @Serializable
 data class LunState(
@@ -100,6 +98,7 @@ data class GadgetState(
     /** Value of sys.usb.state at read time, for the "HAL is quiet" check. */
     val usbState: String = "",
     val usbConfig: String = "",
+    val rndis: RndisState = RndisState.ABSENT,
 )
 
 /** Primitive configfs mutations. Paths are relative to [GadgetNames.GADGET_ROOT]. */
@@ -144,7 +143,62 @@ sealed interface Op {
     @Serializable data class Unlink(
         val link: String,
     ) : Op
+
+    /** Mounts the RNDIS function (made by [Mkdir]) if needed and starts its daemon held. */
+    @Serializable data object StartRndis : Op
+
+    /** Has the held daemon write its descriptors: the function can bind from now on. */
+    @Serializable data object ReleaseRndis : Op
+
+    /** Stops the daemon of the unlinked RNDIS function and unmounts it, before its [Rmdir]. */
+    @Serializable data object StopRndis : Op
+
+    /**
+     * Has the USB HAL relink its own functions (a round trip through another USB mode and back, see
+     * [Journal.usbFunctionsToRestore]), so they come after Bootleg's links. Only while a held RNDIS function
+     * keeps the config unbindable, so the host never sees the layout in between.
+     */
+    @Serializable data object RelinkForeign : Op
 }
+
+/** The daemon serving [GadgetNames.RNDIS_FUNCTION] (root: a process; tests: a fake). Each call throws IOException. */
+interface RndisDaemon {
+    /** Cheap: read before every op. */
+    fun state(): RndisState
+
+    /** Mounts the function if needed and starts the daemon held; returns once it reports held. */
+    fun start()
+
+    /** Has the held daemon write its descriptors; returns once it has. */
+    fun release()
+
+    /** Stops the daemon, if any, and unmounts. */
+    fun stop()
+}
+
+/** Android's USB function setting (`UsbManager`'s `FUNCTION_*` mask), which the HAL applies. */
+interface UsbFunctions {
+    fun current(): Long
+
+    /** Asks for [functions]; the HAL re-plugs USB asynchronously. Throws IOException. */
+    fun set(functions: Long)
+
+    companion object {
+        const val MTP = 1L shl 2
+        const val PTP = 1L shl 4
+
+        /** Android's own USB tethering (its RNDIS or NCM function). */
+        const val TETHERING = (1L shl 5) or (1L shl 10)
+    }
+}
+
+/**
+ * A UDC write that didn't return within its deadline is still pending in the kernel. Until it returns,
+ * every configfs access fails with this at once: reading or writing the gadget would hang behind it.
+ */
+class UdcStuckException(
+    message: String,
+) : java.io.IOException(message)
 
 /** Thin filesystem seam over configfs so the executor can run against a fake in tests. */
 interface ConfigFs {
@@ -212,6 +266,12 @@ data class Journal(
     val lunInstanceNonce: String = "",
     /** Per slot, why it is exported differently from what was asked (a CD-ROM restored as a read-only disk). */
     val slotNotes: Map<Int, String> = emptyMap(),
+    /**
+     * Android's USB functions before prefix establishment's round trip: set before it changes the mode,
+     * cleared once the prefix is served after it, so a root process that dies in between leaves the
+     * round trip to the next one.
+     */
+    val usbFunctionsToRestore: Long? = null,
 )
 
 /** Durable journal storage (app: a file written atomically; tests: in-memory). */
@@ -227,6 +287,9 @@ interface DeadMan {
         udc: String,
         delaySeconds: Int,
     )
+
+    /** The transition is over: watchdogs armed so far do nothing when they fire. */
+    fun disarm() {}
 }
 
 /** Reads Android USB properties (sys.usb.state / sys.usb.config). */
@@ -280,6 +343,9 @@ interface GadgetController {
     /** Called on ACTION_USB_STATE / service start: finish interrupted transitions, re-apply drift. */
     fun reconcile(): ApplyResult
 
+    /** Sets up the prefix (now wanted) without exporting disks, for tethering; null when there is nothing to do. */
+    fun establishPrefix(): ApplyResult? = null
+
     /** Emergency teardown: remove all Bootleg functions and rebind. */
     fun bootlegOff(): ApplyResult
 }
@@ -288,5 +354,5 @@ interface GadgetController {
 interface HidDescriptorProvider {
     fun keyboard(): ByteArray
 
-    fun mouse(layout: MouseLayout): ByteArray
+    fun mouse(): ByteArray
 }

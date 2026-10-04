@@ -34,8 +34,9 @@ class DefaultGadgetControllerTest {
         val applied = assertInstanceOf(ApplyResult.Applied::class.java, result)
         assertTrue(applied.reenumerated)
         rig.assertHealthy(before)
-        assertEquals(listOf(udc to GadgetLimits.DEAD_MAN_REBIND_DELAY_S), rig.deadMan.arms)
-        assertEquals(listOf(true), rig.deadMan.boundAtArm, "armed before unbinding")
+        // One window for the prefix, one for the disks.
+        assertEquals(List(2) { udc to GadgetLimits.DEAD_MAN_REBIND_DELAY_S }, rig.deadMan.arms)
+        assertEquals(listOf(true, true), rig.deadMan.boundAtArm, "armed before unbinding")
         assertEquals(LunState(iso(1), ro = true, cdrom = true, removable = true, nofua = false, GadgetRig.MARKER), rig.state().luns[0])
         assertEquals(LunState(img(1), ro = false, cdrom = false, removable = true, nofua = false, GadgetRig.MARKER), rig.state().luns[1])
         assertEquals(mapOf(0 to SlotIntent.EXPORTED, 1 to SlotIntent.EXPORTED), rig.journal().slotIntents)
@@ -202,10 +203,22 @@ class DefaultGadgetControllerTest {
                 }
             }
         val controller =
-            DefaultGadgetController(rig.scripted, rig.hal, recordingStore, rig.deadMan, rig.clock, FakeHidDescriptors, rig.hidNodes)
+            DefaultGadgetController(
+                rig.scripted,
+                rig.hal,
+                recordingStore,
+                rig.deadMan,
+                rig.clock,
+                FakeHidDescriptors,
+                rig.hidNodes,
+                rndisDaemon = rig.rndisDaemon,
+                usbFunctions = rig.usbFunctions,
+            )
         controller.apply(twoDisks)
         val phases = phasesWithUdc.map { it.first }.distinctConsecutive()
-        assertEquals(listOf(TransitionPhase.MUTATING, TransitionPhase.UNBINDING, TransitionPhase.IDLE), phases)
+        // The prefix's transition, then the disks'.
+        val transition = listOf(TransitionPhase.MUTATING, TransitionPhase.UNBINDING)
+        assertEquals(transition + transition + TransitionPhase.IDLE, phases)
         assertEquals(udc, phasesWithUdc.first { it.first == TransitionPhase.UNBINDING }.second, "UNBINDING saved before unbinding")
         // An fsync inside the unbound window would eat into the time before the HAL rebinds.
         assertTrue(phasesWithUdc.all { it.second.isNotEmpty() }, "journal written while unbound: $phasesWithUdc")
@@ -240,21 +253,33 @@ class DefaultGadgetControllerTest {
     @Test
     fun `a HAL rebind inside the switch is undone and the switch carries on`() {
         val rig = GadgetRig()
+        assertInstanceOf(ApplyResult.Applied::class.java, rig.controller().apply(Desired(prefix = true)))
+        val armsBefore = rig.deadMan.boundAtArm.size
         var rebound = false
         val interfering =
             ScriptedConfigFs(rig.fs, rig.clock) { call ->
-                // The HAL binds between our unbind and our second link (as if its timer fired early).
-                if (call == "symlink configs/b.1/hid.bootleg_kbd" && !rebound) {
+                // The HAL binds between our unbind and our link (as if its timer fired early).
+                if (call == "symlink configs/b.1/mass_storage.bootleg" && !rebound) {
                     rebound = true
                     rig.fs.asActor(FakeConfigFs.HAL) { rig.fs.write(GadgetPaths.UDC, udc) }
                 }
             }
         val controller =
-            DefaultGadgetController(interfering, rig.hal, rig.journalStore, rig.deadMan, rig.clock, FakeHidDescriptors, rig.hidNodes)
+            DefaultGadgetController(
+                interfering,
+                rig.hal,
+                rig.journalStore,
+                rig.deadMan,
+                rig.clock,
+                FakeHidDescriptors,
+                rig.hidNodes,
+                rndisDaemon = rig.rndisDaemon,
+                usbFunctions = rig.usbFunctions,
+            )
         val result = assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(twoDisks))
         assertTrue(result.reenumerated)
-        assertEquals(listOf("${FakeConfigFs.EXECUTOR} configs/b.1/hid.bootleg_kbd"), rig.fs.boundSymlinkRejections)
-        assertEquals(listOf(true, true), rig.deadMan.boundAtArm, "dead-man re-armed before unbinding again")
+        assertEquals(listOf("${FakeConfigFs.EXECUTOR} configs/b.1/mass_storage.bootleg"), rig.fs.boundSymlinkRejections)
+        assertEquals(listOf(true, true), rig.deadMan.boundAtArm.drop(armsBefore), "dead-man re-armed before unbinding again")
         assertEquals(listOf(FakeConfigFs.HAL), rig.fs.bindsInExecutorWindow)
         assertEquals(emptyList<String>(), GadgetInvariants.violations(rig.state(), GadgetTarget.of(rig.journal())))
     }
@@ -527,7 +552,17 @@ class DefaultGadgetControllerTest {
                 }
             }
         val controller =
-            DefaultGadgetController(dropping, rig.hal, rig.journalStore, rig.deadMan, rig.clock, FakeHidDescriptors, rig.hidNodes)
+            DefaultGadgetController(
+                dropping,
+                rig.hal,
+                rig.journalStore,
+                rig.deadMan,
+                rig.clock,
+                FakeHidDescriptors,
+                rig.hidNodes,
+                rndisDaemon = rig.rndisDaemon,
+                usbFunctions = rig.usbFunctions,
+            )
         val result = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.apply(twoDisks))
         assertTrue(result.reason.contains("ADB (ffs.adb) is no longer linked"), result.reason)
         assertEquals(udc, rig.fs.udc, "gadget stays bound")
@@ -591,9 +626,9 @@ class DefaultGadgetControllerTest {
         val rig = GadgetRig()
         val controller = rig.controller()
         controller.apply(twoDisks)
-        // Something else removes our link (and the kernel unbinds), then rebinds.
+        // Something else removes our disks' link (and the kernel unbinds), then rebinds.
         rig.fs.asActor("other") {
-            rig.fs.unlink("configs/b.1/hid.bootleg_mouse_wheel")
+            rig.fs.unlink("configs/b.1/mass_storage.bootleg")
             rig.fs.write("UDC", udc)
         }
         val startMs = rig.clock.nowMs
@@ -731,7 +766,18 @@ class DefaultGadgetControllerTest {
                 }
             }
 
-        fun controller() = DefaultGadgetController(rig.scripted, rig.hal, store, rig.deadMan, rig.clock, FakeHidDescriptors, rig.hidNodes)
+        fun controller() =
+            DefaultGadgetController(
+                rig.scripted,
+                rig.hal,
+                store,
+                rig.deadMan,
+                rig.clock,
+                FakeHidDescriptors,
+                rig.hidNodes,
+                rndisDaemon = rig.rndisDaemon,
+                usbFunctions = rig.usbFunctions,
+            )
     }
 
     @Test
@@ -762,7 +808,7 @@ class DefaultGadgetControllerTest {
     }
 
     @Test
-    fun `with nothing else linked, reconfiguration runs inside the window and the UDC ends bound`() {
+    fun `with nothing else linked, the first export is built inside the window, and the prefix then keeps the UDC bindable`() {
         val rig = GadgetRig().withNothingLinked()
         val audit = PhaseAudit(rig)
         val controller = audit.controller()
@@ -774,11 +820,10 @@ class DefaultGadgetControllerTest {
         assertEquals(udc, rig.fs.udc)
         val windowOpsAfterExport = audit.windowOpCount
         assertTrue(windowOpsAfterExport > 0, "built inside the window")
-        // ro/cdrom change with nothing else linked: one switch detaches, reconfigures and relinks.
+        // A ro/cdrom change: the prefix stays linked, so mass storage is detached and relinked while bound.
         assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(disk), "mode change")
-        assertTrue(audit.windowOpCount > windowOpsAfterExport, "reconfigured inside the window")
-        // The export started unbound (nothing to unbind); the mode change is a single window, not a detach plus a relink.
-        assertEquals(1, rig.fs.executorWindowsUs.size - windowsBefore, "one window, no separate detach")
+        assertEquals(windowOpsAfterExport, audit.windowOpCount, "reconfigured while bound")
+        assertEquals(3, rig.fs.executorWindowsUs.size - windowsBefore, "the disks' link, then the detach and the relink")
         val marker = LunMarker.inquiryString(rig.journal().lunInstanceNonce)
         assertEquals(LunState(img(1), ro = true, cdrom = false, removable = true, nofua = false, marker), rig.state().luns[0])
         assertEquals(udc, rig.fs.udc)
@@ -881,7 +926,7 @@ class DefaultGadgetControllerTest {
     private fun GadgetRig.withNothingLinked(): GadgetRig {
         fs.asActor("setup") {
             fs.write(GadgetPaths.UDC, "")
-            listOf("function0", "hid.keyboard", "hid.touchpad").forEach { fs.unlink(GadgetPaths.configLink(it)) }
+            fs.unlink(GadgetPaths.configLink("function0"))
         }
         journalStore.save(Journal(udc = udc))
         clock.sleepMs(2_000)

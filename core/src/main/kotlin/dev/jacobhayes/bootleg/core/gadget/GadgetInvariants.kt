@@ -65,6 +65,12 @@ object GadgetInvariants {
                 .filter { GadgetPaths.isOwnedName(it) && it !in wanted }
                 .forEach { add("unwanted link $it") }
             if (!LinkOrder.isCanonical(state.configLinks)) add("links out of order: ${LinkOrder.owned(state.configLinks)}")
+            if (target.prefix && !LinkOrder.prefixFirst(state.configLinks)) add("the prefix isn't first: ${state.configLinks.keys}")
+            if (GadgetNames.RNDIS_FUNCTION in state.configLinks.values &&
+                state.rndis != RndisState.READY
+            ) {
+                add("the RNDIS function is ${state.rndis}")
+            }
             addAll(lunViolations(state, allowedRoots))
             if (target.luns.isNotEmpty() &&
                 state.luns.size != target.luns.size

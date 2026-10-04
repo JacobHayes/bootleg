@@ -12,14 +12,16 @@ import org.junit.jupiter.api.assertThrows
 class GadgetInvariantsTest {
     private val roots = GadgetInvariants.ALLOWED_ROOTS_DEFAULT
     private val lun = LunState(img(1), ro = false, cdrom = false, removable = true, nofua = false)
+    private val prefix = LinkOrder.PREFIX.associateWith { it }
     private val good =
         GadgetState(
             udc = FakeConfigFs.PIXEL_UDC,
-            functions = setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION),
-            configLinks = mapOf("function0" to "ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION to GadgetNames.MASS_STORAGE_FUNCTION),
+            functions = setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION) + LinkOrder.PREFIX,
+            configLinks = prefix + mapOf("function0" to "ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION to GadgetNames.MASS_STORAGE_FUNCTION),
             luns = mapOf(0 to lun),
+            rndis = RndisState.READY,
         )
-    private val target = GadgetTarget(listOf(LunTarget(img(1), LunMode.DISK_RW)), HidSpec())
+    private val target = GadgetTarget(listOf(LunTarget(img(1), LunMode.DISK_RW)), prefix = true)
 
     private fun violations(state: GadgetState) = GadgetInvariants.violations(state, target, roots, foreignBefore = good)
 
@@ -33,7 +35,11 @@ class GadgetInvariantsTest {
         val cases =
             mapOf(
                 "UDC is not bound" to good.copy(udc = ""),
-                "link mass_storage.bootleg missing" to good.copy(configLinks = mapOf("function0" to "ffs.adb")),
+                "link mass_storage.bootleg missing" to good.copy(configLinks = prefix + mapOf("function0" to "ffs.adb")),
+                "the prefix isn't first" to good.copy(configLinks = mapOf("function0" to "ffs.adb") + prefix),
+                "links out of order" to
+                    good.copy(configLinks = mapOf(GadgetNames.MASS_STORAGE_FUNCTION to GadgetNames.MASS_STORAGE_FUNCTION) + prefix),
+                "the RNDIS function is HELD" to good.copy(rndis = RndisState.HELD),
                 "cdrom without ro" to good.copy(luns = mapOf(0 to lun.copy(cdrom = true))),
                 "not dense" to good.copy(luns = mapOf(1 to lun)),
                 "exceeds" to good.copy(luns = (0..GadgetLimits.LUN_COUNT_MAX).associateWith { lun.copy(ro = true, file = img(it)) }),
@@ -42,7 +48,7 @@ class GadgetInvariantsTest {
                 "not canonical" to good.copy(luns = mapOf(0 to lun.copy(file = "/data/media/0/bootleg/../x.img"))),
                 "ADB (ffs.adb) is no longer linked (was function0)" to good.copy(configLinks = good.configLinks - "function0"),
                 "foreign functions removed: [ffs.adb]" to good.copy(functions = good.functions - "ffs.adb"),
-                "unwanted function" to good.copy(functions = good.functions + GadgetNames.HID_MOUSE_FUNCTION),
+                "unwanted function" to good.copy(functions = good.functions + "hid.bootleg_mouse"),
                 "file '' != " to good.copy(luns = mapOf(0 to lun.copy(file = ""))),
                 "lun 0: removable=0" to good.copy(luns = mapOf(0 to lun.copy(removable = false))),
                 "lun 0: nofua=1" to good.copy(luns = mapOf(0 to lun.copy(nofua = true))),

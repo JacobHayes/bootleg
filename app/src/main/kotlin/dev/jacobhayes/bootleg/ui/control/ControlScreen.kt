@@ -52,7 +52,6 @@ import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.KeyboardLeds
 import dev.jacobhayes.bootleg.hid.HidController
@@ -163,7 +162,7 @@ fun ControlScreen(
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 val paneModifier = Modifier.fillMaxSize()
                 when (pane) {
-                    ControlPane.POINTER -> PointerPane(hid, wide, scrolling = spec.mouseLayout == MouseLayout.WHEEL, paneModifier)
+                    ControlPane.POINTER -> PointerPane(hid, wide, paneModifier)
                     ControlPane.KEYS ->
                         KeysPane(
                             hid,
@@ -283,14 +282,14 @@ internal fun statusOf(
 ): ControlStatus {
     if (root is RootStatus.Unavailable) return ControlStatus("Needs root: ${root.reason}", StatusTone.PROBLEM)
     if (busy) return ControlStatus("Reconnecting USB…", StatusTone.NEUTRAL)
-    if (!enabled) return ControlStatus("USB keyboard and mouse, including BIOS. Enabling briefly reconnects USB.", StatusTone.NEUTRAL)
+    if (!enabled) return ControlStatus("USB keyboard and mouse, including BIOS.", StatusTone.NEUTRAL)
     val linked =
         if (gadget == null || gadget.udc.isEmpty()) {
             emptySet()
         } else {
             buildSet {
                 if (GadgetNames.HID_KEYBOARD_FUNCTION in gadget.configLinks.values) add(HidKind.KEYBOARD)
-                if (gadget.configLinks.values.any { MouseLayout.ofFunction(it) != null }) add(HidKind.MOUSE)
+                if (GadgetNames.HID_MOUSE_FUNCTION in gadget.configLinks.values) add(HidKind.MOUSE)
             }
         }
     if (linked.isEmpty()) return ControlStatus("Not on USB yet", StatusTone.NEUTRAL)

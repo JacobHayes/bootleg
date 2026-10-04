@@ -7,7 +7,6 @@ import android.os.SystemClock
 import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
-import dev.jacobhayes.bootleg.core.gadget.MouseLayout
 import dev.jacobhayes.bootleg.core.hid.BootKey
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.HidTestSequence
@@ -66,16 +65,14 @@ data class HidTestResult(
 )
 
 /**
- * The phone-as-keyboard/mouse feature: enables Bootleg's HID functions through the backend, owns
- * the [HidSession] while enabled, and turns UI input into reports. Input methods must be called on
- * the main thread; the session writes from its own thread. [mouseLayout] is the user's setting;
- * every spec this applies uses it, whoever asked (the Control switch, remote `hid.set`).
+ * The phone-as-keyboard/mouse feature: enables input through the backend (the functions themselves
+ * stay linked in Bootleg's prefix), owns the [HidSession] while enabled, and turns UI input into
+ * reports. Input methods must be called on the main thread; the session writes from its own thread.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class HidController(
     private val backend: BootlegBackend,
     private val scope: CoroutineScope,
-    private val mouseLayout: () -> MouseLayout = { MouseLayout.WHEEL },
 ) {
     private val keyboard = KeyboardInput()
     private val mouse = MouseInput()
@@ -166,28 +163,9 @@ class HidController(
         scope.launch { setSpec(if (enabled) HidSpec(keyboard = true, mouse = true) else HidSpec()) }
     }
 
-    /**
-     * The Settings switch changed the mouse layout. With the mouse on, the functions are re-applied:
-     * the mouse function is swapped in one re-enumeration and the session reopens. With it off,
-     * the next enable picks the layout up.
-     */
-    fun onMouseLayoutChanged() {
-        scope.launch { applyMouseLayout() }
-    }
-
-    /** [onMouseLayoutChanged], returning the apply's result, or null when nothing had to change. */
-    suspend fun applyMouseLayout(): ApplyResult? =
-        withContext(Dispatchers.Main.immediate) {
-            // Decided under the lock: an apply queued ahead of this one may have turned the mouse off.
-            enableMutex.withLock {
-                val current = spec.value
-                if (current.mouse && current.mouseLayout != mouseLayout()) applyLocked(current.copy(mouseLayout = mouseLayout())) else null
-            }
-        }
-
     suspend fun setSpec(target: HidSpec): ApplyResult =
         withContext(Dispatchers.Main.immediate) {
-            enableMutex.withLock { applyLocked(target.copy(mouseLayout = mouseLayout())) }
+            enableMutex.withLock { applyLocked(target) }
         }
 
     /** Caller holds [enableMutex] on the main thread. */
@@ -266,9 +244,7 @@ class HidController(
         }
 
     fun touchpad(actions: List<TouchpadAction>) {
-        // The compatible mouse has no wheel; its function would take only bytes 0..2 anyway.
-        val wheel = spec.value.mouseLayout == MouseLayout.WHEEL
-        for (action in actions) if (wheel || action !is TouchpadAction.Scroll) sendMouse(mouse.apply(action))
+        for (action in actions) sendMouse(mouse.apply(action))
     }
 
     fun click(button: MouseButton) = sendMouse(mouse.click(button))

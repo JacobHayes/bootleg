@@ -75,7 +75,7 @@ class HidRelay internal constructor(
 
     /** An open `/dev/hidgN` as the relay uses it; a fake in JVM tests. */
     interface RelayEndpoint {
-        /** The function's `report_length`: the leading part of each app report this function takes. */
+        /** The function's `report_length`, which every app report for it must match. */
         val reportLengthBytes: Int
 
         /** Nonblocking writes within the 50ms report deadline; [report] is exactly [reportLengthBytes]. */
@@ -402,17 +402,13 @@ class HidRelay internal constructor(
         }
     }
 
-    /**
-     * The part of an app report [endpoint] takes. App mouse reports use the wheel layout; the
-     * compatible mouse takes their first 3 bytes, which are the boot report (HID 1.11 B.2).
-     */
+    /** [report], checked against the length [endpoint]'s function was created with. */
     private fun fit(
         report: ByteArray,
         endpoint: RelayEndpoint,
     ): ByteArray {
-        val lengthBytes = endpoint.reportLengthBytes
-        check(lengthBytes in 1..report.size) { "endpoint takes $lengthBytes bytes of a ${report.size}-byte report" }
-        return if (lengthBytes == report.size) report else report.copyOf(lengthBytes)
+        check(endpoint.reportLengthBytes == report.size) { "endpoint takes ${endpoint.reportLengthBytes}-byte reports, not ${report.size}" }
+        return report
     }
 
     private fun detachClient() {

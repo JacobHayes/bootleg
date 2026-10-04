@@ -360,10 +360,27 @@ class RecordingDeadMan(
         boundAtArm += fs.udc.isNotEmpty()
     }
 
+    /** Disarms seen; a watchdog armed before the last one is a no-op. */
+    var disarmCount = 0
+        private set
+
+    override fun disarm() {
+        disarmCount++
+    }
+
+    /**
+     * Runs the detached shell: bind if still unbound; if that fails (an unserved RNDIS function keeps
+     * the config unbindable) and nobody holds a hidg fd, remove all our links and bind again.
+     */
     fun fire() {
         val (udc, _) = arms.lastOrNull() ?: return
         fs.asActor(FakeConfigFs.DEAD_MAN) {
-            if (fs.udc.isEmpty()) {
+            if (fs.udc.isNotEmpty()) return@asActor
+            try {
+                fs.write(GadgetPaths.UDC, udc)
+            } catch (_: IOException) {
+                if (fs.list(GadgetPaths.FUNCTIONS_DIR).any { fs.hidFdHolders(it).isNotEmpty() }) return@asActor
+                fs.list(GadgetNames.CONFIG_DIR).filter(GadgetPaths::isOwnedName).forEach { fs.unlink(GadgetPaths.configLink(it)) }
                 try {
                     fs.write(GadgetPaths.UDC, udc)
                 } catch (_: IOException) {
@@ -435,15 +452,117 @@ class FakeHidNodes(
 
     companion object {
         const val RELAY = "relay"
-        val RELAY_FUNCTIONS = listOf(GadgetNames.HID_KEYBOARD_FUNCTION) + MouseLayout.entries.map { it.functionName }
+        val RELAY_FUNCTIONS = listOf(GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_MOUSE_FUNCTION)
     }
 }
 
 object FakeHidDescriptors : HidDescriptorProvider {
     override fun keyboard(): ByteArray = byteArrayOf(0x05, 0x01, 0x09, 0x06, 0xA1.toByte(), 0x01, 0xC0.toByte())
 
-    override fun mouse(layout: MouseLayout): ByteArray =
-        byteArrayOf(0x05, 0x01, 0x09, 0x02, 0xA1.toByte(), 0x01, layout.reportLengthBytes.toByte(), 0xC0.toByte())
+    override fun mouse(): ByteArray = byteArrayOf(0x05, 0x01, 0x09, 0x02, 0xA1.toByte(), 0x01, 0x05, 0xC0.toByte())
+}
+
+/**
+ * The RNDIS daemon as the kernel sees it: while it is held or dead its linked function makes every
+ * bind fail; [die] is a crash (with no_disconnect the gadget stays bound); [start] on a linked dead
+ * function makes the kernel unbind the gadget.
+ */
+class FakeRndisDaemon(
+    private val fs: FakeConfigFs,
+    private val clock: FakeClock? = null,
+) : RndisDaemon {
+    private var daemon = RndisState.ABSENT
+    private val function = GadgetNames.RNDIS_FUNCTION
+    val events = mutableListOf<String>()
+
+    /** Start fails while set (the binary is missing, the mount refused, ...). */
+    var startFails = false
+
+    init {
+        fs.rejectBind = { linked -> linked.values.any { it.endsWith("/$function") } && state() != RndisState.READY }
+    }
+
+    override fun state(): RndisState = if (fs.exists(GadgetPaths.function(function))) daemon else RndisState.ABSENT
+
+    override fun start() {
+        if (!fs.exists(GadgetPaths.function(function)) || startFails) throw IOException("the daemon didn't start")
+        check(daemon != RndisState.HELD) { "a second held daemon" }
+        clock?.advanceUs(START_COST_US)
+        // A start replaces any daemon; reopening a linked function's ep0 makes the kernel unbind the gadget.
+        if (fs.udc.isNotEmpty() && fs.isLinkedFunction(function)) {
+            fs.asActor("kernel") { fs.write(GadgetPaths.UDC, "") }
+        }
+        transition(RndisState.HELD, "start")
+    }
+
+    override fun release() {
+        check(daemon == RndisState.HELD) { "release in $daemon" }
+        transition(RndisState.READY, "release")
+    }
+
+    override fun stop() {
+        check(!fs.isLinkedFunction(function)) { "stopping the daemon while its function is linked" }
+        transition(RndisState.ABSENT, "stop")
+    }
+
+    fun die() = transition(RndisState.DEAD, "die")
+
+    private fun transition(
+        to: RndisState,
+        event: String,
+    ) {
+        // A start or release inside a window of ours: the config couldn't bind meanwhile.
+        if (fs.udc.isEmpty() && event != "die") fs.windowUnbindable = true
+        daemon = to
+        events += event
+    }
+
+    companion object {
+        const val START_COST_US = 60_000L
+    }
+}
+
+/**
+ * `UsbManager`'s functions over [FakeHal]: setting them makes the HAL unlink its `functionN` links and
+ * link the new set after ours, then try to bind (which fails while a held RNDIS function is linked).
+ */
+class FakeUsbFunctions(
+    private val hal: FakeHal,
+    private val clock: FakeClock,
+) : UsbFunctions {
+    val sets = mutableListOf<Long>()
+
+    /** How long after a set the HAL applies it; null: it never does. */
+    var halDelayMs: Long? = 0L
+
+    /** Functions Android reports on top of the HAL's mode (its USB tethering). */
+    var extra = 0L
+    private var pending: Long? = null
+
+    /** The last setting until the HAL has applied it, then the HAL's mode (whoever set it). */
+    override fun current(): Long =
+        (
+            pending ?: if (hal.config.startsWith("mtp")) {
+                UsbFunctions.MTP
+            } else if (hal.config.startsWith("ptp")) {
+                UsbFunctions.PTP
+            } else {
+                0L
+            }
+        ) or
+            extra
+
+    override fun set(functions: Long) {
+        sets += functions
+        val names = listOfNotNull("mtp".takeIf { functions == UsbFunctions.MTP }, "ptp".takeIf { functions == UsbFunctions.PTP }) + "adb"
+        pending = functions
+        val apply = {
+            pending = null
+            hal.setFunctions(names.joinToString(","))
+        }
+        val delayMs = halDelayMs ?: return
+        if (delayMs == 0L) apply() else clock.schedule(delayMs, apply)
+    }
 }
 
 /**
@@ -454,8 +573,9 @@ class GadgetRig(
     seed: Long = 0,
     hostFiles: Set<String> = HOST_FILES,
     costs: OpCostsUs = OpCostsUs(),
+    otherAppHid: Boolean = false,
 ) {
-    val fs = FakeConfigFs.pixel(hostFiles)
+    val fs = FakeConfigFs.pixel(hostFiles, otherAppHid)
     val clock = FakeClock()
     val hal = FakeHal(fs, clock, seed)
     val scripted = ScriptedConfigFs(fs, clock, costs) { hal.maybeInterfere() }
@@ -463,6 +583,8 @@ class GadgetRig(
     var deadMan = RecordingDeadMan(fs, clock, DEAD_MAN_ARM_COST_US)
         private set
     val hidNodes = FakeHidNodes(fs)
+    val rndisDaemon = FakeRndisDaemon(fs, clock)
+    val usbFunctions = FakeUsbFunctions(hal, clock)
 
     init {
         fs.nowUs = { clock.nowUs }
@@ -481,13 +603,15 @@ class GadgetRig(
             hidNodes,
             newLunInstanceNonce = { NONCE },
             fileSizeBytes = { fileSizes[it] },
+            rndisDaemon = rndisDaemon,
+            usbFunctions = usbFunctions,
         )
     }
 
     /** Backing file sizes the controller sees (unknown when absent, as for an unreadable file). */
     val fileSizes = mutableMapOf<String, Long>()
 
-    fun state(): GadgetState = GadgetReader(fs, hal).read()
+    fun state(): GadgetState = GadgetReader(fs, hal, rndisDaemon).read()
 
     fun journal(): Journal = journalStore.load()
 
