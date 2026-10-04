@@ -27,6 +27,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -51,6 +54,7 @@ import dev.jacobhayes.bootleg.ImageFile
 import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.ui.common.ConfirmDialog
 import dev.jacobhayes.bootleg.ui.common.EmptyState
@@ -74,6 +78,7 @@ fun DrivesScreen(
     val gadget by backend.gadgetState.collectAsState()
     val tethering by backend.usbTethering.collectAsState()
     val tetheringBusy by backend.usbTetheringBusy.collectAsState()
+    val tetherMode by backend.usbTetherMode.collectAsState()
     val snackbar = remember { SnackbarHostState() }
     var picker by remember { mutableStateOf<SlotPickerTarget?>(null) }
     var confirmEjectAll by remember { mutableStateOf(false) }
@@ -105,10 +110,12 @@ fun DrivesScreen(
             RootBanner(root)
             TetherCard(
                 tethering = tethering,
+                mode = tetherMode,
                 busy = tetheringBusy,
                 disksExposed = gadget?.let(TetherPolicy::exposedLuns).orEmpty().isNotEmpty(),
                 rootGranted = root is RootStatus.Granted,
-                onToggle = controller::setUsbTethering,
+                onToggle = { controller.setUsbTethering(it) },
+                onModeChange = controller::setUsbTetherMode,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
             )
             if (state.slots.isEmpty()) {
@@ -261,29 +268,37 @@ private const val EJECT_HINT =
         "Drive not showing up? Rescan disks on the computer (Windows: Disk Management, Action, Rescan Disks), " +
         "or turn on Reconnect USB after a disk change in Settings."
 
-/** The phone's kernel tethers over NCM only (no RNDIS); Windows has an inbox NCM driver from 10 2004. */
-private const val TETHER_HOSTS = "Works with macOS, Linux, and Windows 10 (2004) or later."
+/** RNDIS has inbox drivers from Windows 7 on (and Linux) but none on macOS; NCM from Windows 10 2004. */
+private fun tetherHosts(mode: TetherMode): String =
+    when (mode) {
+        TetherMode.RNDIS -> "RNDIS: Windows 7 or later and Linux. For a Mac, choose NCM."
+        TetherMode.NCM -> "NCM: macOS, Linux, and Windows 10 (2004) or later."
+    }
 
 /**
- * Android's USB tethering next to the drives: it shares the USB connection with them, and switching
- * it re-plugs USB, so it can't change while a disk is exposed.
+ * USB tethering next to the drives, over the chosen transport: RNDIS (Bootleg's adapter) switches
+ * without touching USB; NCM (Android's) re-plugs USB, so it can't change while a disk is exposed.
  */
 @Composable
 private fun TetherCard(
     tethering: Boolean?,
+    mode: TetherMode,
     busy: Boolean,
     disksExposed: Boolean,
     rootGranted: Boolean,
     onToggle: (Boolean) -> Unit,
+    onModeChange: (TetherMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val blocked = disksExposed && mode == TetherMode.NCM
     val status =
         when {
-            busy -> "Reconnecting USB…"
+            busy -> "Switching…"
             tethering == null -> "Checking…"
-            disksExposed -> "Eject every disk to turn it ${if (tethering) "off" else "on"}: switching re-plugs USB"
+            blocked -> "Eject every disk to turn NCM ${if (tethering) "off" else "on"}: it re-plugs USB"
             tethering -> "On · the computer shares this phone's internet"
-            else -> "Off · switching re-plugs USB (keyboard and mouse drop for a second)"
+            mode == TetherMode.NCM -> "Off · NCM re-plugs USB (keyboard and mouse drop for a second)"
+            else -> "Off"
         }
     OutlinedCard(modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -292,13 +307,24 @@ private fun TetherCard(
             Column(Modifier.weight(1f)) {
                 Text("USB tethering", style = MaterialTheme.typography.titleMedium)
                 Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(TETHER_HOSTS, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(tetherHosts(mode), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SingleChoiceSegmentedButtonRow(Modifier.padding(top = 8.dp)) {
+                    TetherMode.entries.forEachIndexed { index, entry ->
+                        SegmentedButton(
+                            selected = entry == mode,
+                            onClick = { onModeChange(entry) },
+                            shape = SegmentedButtonDefaults.itemShape(index, TetherMode.entries.size),
+                            enabled = rootGranted && !busy,
+                            modifier = Modifier.testTag("usb-tethering-mode-${entry.wireName}"),
+                        ) { Text(entry.name) }
+                    }
+                }
             }
             Spacer(Modifier.width(12.dp))
             Switch(
                 checked = tethering == true,
                 onCheckedChange = onToggle,
-                enabled = rootGranted && !busy && tethering != null && !disksExposed,
+                enabled = rootGranted && !busy && tethering != null && !blocked,
                 modifier = Modifier.testTag("usb-tethering-switch"),
             )
         }

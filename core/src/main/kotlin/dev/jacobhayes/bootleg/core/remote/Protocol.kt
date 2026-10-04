@@ -531,10 +531,11 @@ data class HidView(
 
 const val HID_STATUS_RELEASE_PENDING = "release_pending"
 
-/** The phone's USB tethering, as Android reports it. */
+/** The phone's USB tethering, as Android reports it, and its mode (`TetherMode.wireName`; absent in `tether.set` replies). */
 @Serializable
 data class TetherView(
     val on: Boolean,
+    val mode: String? = null,
 )
 
 @Serializable

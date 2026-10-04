@@ -13,6 +13,7 @@ import dev.jacobhayes.bootleg.core.gadget.LunState
 import dev.jacobhayes.bootleg.core.gadget.RndisState
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.hid.HidEndpoint
@@ -52,14 +53,22 @@ class FakeBootlegBackend(
     private val tetheringFlow = MutableStateFlow<Boolean?>(initialUsbTethering)
     override val usbTethering: StateFlow<Boolean?> = tetheringFlow.asStateFlow()
     override val usbTetheringBusy: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
+    private val modeFlow = MutableStateFlow(TetherMode.DEFAULT)
+    override val usbTetherMode: StateFlow<TetherMode> = modeFlow.asStateFlow()
 
-    /** Same rule as the root side: refused while a LUN holds media. */
+    override fun setUsbTetherMode(mode: TetherMode) {
+        modeFlow.value = mode
+    }
+
+    /** Same rule as the root side: NCM is refused while a LUN holds media. */
     override suspend fun setUsbTethering(on: Boolean): TetherResult {
         delay(latencyMs)
         val active = tetheringFlow.value == true
         if (on == active) return TetherResult.Unchanged(active)
         val exposed = gadgetFlow.value?.let(TetherPolicy::exposedLuns).orEmpty()
-        if (exposed.isNotEmpty()) return TetherResult.Refused(active, exposed, TetherPolicy.DISKS_EXPOSED_REASON)
+        if (exposed.isNotEmpty() && modeFlow.value == TetherMode.NCM) {
+            return TetherResult.Refused(active, exposed, TetherPolicy.DISKS_EXPOSED_REASON)
+        }
         tetheringFlow.value = on
         val state = checkNotNull(gadgetFlow.value)
         return TetherResult.Changed(on, ApplyResult.Applied(state, reenumerated = false), switchSettled = true)

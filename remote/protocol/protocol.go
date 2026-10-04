@@ -409,7 +409,8 @@ type HidState struct {
 
 // TetherState is state.tether: the phone's USB tethering as Android reports it.
 type TetherState struct {
-	On bool `json:"on"`
+	On   bool   `json:"on"`
+	Mode string `json:"mode,omitempty"` // "rndis" or "ncm"; absent in tether.set replies and from older phones
 }
 
 // TetherResult is the tether.set result. Warning is set when tethering

@@ -1675,7 +1675,7 @@ class RemoteController(
                         ?.sorted(),
                 ),
             lease = leaseViewFor(),
-            tether = device.usbTethering?.let(::TetherView),
+            tether = device.usbTethering?.let { TetherView(it, device.usbTetherMode) },
         )
     }
 

@@ -10,6 +10,7 @@ import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.LunModes
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
+import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -169,14 +170,25 @@ class DrivesController(
             }
         }
 
-    /** Turns Android's USB tethering on or off; the root side refuses while a disk is exposed. */
-    fun setUsbTethering(on: Boolean) {
+    /** Stores the mode; tethering that is on switches over, and a refused switch keeps the old mode. */
+    fun setUsbTetherMode(mode: TetherMode) {
+        val previous = backend.usbTetherMode.value
+        if (backend.usbTetheringBusy.value || previous == mode) return
+        backend.setUsbTetherMode(mode)
+        if (backend.usbTethering.value == true) setUsbTethering(true) { if (it is TetherResult.Refused) backend.setUsbTetherMode(previous) }
+    }
+
+    /** Turns USB tethering on (over the mode) or off; the root side refuses an NCM change while a disk is exposed. */
+    fun setUsbTethering(
+        on: Boolean,
+        afterResult: (TetherResult) -> Unit = {},
+    ) {
         if (backend.usbTetheringBusy.value) return
         message.value = null
         scope.launch {
             message.value =
                 try {
-                    describe(backend.setUsbTethering(on))
+                    describe(backend.setUsbTethering(on).also(afterResult))
                 } catch (error: Exception) {
                     "USB tethering failed: ${error.message ?: error::class.simpleName}"
                 }

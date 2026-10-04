@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# L4 USB tethering check (~50s): with HID on and its session open, turn Android's USB tethering on
-# through Bootleg (root closes every hidg fd before the HAL's re-plug and reopens nothing until it
+# L4 USB tethering check, NCM mode (~50s; the phone's mode is put back after): with HID on and its
+# session open, turn Android's USB tethering on through Bootleg (root closes every hidg fd before the HAL's re-plug and reopens nothing until it
 # has settled), confirm no hidg fd crossed the re-plug and HID still types (F24), confirm the Mac gets the phone's NCM interface with a DHCP address and reaches the internet
 # through it (curl bound to that interface), expose a read-only disk next to it (the Mac mounts it
 # while the network and HID stay up), confirm Bootleg refuses to switch tethering while that disk is
@@ -117,6 +117,7 @@ tether_on=0
 volume_seen=0
 disk_exposed=0
 hid_before=
+mode_before=
 hid_spec=
 
 # Puts HID back as it was before the check (HidController closes its session before removing
@@ -180,6 +181,9 @@ cleanup() {
         echo "check-device-tether: WARN: HID is not back to $hid_before; fix it in the Control tab" >&2
         [[ $status != 0 ]] || status=1
     fi
+    if [[ -n $mode_before ]]; then
+        call TETHER_MODE --extra "mode:s:$mode_before" >/dev/null || echo "check-device-tether: WARN: tethering mode not put back to $mode_before" >&2
+    fi
     if [[ $lock_taken == 1 ]]; then rmdir "$LOCK"; fi
     exit "$status"
 }
@@ -237,6 +241,9 @@ if [[ $(phone_sha256 "$PHONE_DIR/$IMAGE") != "$(sha256_of "$FIXTURE_DIR/$IMAGE")
 fi
 hid_before=$(call HID_STATE | jq -c '{keyboard, mouse}')
 interfaces_before=$(ifconfig -l)
+# This check is about Android's NCM tethering (macOS has no RNDIS driver); check-device-rndis.sh covers RNDIS.
+mode_before=$(call TETHER_STATE | jq -r .mode)
+[[ $(call TETHER_MODE --extra mode:s:ncm | jq -r .mode) == ncm ]] || fail "could not set the tethering mode to NCM"
 
 step "HID on (keyboard + mouse)"
 [[ $(call HID_ENABLE --extra keyboard:b:true --extra mouse:b:true) == *ApplyResult.Applied* ]] || fail "HID_ENABLE failed"

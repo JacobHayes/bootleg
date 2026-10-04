@@ -42,11 +42,18 @@ class RemoteDevice(
     override suspend fun setUsbTethering(on: Boolean): TetherResult = backend.setUsbTethering(on)
 
     override val snapshots: Flow<DeviceSnapshot> =
-        combine(backend.journal, backend.images, hid.link, backend.usbTethering) { journal, images, link, tethering ->
+        combine(
+            backend.journal,
+            backend.images,
+            hid.link,
+            backend.usbTethering,
+            backend.usbTetherMode,
+        ) { journal, images, link, tethering, mode ->
             snapshotOf(journal, images).copy(
                 hidLink = statusOf(link),
                 hidNotReading = (link as? HidLinkState.Open)?.notReading.orEmpty(),
                 usbTethering = tethering,
+                usbTetherMode = mode.wireName,
             )
         }.distinctUntilChanged()
 

@@ -14,6 +14,7 @@ import dev.jacobhayes.bootleg.core.gadget.TransitionPhase
 import dev.jacobhayes.bootleg.core.hid.HidDescriptors
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.tether.TetherLimits
+import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.UsbTetherController
 import dev.jacobhayes.bootleg.download.BackgroundJobScheduling
 import java.io.File
@@ -60,7 +61,10 @@ class BootlegRootService : RootService() {
     private val tetherTransitions by lazy { FileTetherTransitionStore(clock = clock) }
 
     // Lazy: a device without the tethering service still serves disks and HID.
-    private val tether by lazy { UsbTetherController(RootTetherPort(this), controller, tetherTransitions, clock, hidNodes) }
+    private val tether by lazy {
+        val port = RootTetherPort(this)
+        UsbTetherController(port, controller, tetherTransitions, clock, hidNodes, port.rndis(rndisDaemons))
+    }
 
     private lateinit var rndisDaemons: RndisDaemons
 
@@ -240,7 +244,14 @@ class BootlegRootService : RootService() {
             }
 
             // The HAL's re-plug rebinds every linked hid function: the relay stays closed until it has settled.
-            override fun setUsbTethering(on: Boolean): String = call { BootlegJson.encodeToString(gadgetChange { tether.set(on) }) }
+            override fun setUsbTethering(
+                on: Boolean,
+                mode: String,
+            ): String =
+                call {
+                    val tetherMode = requireNotNull(TetherMode.fromWireName(mode)) { "unknown tethering mode: '$mode'" }
+                    BootlegJson.encodeToString(gadgetChange { tether.set(on, tetherMode) })
+                }
 
             override fun usbTethered(): Boolean = call(tetherReadLock) { tether.usbTethered() }
 

@@ -104,6 +104,15 @@ class RndisDaemons(
         File(MOUNT_POINT).delete()
     }
 
+    fun mediaConnected(): Boolean = status()?.takeIf { isOurs(it.pid) }?.media == true
+
+    /** Connects or disconnects the medium; off is applied only once the daemon reports it drained. */
+    fun setMedia(connected: Boolean) =
+        command(release = status()?.released == true, media = connected) {
+            it.media == connected &&
+                it.drained
+        }
+
     /** SIGKILLs every daemon of ours without waiting: a UDC write stuck behind its ep0 needs it gone at once. */
     fun kill() = daemonPids().forEach { signal(it, OsConstants.SIGKILL) }
 

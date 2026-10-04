@@ -6,7 +6,29 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetController
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
 import dev.jacobhayes.bootleg.core.gadget.HidFunctions
 import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
+import dev.jacobhayes.bootleg.core.gadget.LinkOrder
+import dev.jacobhayes.bootleg.core.gadget.RndisState
 import kotlinx.serialization.Serializable
+import java.io.IOException
+
+/**
+ * The transport USB tethering uses, one at a time: Bootleg's own RNDIS function (Windows 7 and
+ * later, Linux) or Android's NCM (macOS, Linux, Windows 10 2004 or later).
+ */
+@Serializable
+enum class TetherMode(
+    val wireName: String,
+) {
+    RNDIS("rndis"),
+    NCM("ncm"),
+    ;
+
+    companion object {
+        val DEFAULT = RNDIS
+
+        fun fromWireName(name: String): TetherMode? = entries.firstOrNull { it.wireName == name }
+    }
+}
 
 /** Bounds on one USB tethering change (TigerStyle: every wait is bounded). */
 object TetherLimits {
@@ -28,6 +50,9 @@ object TetherLimits {
 
     /** A transition marker left by a root process that died is waited out at most this long after it was written. */
     const val TRANSITION_GATE_MS_MAX = 10_000L
+
+    /** Android tethers or untethers the RNDIS TAP within ~100ms of the request. */
+    const val RNDIS_INTERFACE_WAIT_MS_MAX = 3_000L
 
     /** How long an on-to-off broadcast must hold before it can clear the remembered choice; `ncm0` comes back ~4s after a re-enumeration (Windows 7). */
     const val EXTERNAL_STOP_CONFIRM_MS = 10_000L
@@ -140,9 +165,14 @@ object TetherPolicy {
                 it.startsWith("rndis.")
         }
 
+    /** The TAP of Bootleg's RNDIS daemon, which Android tethers as a virtual interface. */
+    const val RNDIS_INTERFACE = "bootleg_rndis"
+
     fun isUsbTetherInterface(name: String): Boolean = usbInterfacePattern.matches(name)
 
-    fun usbTethered(tetheredInterfaces: Collection<String>): Boolean = tetheredInterfaces.any(::isUsbTetherInterface)
+    /** USB tethering over either transport. */
+    fun usbTethered(tetheredInterfaces: Collection<String>): Boolean =
+        tetheredInterfaces.any { isUsbTetherInterface(it) || it == RNDIS_INTERFACE }
 }
 
 /**
@@ -220,6 +250,28 @@ interface TetherPort {
 }
 
 /**
+ * Bootleg's RNDIS transport as root sees it: Android tethering the daemon's TAP (`TETHERING_VIRTUAL`,
+ * no USB change) and the daemon's medium, which decides whether frames pass and whether the host's
+ * adapter shows a cable plugged in. Each converges on its own.
+ */
+interface RndisTetherPort {
+    /** Asks Android to tether the TAP and waits (≤ [timeoutMs]) for its answer. */
+    fun start(timeoutMs: Long): TetherPort.StartOutcome
+
+    /** Asks Android to stop tethering the TAP; callers watch [tethered]. */
+    fun stop()
+
+    /** Android reports the TAP tethered. Cheap; throws while unknown. */
+    fun tethered(): Boolean
+
+    /** The daemon's medium is connected (false while no daemon runs). */
+    fun mediaConnected(): Boolean
+
+    /** Connects or disconnects the medium; returns once the daemon applied it (and, off, drained). Throws [IOException]. */
+    fun setMedia(connected: Boolean)
+}
+
+/**
  * Written before every request, so a root process that dies mid-change, or a start Android never
  * answered, leaves a trace that [UsbTetherController.awaitPendingTransition] waits out.
  */
@@ -266,27 +318,124 @@ class UsbTetherController(
     private val transitions: TetherTransitionStore,
     private val clock: Clock,
     private val hidNodes: HidNodeGuard,
+    /** Null when this Android can't tether an interface by name: RNDIS is then unsupported. */
+    private val rndis: RndisTetherPort? = null,
 ) {
-    fun usbTethered(): Boolean = port.usbTethered()
+    /** Tethered over either transport, as root's callback reports it. */
+    fun usbTethered(): Boolean = port.usbTethered() || rndis?.tethered() == true
 
     /**
-     * Returns only once no marker is left (the switch settled, or the marker's window was waited out
-     * here), so a caller that keeps HID closed until this returns keeps it closed through the HAL's
-     * re-plug.
+     * Turns tethering on over [mode] (the other transport off first) or everything off. Returns only
+     * once no marker is left (the switch settled, or the marker's window was waited out here), so a
+     * caller that keeps HID closed until this returns keeps it closed through the HAL's re-plug.
      */
-    fun set(on: Boolean): TetherResult {
-        val result = runCatching { change(on) }
+    fun set(
+        on: Boolean,
+        mode: TetherMode = TetherMode.NCM,
+    ): TetherResult {
+        val result =
+            runCatching {
+                awaitPendingTransition()
+                val rndisOn = on && mode == TetherMode.RNDIS
+                if (rndisOn && rndis == null) return@runCatching TetherResult.Failed(usbTethered(), RNDIS_UNSUPPORTED_REASON)
+                // An NCM start that will be refused mustn't take RNDIS down first.
+                val ncmDecision = TetherPolicy.decide(on && !rndisOn, port.usbTethered(), gadget.read())
+                if (ncmDecision is TetherDecision.RefuseDisksExposed) {
+                    return@runCatching TetherResult.Refused(usbTethered(), ncmDecision.exposedLuns, TetherPolicy.DISKS_EXPOSED_REASON)
+                }
+                val first = if (rndisOn) changeNcm(false) else changeRndis(false)
+                if (first is TetherResult.Failed || first is TetherResult.Refused) return@runCatching first
+                val second = if (rndisOn) changeRndis(true) else changeNcm(on)
+                if (second is TetherResult.Unchanged && first is TetherResult.Changed) first.copy(active = usbTethered()) else second
+            }
         if (transitions.load() != null) awaitPendingTransition()
         return result.getOrThrow()
     }
 
-    private fun change(on: Boolean): TetherResult {
-        awaitPendingTransition()
+    /**
+     * RNDIS on: the prefix in place (set up first, without disks), Android tethering the TAP, then the
+     * medium connected, so the host's DHCP request finds Android's server. Off: the medium first, so
+     * nothing passes once Android stops. Each part converges on its own (a failed stop or a dead root
+     * process can leave one of them behind); a failed start is taken back down. No USB change.
+     */
+    private fun changeRndis(on: Boolean): TetherResult {
+        val port =
+            rndis ?: return if (on) TetherResult.Failed(usbTethered(), RNDIS_UNSUPPORTED_REASON) else TetherResult.Unchanged(usbTethered())
+        if (port.tethered() == on && port.mediaConnected() == on) return TetherResult.Unchanged(usbTethered())
+        var reconcile = ApplyResult.Applied(gadget.read(), reenumerated = false) as ApplyResult
+        if (on && !rndisReady(gadget.read())) {
+            val exposed = TetherPolicy.exposedLuns(gadget.read())
+            if (exposed.isNotEmpty()) return TetherResult.Refused(usbTethered(), exposed, TetherPolicy.DISKS_EXPOSED_REASON)
+            gadget.establishPrefix()?.let { reconcile = it }
+            if (!rndisReady(gadget.read())) return TetherResult.Failed(usbTethered(), "$RNDIS_NOT_READY_REASON: $reconcile")
+            reconcile = gadget.reconcile()
+        }
+        val failure =
+            if (on) {
+                rndisOn(port)?.let { failure ->
+                    rndisOff(port)?.let { "$failure (and undoing it failed: $it)" } ?: failure
+                }
+            } else {
+                rndisOff(port)
+            }
+        return if (failure ==
+            null
+        ) {
+            TetherResult.Changed(usbTethered(), reconcile, switchSettled = true)
+        } else {
+            TetherResult.Failed(usbTethered(), failure)
+        }
+    }
+
+    /** Why turning RNDIS on failed, or null. */
+    private fun rndisOn(port: RndisTetherPort): String? {
+        if (!port.tethered()) {
+            val failure =
+                when (val outcome = requestStart(port::start)) {
+                    TetherPort.StartOutcome.Started ->
+                        "Android didn't tether the adapter within ${TetherLimits.RNDIS_INTERFACE_WAIT_MS_MAX}ms"
+                            .takeUnless { poll(clock.nowMs() + TetherLimits.RNDIS_INTERFACE_WAIT_MS_MAX) { port.tethered() } }
+                    is TetherPort.StartOutcome.Failed -> "Android refused: ${TetherErrors.describe(outcome.errorCode)}"
+                    TetherPort.StartOutcome.TimedOut -> "Android didn't answer within ${TetherLimits.START_CALLBACK_WAIT_MS_MAX}ms"
+                }
+            if (failure != null) return failure
+        }
+        return try {
+            port.setMedia(true)
+            null
+        } catch (e: IOException) {
+            "the network adapter didn't connect: ${e.message}"
+        }
+    }
+
+    /** Why turning RNDIS off failed, or null. A medium that can't be shown drained fails it. */
+    private fun rndisOff(port: RndisTetherPort): String? {
+        if (port.mediaConnected()) {
+            try {
+                port.setMedia(false)
+            } catch (e: IOException) {
+                return "the network adapter didn't disconnect: ${e.message}"
+            }
+        }
+        if (!port.tethered()) return null
+        // A stop that throws still gets its bounded check: Android may have untethered anyway.
+        val stopError = runCatching { port.stop() }.exceptionOrNull()
+        if (poll(clock.nowMs() + TetherLimits.RNDIS_INTERFACE_WAIT_MS_MAX) { !port.tethered() }) return null
+        return "Android didn't stop tethering within ${TetherLimits.RNDIS_INTERFACE_WAIT_MS_MAX}ms${stopError?.let {
+            " (${it.message})"
+        }.orEmpty()}"
+    }
+
+    private fun rndisReady(state: GadgetState): Boolean =
+        LinkOrder.prefixFirst(state.configLinks) && state.rndis == RndisState.READY && state.udc.isNotEmpty()
+
+    /** NCM: Android's USB tethering, which re-plugs USB through the HAL. */
+    private fun changeNcm(on: Boolean): TetherResult {
         var gadgetState = gadget.read()
         when (val decision = TetherPolicy.decide(on, port.usbTethered(), gadgetState)) {
-            TetherDecision.AlreadyDone -> return TetherResult.Unchanged(port.usbTethered())
+            TetherDecision.AlreadyDone -> return TetherResult.Unchanged(usbTethered())
             is TetherDecision.RefuseDisksExposed ->
-                return TetherResult.Refused(port.usbTethered(), decision.exposedLuns, TetherPolicy.DISKS_EXPOSED_REASON)
+                return TetherResult.Refused(usbTethered(), decision.exposedLuns, TetherPolicy.DISKS_EXPOSED_REASON)
             TetherDecision.Proceed -> Unit
         }
         // Once tethering is on, changing the USB mode would end it, so the prefix can't be set up after.
@@ -295,16 +444,16 @@ class UsbTetherController(
         // The HAL's re-plug rebinds every linked hid function: no hidg fd (ours or anyone's) may be open across it.
         hidNodes.closeAll()
         val holders = hidNodes.holders((HidFunctions.linked(gadgetState) + HidFunctions.owned(gadgetState)).sorted())
-        if (holders.isNotEmpty()) return TetherResult.Failed(port.usbTethered(), "$HID_NODE_HELD_REASON: ${holders.joinToString(", ")}")
+        if (holders.isNotEmpty()) return TetherResult.Failed(usbTethered(), "$HID_NODE_HELD_REASON: ${holders.joinToString(", ")}")
         transitions.save(TetherTransition(on, clock.nowMs()))
         if (on) {
-            when (val outcome = requestStart()) {
+            when (val outcome = requestStart(port::start)) {
                 TetherPort.StartOutcome.Started -> Unit
                 is TetherPort.StartOutcome.Failed -> {
                     // Android refused outright: nothing started, so there is nothing to stop.
                     transitions.clear()
                     return TetherResult.Failed(
-                        port.usbTethered(),
+                        usbTethered(),
                         "Android refused USB tethering: ${TetherErrors.describe(outcome.errorCode)}",
                     )
                 }
@@ -320,7 +469,7 @@ class UsbTetherController(
         if (!awaitTethered(on)) {
             if (on) return withdraw("USB tethering didn't come up within ${TetherLimits.INTERFACE_WAIT_MS_MAX}ms", verified = true)
             // The marker stays: whatever Android does next, [set] waits it out before returning.
-            return TetherResult.Failed(port.usbTethered(), "USB tethering didn't stop within ${TetherLimits.INTERFACE_WAIT_MS_MAX}ms")
+            return TetherResult.Failed(usbTethered(), "USB tethering didn't stop within ${TetherLimits.INTERFACE_WAIT_MS_MAX}ms")
         }
         val switchSettled = awaitSwitchSettled(on, clock.nowMs() + TetherLimits.SWITCH_WAIT_MS_MAX)
         if (switchSettled) {
@@ -331,7 +480,7 @@ class UsbTetherController(
         }
         // Android may change it again meanwhile (its own switch, an unplug), so report what it says now.
         val reconcile = gadget.reconcile()
-        return TetherResult.Changed(port.usbTethered(), reconcile, switchSettled)
+        return TetherResult.Changed(usbTethered(), reconcile, switchSettled)
     }
 
     /**
@@ -370,14 +519,14 @@ class UsbTetherController(
         port.stop()
         val stopped = awaitTethered(false) && awaitSwitchSettled(false, clock.nowMs() + TetherLimits.SWITCH_WAIT_MS_MAX)
         if (stopped && verified) transitions.clear()
-        return TetherResult.Failed(port.usbTethered(), reason)
+        return TetherResult.Failed(usbTethered(), reason)
     }
 
     /** Asks Android to start, retrying once on a transient error. */
-    private fun requestStart(): TetherPort.StartOutcome {
+    private fun requestStart(start: (Long) -> TetherPort.StartOutcome): TetherPort.StartOutcome {
         var outcome: TetherPort.StartOutcome = TetherPort.StartOutcome.TimedOut
         for (attempt in 1..TetherLimits.START_ATTEMPT_COUNT_MAX) {
-            outcome = port.start(TetherLimits.START_CALLBACK_WAIT_MS_MAX)
+            outcome = start(TetherLimits.START_CALLBACK_WAIT_MS_MAX)
             val retry = outcome is TetherPort.StartOutcome.Failed && TetherErrors.isTransient(outcome.errorCode)
             if (!retry) break
         }
@@ -421,10 +570,12 @@ class UsbTetherController(
         return done()
     }
 
-    private companion object {
-        const val HID_NODE_HELD_REASON = "a keyboard/mouse device node is held open, so USB tethering was left as it was"
+    companion object {
+        private const val HID_NODE_HELD_REASON = "a keyboard/mouse device node is held open, so USB tethering was left as it was"
+        const val RNDIS_UNSUPPORTED_REASON = "This Android can't tether Bootleg's RNDIS adapter; choose NCM"
+        const val RNDIS_NOT_READY_REASON = "Bootleg's USB functions couldn't be set up"
 
         /** No wait here spans more than the transition gate, which bounds the loop independently of the clock. */
-        const val POLL_COUNT_MAX = (TetherLimits.TRANSITION_GATE_MS_MAX / TetherLimits.POLL_INTERVAL_MS).toInt() + 1
+        private const val POLL_COUNT_MAX = (TetherLimits.TRANSITION_GATE_MS_MAX / TetherLimits.POLL_INTERVAL_MS).toInt() + 1
     }
 }

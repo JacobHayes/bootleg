@@ -219,8 +219,10 @@ data class DeviceSnapshot(
     val hidLink: HidLinkStatus = HidLinkStatus.STOPPED,
     /** While [hidLink] is open: the endpoints whose reports the computer isn't reading. */
     val hidNotReading: Set<HidKind> = emptySet(),
-    /** Android's USB tethering; null until Android has reported it. */
+    /** USB tethering over either transport; null until Android has reported it. */
     val usbTethering: Boolean? = null,
+    /** The phone's tethering mode (`TetherMode.wireName`). */
+    val usbTetherMode: String = "rndis",
 )
 
 /**

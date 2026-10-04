@@ -13,6 +13,7 @@ import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.hid.HidTestSequence
 import dev.jacobhayes.bootleg.core.remote.LeaseHolder
 import dev.jacobhayes.bootleg.core.remote.Principal
+import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.root.BootlegJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException
@@ -149,11 +150,20 @@ class CommandProvider : ContentProvider() {
                             // USB tethering (L4 check:device:tether): the same path as the Drives switch.
                             "TETHER_ON" -> BootlegJson.encodeToString(backend.setUsbTethering(true))
                             "TETHER_OFF" -> BootlegJson.encodeToString(backend.setUsbTethering(false))
+                            "TETHER_MODE" -> {
+                                val mode =
+                                    requireNotNull(
+                                        arguments.getString("mode")?.let(TetherMode::fromWireName),
+                                    ) { "mode must be rndis or ncm" }
+                                backend.setUsbTetherMode(mode)
+                                buildJsonObject { put("mode", mode.wireName) }.toString()
+                            }
                             "TETHER_STATE" ->
                                 buildJsonObject {
                                     put("tethered", backend.usbTethered())
                                     put("observed", backend.usbTethering.value)
                                     put("choice", app.prefs.usbTetherChoice.value)
+                                    put("mode", backend.usbTetherMode.value.wireName)
                                 }.toString()
                             // Remote (L4 check:device:remote). Approve/revoke here stand in for the in-app buttons.
                             "REMOTE_ON" -> {

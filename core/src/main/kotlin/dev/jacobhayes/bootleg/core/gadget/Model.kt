@@ -343,7 +343,7 @@ interface GadgetController {
     /** Called on ACTION_USB_STATE / service start: finish interrupted transitions, re-apply drift. */
     fun reconcile(): ApplyResult
 
-    /** Sets up the prefix (now wanted) without exporting disks, for tethering; null when there is nothing to do. */
+    /** Sets up the prefix (marking it wanted) without exporting disks, for tethering; null when there is nothing to do. */
     fun establishPrefix(): ApplyResult? = null
 
     /** Emergency teardown: remove all Bootleg functions and rebind. */

@@ -409,15 +409,24 @@ func hidCommand(ctx context.Context, call *invocation, c *client) error {
 	return err
 }
 
-// tetherHostNote: the phone's kernel has NCM but no RNDIS, and Windows has an
+// tetherHostNote says which computers the phone's tethering mode serves: RNDIS
+// has inbox drivers from Windows 7 and on Linux, not on macOS; Windows has an
 // inbox NCM driver only from Windows 10 2004.
-const tetherHostNote = "USB tethering works with macOS, Linux, and Windows 10 (2004) or later."
+func tetherHostNote(mode string) string {
+	if mode == "rndis" {
+		return "USB tethering (RNDIS) works with Windows 7 or later and Linux; for a Mac, choose NCM on the phone."
+	}
+	return "USB tethering (NCM) works with macOS, Linux, and Windows 10 (2004) or later."
+}
 
 func tetherText(tether *protocol.TetherState) string {
 	if tether == nil {
 		return "unknown"
 	}
-	return onOff(tether.On)
+	if tether.Mode == "" {
+		return onOff(tether.On)
+	}
+	return onOff(tether.On) + " (" + tether.Mode + ")"
 }
 
 func tetherStatusCommand(ctx context.Context, call *invocation, c *client) error {
@@ -450,7 +459,11 @@ func tetherCommand(ctx context.Context, call *invocation, c *client) error {
 	}
 	fmt.Fprintf(call.stdout, "USB tethering: %s\n", onOff(result.Tether.On))
 	if on {
-		fmt.Fprintln(call.stderr, tetherHostNote)
+		mode := ""
+		if state, _, err := c.fetchState(ctx); err == nil && state.Tether != nil {
+			mode = state.Tether.Mode
+		}
+		fmt.Fprintln(call.stderr, tetherHostNote(mode))
 	}
 	if result.Warning != "" {
 		fmt.Fprintf(call.stderr, "Warning: %s\n", result.Warning)

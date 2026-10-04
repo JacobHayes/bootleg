@@ -2,6 +2,7 @@ package dev.jacobhayes.bootleg
 
 import android.content.Context
 import android.content.SharedPreferences
+import dev.jacobhayes.bootleg.core.tether.TetherMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +17,8 @@ class Prefs(
     private val restoreFlow = MutableStateFlow(preferences.getBoolean(KEY_RESTORE_AFTER_REBOOT, false))
     private val remoteEnabledFlow = MutableStateFlow(preferences.getBoolean(KEY_REMOTE_ENABLED, false))
     private val usbTetherChoiceFlow = MutableStateFlow(preferences.getBoolean(KEY_USB_TETHER_CHOICE, false))
+    private val usbTetherModeFlow =
+        MutableStateFlow(preferences.getString(KEY_USB_TETHER_MODE, null)?.let(TetherMode::fromWireName) ?: TetherMode.DEFAULT)
 
     val wifiOnlyDownloads: StateFlow<Boolean> = wifiOnlyFlow.asStateFlow()
     val restoreAfterReboot: StateFlow<Boolean> = restoreFlow.asStateFlow()
@@ -25,6 +28,14 @@ class Prefs(
 
     /** USB tethering as last chosen through Bootleg (see `TetherChoice`); restore after reboot turns it back on. */
     val usbTetherChoice: StateFlow<Boolean> = usbTetherChoiceFlow.asStateFlow()
+
+    /** The transport USB tethering uses (Drives card); the root call, restore and remote use it. */
+    val usbTetherMode: StateFlow<TetherMode> = usbTetherModeFlow.asStateFlow()
+
+    fun setUsbTetherMode(mode: TetherMode) {
+        preferences.edit().putString(KEY_USB_TETHER_MODE, mode.wireName).apply()
+        usbTetherModeFlow.value = mode
+    }
 
     fun setUsbTetherChoice(on: Boolean) {
         if (usbTetherChoiceFlow.value == on) return
@@ -73,6 +84,7 @@ class Prefs(
         const val KEY_NOTIFICATIONS_ASKED = "notifications_asked"
         const val KEY_REMOTE_ENABLED = "remote_enabled"
         const val KEY_USB_TETHER_CHOICE = "usb_tether_choice"
+        const val KEY_USB_TETHER_MODE = "usb_tether_mode"
         const val KEY_CONTROL_PANE = "control_pane"
         const val KEY_RECONNECT_AFTER_DISK_CHANGE = "reconnect_after_disk_change"
     }

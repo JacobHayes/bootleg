@@ -129,6 +129,10 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
   bind once its FunctionFS functions are ready; the same functions again is a no-op. With an
   unready FunctionFS function of ours linked the HAL still relinks at once, its pull-up fails until
   our daemon writes its descriptors, and the host sees only the final layout.
+- Android 17's `TetheringManager.startTethering(TetheringRequest(TETHERING_VIRTUAL = 7)
+  .setInterfaceName(name))`, called by uid 0, tethers any existing interface: IpServer gives it a
+  /24, runs DHCP, DNS, NAT to the upstream, IPv6 and offload, and untethers when the interface goes
+  away. The legacy `tether(iface)` throws ("unsupported after V").
 - A TAP interface (`/dev/tun`, `TUNSETIFF` with `IFF_TAP | IFF_NO_PI`) carries Ethernet frames and
   is gone with the last fd. Measured over RNDIS, one frame per USB transfer: 6-7 MiB/s phone to PC.
 
@@ -454,7 +458,7 @@ rndis/     Go: the RNDIS device (control messages, PACKET_MSG framing, FunctionF
   - `grantSelfStorage()`
   - `hidOpen(kind, clientToken)`, `hidWrite(kind, report) → result`, `hidReadOutput(kind)`,
     `hidClose(kind)` (`kind` is `keyboard` or `mouse`)
-  - `setUsbTethering(on) → TetherResult`, `usbTethered()`
+  - `setUsbTethering(on, mode) → TetherResult`, `usbTethered()` (either transport)
   - later: `setRemotePowerProfile(on)`
 
   Image paths (`/sdcard/...` is mapped to `/data/media/0/...`) must be normalized (no `.`, `..` or
@@ -665,11 +669,25 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
 
 ## USB tethering
 
-Bootleg doesn't run its own network stack: it asks Android to start or stop USB tethering, and
-Android links its NCM function, runs DHCP/NAT/IPv6 and picks the upstream (no picker). Carrier
-entitlement checks stay on (`exemptFromEntitlementCheck` is never set).
+Bootleg runs no network stack of its own: Android runs DHCP, DNS, NAT, IPv6 and picks the upstream
+(no picker) on whichever interface carries the host's traffic. Carrier entitlement checks stay on
+(`exemptFromEntitlementCheck` is never set). One switch and a mode (`TetherMode`, a preference on
+the Drives card), one transport at a time: **RNDIS** (default) or **NCM**. A request turns the other
+transport off first, then the mode's on (or everything off); an NCM change that would be refused
+(disks exposed) is refused before RNDIS changes. Tethering on is a use of Bootleg: it sets the
+prefix up first when it isn't (`establishPrefix`, without disks; once NCM is on the mode change it
+needs would end NCM).
 
-- **Root side** (`IBootlegRoot.setUsbTethering(on)`, under the gadget lock so no apply, eject or
+- **RNDIS transport** (no USB change, so it works with disks exposed once the prefix is up). On:
+  Android tethers the TAP (`TETHERING_VIRTUAL` by name, ≤ 2s for the answer, one retry for a
+  transient error, ≤ 3s until reported), then the daemon's medium connects (it sends
+  `MEDIA_CONNECT`) and frames pass. Off is the mirror image, medium first; the daemon reports it
+  only once the frame being written to the host has finished (≤ 500ms), else off fails. Android's
+  tethering of the TAP and the medium each converge on their own, so a failed stop or a root
+  process that died between them is repaired by the next request; a start that fails is taken
+  back down. Unplugging changes nothing; Android untethers the TAP if it goes (the daemon died).
+  Without the API to tether an interface by name, RNDIS fails as unsupported.
+- **NCM transport** (`IBootlegRoot.setUsbTethering(on, mode)`, under the gadget lock so no apply, eject or
   reconcile of ours overlaps the HAL's re-plug). `UsbTetherController` (core, fake clock in tests)
   runs the sequence against a `TetherPort`: the root service's `TetheringManager`, by reflection,
   with one event callback registered for the root process's life. Until that callback has
@@ -758,10 +776,13 @@ entitlement checks stay on (`exemptFromEntitlementCheck` is never set).
   (step 3), so the host loses the keyboard and mouse for the whole call (~3–5s), not just the
   ~1s re-plug. `HidSession` sees its writes fail and reopens with its usual backoff once the
   fence lifts; input meanwhile is dropped, never replayed late.
-- **Surfaces:** a "USB tethering" card on Drives (switch, state, the refusal reason while disks
-  are exposed, and a note that the re-plug briefly drops the keyboard and mouse). The notification
-  (shown while disks are exported) and the Quick Settings tile subtitle mention it when it's on.
-  Debug hooks `TETHER_ON`, `TETHER_OFF`, `TETHER_STATE`.
+- **Surfaces:** a "USB tethering" card on Drives (switch, RNDIS/NCM buttons, the hosts the mode
+  serves, the refusal reason while disks are exposed in NCM, and a note that NCM's re-plug briefly
+  drops the keyboard and mouse). Choosing the other mode while tethering is on switches over (a
+  refused switch keeps the old mode). The notification and the Quick Settings tile subtitle mention
+  it when it's on; the remote's `State.tether` carries the mode. Debug hooks `TETHER_ON`,
+  `TETHER_OFF`, `TETHER_MODE`, `TETHER_STATE`. The app's broadcast observer counts `bootleg_rndis`
+  as tethered too.
 
 ## Remote (phase 3)
 
@@ -913,8 +934,8 @@ frames, pairing); a `core` test keeps it in sync with `core/remote/Protocol.kt` 
   - `slots.apply{slots:[{lun, imageId, mode}], ifRev}`, `slot.eject{lun, force}`,
     `slot.reinsert{lun}`
   - `hid.set{keyboard, mouse}`
-  - `tether.set{on}`: refused with `disks_exposed` by root, from the live LUNs under the gadget
-    lock; 75s deadline. Clients always warn that turning it off may cut the remote (they can't
+  - `tether.set{on}`: in the phone's mode; an NCM change is refused with `disks_exposed` by root,
+    from the live LUNs under the gadget lock; 75s deadline. Clients always warn that turning it off may cut the remote (they can't
     tell whether it reaches the phone over that USB link).
   - `bootkey.run{vendor, action}`, `bootkey.cancel`
   - `paste.prepare{text}` → `{planId, unsupported, durationMs}`. Then `paste.run{planId}`, which

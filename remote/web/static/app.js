@@ -569,15 +569,16 @@ function renderState() {
   const values = luns.filter((element) => !element.disabled).map((element) => element.value);
   lunSelect.value = values.includes(selectedLun) ? selectedLun : (existing.length < LUN_COUNT_MAX ? "new" : "");
 
-  // Absent until the phone knows. Switching re-plugs USB, so the phone refuses it while a disk has media.
+  // Absent until the phone knows. NCM (not RNDIS) re-plugs USB, so the phone refuses it while a disk has media.
   const tether = state.tether;
-  $("tether-state").textContent = tether ? (tether.on ? "On" : "Off") : "Unknown";
-  const disksExposed = (state.slots || []).some((slot) => slot.status === "exported");
+  const mode = tether && tether.mode ? ` (${tether.mode.toUpperCase()})` : "";
+  $("tether-state").textContent = tether ? (tether.on ? "On" : "Off") + mode : "Unknown";
+  const blocked = (state.slots || []).some((slot) => slot.status === "exported") && !(tether && tether.mode === "rndis");
   $("tether-on").hidden = !!(tether && tether.on);
   $("tether-off").hidden = !(tether && tether.on);
   for (const id of ["tether-on", "tether-off"]) {
-    $(id).disabled = !holdsLease() || disksExposed;
-    $(id).title = disksExposed ? "Eject every disk first: switching re-plugs USB" : "";
+    $(id).disabled = !holdsLease() || blocked;
+    $(id).title = blocked ? "Eject every disk first: switching NCM re-plugs USB" : "";
   }
 
   const hid = state.hid || {};

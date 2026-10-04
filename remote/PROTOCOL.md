@@ -176,9 +176,10 @@ Details:
   slots failed and the rest were applied; errors `device`, `device_attention` (needs the user on
   the phone), `timeout` (10 s). A started operation finishes atomically even if the session ends;
   its reply then goes nowhere, and every session sees the result in `state`.
-- **`tether.set`** turns the phone's USB tethering on or off. Either way USB re-plugs, so the
-  phone refuses it with `disks_exposed` while any LUN holds media (it checks the live gadget, so a
-  slot the host already ejected doesn't count); HID may stay on and loses the host for about a
+- **`tether.set`** turns the phone's USB tethering on or off, in the mode set on the phone
+  (`Tether.mode`). RNDIS doesn't re-plug USB (once Bootleg's functions are set up); NCM does, so the
+  phone then refuses it with `disks_exposed` while any LUN holds media (it checks the live gadget, so
+  a slot the host already ejected doesn't count); HID may stay on and loses the host for about a
   second, as with `hid.set`. Asking for the current state answers at once without a re-plug (also
   with disks exposed). Android failures (carrier entitlement, unsupported, nothing came up within
   5 s) are `device`. The reply carries the state Android reports afterwards, and `warning` (a
@@ -283,7 +284,8 @@ Image = {imageId: string, name: string, sizeBytes: int, defaultMode: "cdrom"|"di
 Hid   = {keyboard: bool, mouse: bool, wheel: bool, status?: "release_pending",
          link?: "stopped"|"connecting"|"open"|"reconnecting"|"failed"|"restart_required",
          notReading?: ["keyboard"|"mouse"]}
-Tether = {on: bool}   // the phone's USB tethering, as Android reports it; absent until known
+Tether = {on: bool, mode?: "rndis"|"ncm"}   // on: either transport, as Android reports it; absent until known.
+  // mode: the phone's tethering mode (absent in tether.set replies and from older phones).
 
 Catalog  = {catalogRev: int, refreshing: bool, truncated: bool, distros: [Distro]}
 Distro   = {distroId: string, name: string, category: "desktop"|"server"|"rescue",

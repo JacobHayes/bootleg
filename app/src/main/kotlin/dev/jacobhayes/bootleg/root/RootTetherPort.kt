@@ -2,6 +2,7 @@ package dev.jacobhayes.bootleg.root
 
 import android.content.Context
 import android.util.Log
+import dev.jacobhayes.bootleg.core.tether.RndisTetherPort
 import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.core.tether.TetherPort
 import java.lang.reflect.InvocationHandler
@@ -30,6 +31,9 @@ class RootTetherPort(
 
     /** Null until Android's first report; the callback replays the current state when registered. */
     private val usbTethered = AtomicReference<Boolean?>(null)
+
+    /** Every tethered interface's name, from the same callback. */
+    private val tetheredNames = AtomicReference<Set<String>>(emptySet())
     private val firstReport = CountDownLatch(1)
 
     init {
@@ -46,7 +50,14 @@ class RootTetherPort(
             ).invoke(manager, callbackExecutor, callback)
     }
 
-    override fun start(timeoutMs: Long): TetherPort.StartOutcome {
+    override fun start(timeoutMs: Long): TetherPort.StartOutcome = start(Int::class.javaPrimitiveType!!, TETHERING_USB, timeoutMs)
+
+    /** `startTethering(type or request, executor, callback)`, waiting ≤ [timeoutMs] for the answer. */
+    private fun start(
+        requestClass: Class<*>,
+        request: Any,
+        timeoutMs: Long,
+    ): TetherPort.StartOutcome {
         require(timeoutMs > 0) { "timeoutMs must be positive, got $timeoutMs" }
         val startCallbackClass = Class.forName("$MANAGER_CLASS\$StartTetheringCallback")
         // A fresh callback per attempt: an answer that comes after the timeout lands on an abandoned latch.
@@ -62,8 +73,8 @@ class RootTetherPort(
                 answered.countDown()
             }
         managerClass
-            .getMethod("startTethering", Int::class.javaPrimitiveType, Executor::class.java, startCallbackClass)
-            .invoke(manager, TETHERING_USB, callbackExecutor, callback)
+            .getMethod("startTethering", requestClass, Executor::class.java, startCallbackClass)
+            .invoke(manager, request, callbackExecutor, callback)
         if (!answered.await(timeoutMs, TimeUnit.MILLISECONDS)) return TetherPort.StartOutcome.TimedOut
         return outcome.get()
     }
@@ -73,10 +84,47 @@ class RootTetherPort(
     }
 
     override fun usbTethered(): Boolean {
-        if (!firstReport.await(FIRST_REPORT_WAIT_MS_MAX, TimeUnit.MILLISECONDS)) {
-            error("Android hasn't reported the tethering state within ${FIRST_REPORT_WAIT_MS_MAX}ms")
-        }
+        awaitFirstReport()
         return checkNotNull(usbTethered.get())
+    }
+
+    private fun awaitFirstReport() =
+        check(firstReport.await(FIRST_REPORT_WAIT_MS_MAX, TimeUnit.MILLISECONDS)) {
+            "Android hasn't reported the tethering state within ${FIRST_REPORT_WAIT_MS_MAX}ms"
+        }
+
+    /**
+     * Bootleg's RNDIS transport: Android tethers the daemon's TAP by name (`TetheringRequest` of type
+     * `TETHERING_VIRTUAL`, root only) and the daemon's medium follows. Null when this Android can't
+     * tether an interface by name (probed once).
+     */
+    fun rndis(daemons: RndisDaemons): RndisTetherPort? {
+        val request =
+            runCatching {
+                val builderClass = Class.forName("$MANAGER_CLASS\$TetheringRequest\$Builder")
+                val builder = builderClass.getConstructor(Int::class.javaPrimitiveType).newInstance(TETHERING_VIRTUAL)
+                builderClass.getMethod("setInterfaceName", String::class.java).invoke(builder, TetherPolicy.RNDIS_INTERFACE)
+                checkNotNull(builderClass.getMethod("build").invoke(builder))
+            }.onFailure { Log.i(TAG, "tethering an interface by name isn't available: RNDIS is unsupported", it) }
+                .getOrNull() ?: return null
+        val stopCallbackClass = Class.forName("$MANAGER_CLASS\$StopTetheringCallback")
+        val stop = managerClass.getMethod("stopTethering", request.javaClass, Executor::class.java, stopCallbackClass)
+        return object : RndisTetherPort {
+            override fun start(timeoutMs: Long) = start(request.javaClass, request, timeoutMs)
+
+            override fun stop() {
+                stop.invoke(manager, request, callbackExecutor, proxy(stopCallbackClass) { _, _ -> })
+            }
+
+            override fun tethered(): Boolean {
+                awaitFirstReport()
+                return TetherPolicy.RNDIS_INTERFACE in tetheredNames.get()
+            }
+
+            override fun mediaConnected(): Boolean = daemons.mediaConnected()
+
+            override fun setMedia(connected: Boolean) = daemons.setMedia(connected)
+        }
     }
 
     /**
@@ -85,14 +133,15 @@ class RootTetherPort(
      * else the name ([TetherPolicy.isUsbTetherInterface]).
      */
     private fun onTethered(argument: Any?) {
+        val elements = (argument as? Collection<*>).orEmpty().filterNotNull()
         val tethered =
-            (argument as? Collection<*>).orEmpty().any { element ->
+            elements.any { element ->
                 when (element) {
-                    null -> false
                     is String -> TetherPolicy.isUsbTetherInterface(element)
                     else -> (element.javaClass.getMethod("getType").invoke(element) as Int) in USB_TETHERING_TYPES
                 }
             }
+        tetheredNames.set(elements.map { it as? String ?: it.javaClass.getMethod("getInterface").invoke(it) as String }.toSet())
         usbTethered.set(tethered)
         firstReport.countDown()
     }
@@ -127,9 +176,10 @@ class RootTetherPort(
         const val TETHERING_SERVICE = "tethering"
         const val MANAGER_CLASS = "android.net.TetheringManager"
 
-        // TetheringManager.TETHERING_USB / TETHERING_NCM.
+        // TetheringManager.TETHERING_USB / TETHERING_NCM / TETHERING_VIRTUAL.
         const val TETHERING_USB = 1
         const val TETHERING_NCM = 4
+        const val TETHERING_VIRTUAL = 7
         val USB_TETHERING_TYPES = setOf(TETHERING_USB, TETHERING_NCM)
 
         /** Android replays the state as soon as the callback is registered (≈ 1ms); this bounds a stuck service. */

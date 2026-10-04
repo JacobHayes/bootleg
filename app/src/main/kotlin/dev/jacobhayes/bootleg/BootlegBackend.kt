@@ -6,6 +6,7 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetState
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.hid.HidEndpoint
 import dev.jacobhayes.bootleg.hid.HidRelayNotice
@@ -77,12 +78,17 @@ interface BootlegBackend {
     /** What the root relay says when it drops (or refuses) the HID fds on its own; the open HID session follows it. */
     val hidRelayNotices: Flow<HidRelayNotice>
 
-    /** Android's USB tethering: on, off, or null until Android has reported it. */
+    /** USB tethering over either transport: on, off, or null until Android has reported it. */
     val usbTethering: StateFlow<Boolean?>
 
     /** A tethering change is running. */
     val usbTetheringBusy: StateFlow<Boolean>
 
-    /** Turns Android's USB tethering on or off (re-plugs USB; refused while a disk is exposed). */
+    /** The transport tethering uses (a preference); a caller switches tethering that is on over to a new one. */
+    val usbTetherMode: StateFlow<TetherMode>
+
+    fun setUsbTetherMode(mode: TetherMode)
+
+    /** Turns USB tethering on over [usbTetherMode], or off. NCM re-plugs USB and is refused while a disk is exposed; RNDIS doesn't. */
     suspend fun setUsbTethering(on: Boolean): TetherResult
 }

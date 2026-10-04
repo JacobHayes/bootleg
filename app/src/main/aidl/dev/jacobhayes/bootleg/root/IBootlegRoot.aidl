@@ -39,7 +39,8 @@ interface IBootlegRoot {
     void setKeepAwake(int stayOnWhilePluggedIn, boolean lowLatency, boolean wakeScreen);
     // Android's USB tethering on or off (re-plugs USB; refused while a disk is exposed).
     // Returns JSON TetherResult. Holds the gadget lock for the whole change.
-    String setUsbTethering(boolean on);
+    // mode: TetherMode.wireName (RNDIS needs no re-plug).
+    String setUsbTethering(boolean on, String mode);
     // Whether Android reports a USB interface tethered.
     boolean usbTethered();
     // Sends the app's ScheduleDownloadReceiver a broadcast that may start activities from the

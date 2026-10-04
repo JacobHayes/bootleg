@@ -216,14 +216,14 @@ class DefaultGadgetController(
     }
 
     /**
-     * Sets up the prefix, if the journal wants it and it isn't in place, without exporting any disk:
-     * Android's USB tethering is about to start, and its re-plug may not happen with disks exposed,
-     * while the prefix can't be set up once tethering is on. The journal's slots stay as they are; the
-     * reconcile after tethering exports them. Null when there is nothing to do.
+     * Sets up the prefix, if it isn't in place, without exporting any disk, and records it as wanted
+     * (tethering is a use of Bootleg): RNDIS needs it, and once NCM is on the USB mode change it needs
+     * would end NCM. The journal's slots stay; a later reconcile exports them. Null when there is
+     * nothing to do (or disks have media, so the re-plug isn't allowed now).
      */
     override fun establishPrefix(): ApplyResult? {
-        val journal = journalStore.load()
-        if (!journal.desired.wantsPrefix) return null
+        val loaded = journalStore.load()
+        val journal = if (loaded.desired.wantsPrefix) loaded else save(loaded.copy(desired = loaded.desired.copy(prefix = true)))
         val current = reader.read()
         if (LinkOrder.prefixFirst(current.configLinks) && current.rndis == RndisState.READY && current.udc.isNotEmpty()) return null
         if (current.luns.values.any { it.file.isNotEmpty() }) return null

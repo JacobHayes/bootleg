@@ -22,6 +22,7 @@ import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.hid.HidEndpoint
@@ -82,6 +83,9 @@ class BootlegBackendImpl(
 
     override val usbTethering: StateFlow<Boolean?> = tethering.state
     override val usbTetheringBusy: StateFlow<Boolean> = tethering.busy
+    override val usbTetherMode: StateFlow<TetherMode> = prefs.usbTetherMode
+
+    override fun setUsbTetherMode(mode: TetherMode) = prefs.setUsbTetherMode(mode)
 
     private val bindMutex = Mutex()
 
@@ -146,13 +150,13 @@ class BootlegBackendImpl(
 
     override suspend fun setUsbTethering(on: Boolean): TetherResult = tethering.set(on)
 
-    /** Root's own view (its TetheringManager callback), not the broadcast-fed [usbTethering]. */
+    /** Root's own view (its TetheringManager callback, either transport), not the broadcast-fed [usbTethering]. */
     suspend fun usbTethered(): Boolean = call { it.usbTethered() }
 
     /** Like a gadget call: the root side reconciles after the HAL's re-plug, so the journal belongs to this boot. */
     private suspend fun userTetherCall(on: Boolean): TetherResult {
         withContext(Dispatchers.IO) { BootGeneration.markJournalCurrent(context) }
-        val result = call { BootlegJson.decodeFromString<TetherResult>(it.setUsbTethering(on)) }
+        val result = call { BootlegJson.decodeFromString<TetherResult>(it.setUsbTethering(on, prefs.usbTetherMode.value.wireName)) }
         runCatchingNonCancel { refreshGadget() }
         if (hasExports) BootlegService.start(context)
         return result
