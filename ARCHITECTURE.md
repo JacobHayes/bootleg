@@ -17,6 +17,12 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
 - macOS can't open `/dev/rdiskN` without sudo (root:operator), so host-side checks rely on
   auto-mounted filesystems and `diskutil info`.
 - `newfs_msdos`, `mkfs.exfat`, `mke2fs` and `losetup` (toybox) are on the phone.
+- The kernel numbers a config's interfaces in link order, and configfs lists a config's entries
+  newest first (readdir of `configs/b.1` showed `hid.bootleg_mouse_wheel`, `hid.bootleg_kbd`,
+  `mass_storage.bootleg`, `function1`, `function0` for links made in the reverse order). Windows
+  keeps a composite device's child drivers per interface number (`USB\VID_18D1&PID_4EEC&MI_nn`,
+  no class in the hardware ID): a function that moves to another's number gets that one's driver
+  (a mouse on the keyboard's old number stops working, though the host keeps polling it).
 - A CD-ROM LUN uses 2048-byte blocks and f_mass_storage caps it at `256*60*75 - 1` = 1,151,999
   blocks (2,359,295,999 bytes): a bigger file is silently cut off ("file too big ... using only
   first 1151999 blocks" in dmesg) and the host sees a broken disc; fewer than 300 blocks fails the
@@ -133,7 +139,24 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI �
   A linked `mass_storage.bootleg` whose LUN set, `ro`/`cdrom`, `removable` or `nofua` must change
   needs reconfiguring while unlinked, so the plan has two stages: a detach switch (unbind → unlink
   → bind; the host sees the gadget without disks, which also clears the host's prevent-removal),
-  then prepare reconfigures it while bound and unlinked, and a second switch relinks it.
+  then prepare reconfigures it while bound and unlinked, and a second switch relinks it. The detach
+  also unlinks our links after mass storage (the keyboard and mouse), and the second switch relinks
+  them after it.
+
+  **Link order** (`LinkOrder`): Bootleg's links are always in one order, mass storage, keyboard,
+  mouse (either layout in the same place), so each function keeps its interface number (see Device
+  facts). The reader keeps the kernel's link order (`ConfigFs.listInLinkOrder`, readdir reversed).
+  Links that stay and already start the wanted order are never touched; the first one that doesn't,
+  and every link of ours after it, is relinked in order in the same switch, so a gadget left out of
+  order (by an older version) is put back in order with one re-enumeration. The planner asserts the
+  order at every bind of the plan, and the post-apply invariants check it. While HID is on with no
+  disk, mass storage stays linked with one empty read-only LUN (the placeholder: no slot, no
+  intent, never exposed media), so adding a disk doesn't shift the keyboard's and mouse's numbers;
+  a first disk that is a read-only disk image goes in place, other modes detach as above. Hosts
+  may show an empty removable drive meanwhile (Windows "USB Drive" with no media; some boot menus
+  list it). Numbers still shift when the HAL links its own functions around ours (tethering's
+  `ncm` link), when only the mouse is on (it takes the keyboard's place), and between HID on and
+  off; Bootleg can't prevent those.
 
   **Nothing linked.** The kernel can't bind a config without functions, so when nothing at all is
   linked during a switch (USB debugging off, no other functions) the UDC can't be bound for

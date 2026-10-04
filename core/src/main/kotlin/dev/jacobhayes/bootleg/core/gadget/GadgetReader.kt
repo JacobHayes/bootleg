@@ -40,9 +40,10 @@ class GadgetReader(
     /** Bootleg's own links only: the cheap check run inside the unbound window. */
     fun readOwnedLinks(): Map<String, String> = readLinks(GadgetPaths::isOwnedName)
 
+    /** In link order (the composite's interface order), which the returned map keeps. */
     private fun readLinks(include: (String) -> Boolean): Map<String, String> =
         fs
-            .list(GadgetNames.CONFIG_DIR)
+            .listInLinkOrder(GadgetNames.CONFIG_DIR)
             .filter(include)
             .mapNotNull { name ->
                 // Configfs reports targets like ../../../../usb_gadget/g1/functions/ffs.adb; keep the function name.

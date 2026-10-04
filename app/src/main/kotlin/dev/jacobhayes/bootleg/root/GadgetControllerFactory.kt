@@ -73,7 +73,10 @@ fun adoptableDesired(state: GadgetState): Desired? {
             mouse = mouseLayouts.isNotEmpty(),
             mouseLayout = mouseLayouts.firstOrNull() ?: MouseLayout.WHEEL,
         )
-    val luns = if (GadgetNames.MASS_STORAGE_FUNCTION in state.configLinks) state.luns else emptyMap()
+    val linkedLuns = if (GadgetNames.MASS_STORAGE_FUNCTION in state.configLinks) state.luns else emptyMap()
+    // One empty LUN next to HID is the placeholder that keeps HID's interface numbers, not a slot.
+    val placeholder = (hid.keyboard || hid.mouse) && linkedLuns.size == 1 && linkedLuns[0]?.file == ""
+    val luns = if (placeholder) emptyMap() else linkedLuns
     if (luns.keys.sorted() != luns.keys.indices.toList() || luns.values.any { it.file.isEmpty() }) return null
     if (luns.isEmpty() && !hid.keyboard && !hid.mouse) return null
     val slots =

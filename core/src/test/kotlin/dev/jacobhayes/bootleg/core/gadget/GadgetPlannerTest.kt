@@ -172,10 +172,13 @@ class GadgetPlannerTest {
         val ops = planner.plan(read(FakeConfigFs.pixel()), Desired(hid = HidSpec(keyboard = true, mouse = true))).ops
         val keyboard = "functions/hid.bootleg_kbd"
         val mouse = "functions/hid.bootleg_mouse_wheel"
+        // HID without a disk still links mass storage first, with one empty LUN (the placeholder).
         assertEquals(
             listOf(
+                Op.Mkdir(massStorage),
                 Op.Mkdir(keyboard),
                 Op.Mkdir(mouse),
+                Op.Write("$massStorage/lun.0/ro", "1"),
                 Op.Write("$keyboard/subclass", "1"),
                 Op.Write("$keyboard/protocol", "1"),
                 Op.Write("$keyboard/report_length", "8"),
@@ -185,6 +188,7 @@ class GadgetPlannerTest {
                 Op.Write("$mouse/report_length", "5"),
                 Op.WriteBytes("$mouse/report_desc", FakeHidDescriptors.mouse(MouseLayout.WHEEL)),
                 Op.Unbind,
+                Op.Symlink(massStorage, massStorageLink),
                 Op.Symlink(keyboard, "configs/b.1/hid.bootleg_kbd"),
                 Op.Symlink(mouse, "configs/b.1/hid.bootleg_mouse_wheel"),
                 Op.Bind(udc),
@@ -265,7 +269,7 @@ class GadgetPlannerTest {
         val plan = planner.plan(read(fs), Desired(hid = HidSpec(keyboard = true, mouse = true)))
         execute(fs, plan)
         assertEquals(
-            setOf(GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_WHEEL_MOUSE_FUNCTION),
+            setOf(GadgetNames.MASS_STORAGE_FUNCTION, GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_WHEEL_MOUSE_FUNCTION),
             read(fs)
                 .functions
                 .filter {
@@ -281,8 +285,9 @@ class GadgetPlannerTest {
         val fs = FakeConfigFs.pixel()
         fs.mkdir("functions/hid.bootleg_kbd")
         val ops = planner.plan(read(fs), Desired(hid = HidSpec(keyboard = true))).ops
-        assertEquals(Op.Rmdir("functions/hid.bootleg_kbd"), ops[0])
-        assertEquals(Op.Mkdir("functions/hid.bootleg_kbd"), ops[1])
+        val rmdir = ops.indexOf(Op.Rmdir("functions/hid.bootleg_kbd"))
+        assertTrue(rmdir >= 0, "$ops")
+        assertTrue(ops.indexOf(Op.Mkdir("functions/hid.bootleg_kbd")) > rmdir, "$ops")
     }
 
     @Test
@@ -390,7 +395,10 @@ class GadgetPlannerTest {
                     assertTrue(plan.ops.flatMap(GadgetPaths::touchedPaths).all(GadgetPaths::isMutableByBootleg))
                     execute(fs, plan)
                     val after = read(fs)
-                    assertEquals(GadgetSimulation.apply(before, plan.ops), after)
+                    val simulated = GadgetSimulation.apply(before, plan.ops)
+                    assertEquals(simulated, after)
+                    assertEquals(fs.linkOrder(), after.configLinks.keys.toList(), "the reader keeps the kernel's link order")
+                    assertEquals(simulated.configLinks.toList(), after.configLinks.toList(), "the simulation keeps the link order")
                     assertEquals(emptyList<String>(), GadgetInvariants.violations(after, target, foreignBefore = before))
                     assertEquals(emptyList<Op>(), planner.plan(after, target).ops, "replanning a converged gadget must be a no-op")
                     // Swaps (and marker writes) that keep the topology never re-enumerate.
@@ -411,6 +419,105 @@ class GadgetPlannerTest {
                 }
             }
         }
+
+    @Test
+    fun `random plans keep every function on its interface number - canonical order, kept links never relinked`(): Unit =
+        runBlocking {
+            checkAll(300, Arb.long()) { seed ->
+                val random = Random(seed)
+                val fs = FakeConfigFs.pixel(GadgetRig.HOST_FILES)
+                var previous = Desired()
+                repeat(6) {
+                    val desired = if (random.nextInt(3) == 0) randomHidOnly(random) else randomDesired(random)
+                    val before = read(fs)
+                    val target = GadgetTarget.of(desired)
+                    val plan = planner.plan(before, target)
+                    // Bound with our links out of order at any point would hand a function another's number.
+                    var state = before
+                    for (op in plan.ops) {
+                        state = GadgetSimulation.apply(state, op)
+                        if (op is Op.Bind) assertTrue(LinkOrder.isCanonical(state.configLinks), "bound out of order: $state")
+                    }
+                    // A link is only taken down when it goes away, mass storage is reconfigured (detached
+                    // before it), or something earlier in the order is (re)linked.
+                    val relinked = plan.ops.filterIsInstance<Op.Symlink>().map { it.link.substringAfterLast('/') }
+                    val massStorageReconfigured = plan.ops.any { it is Op.Unlink && it.link.endsWith(GadgetNames.MASS_STORAGE_FUNCTION) }
+                    for (unlink in plan.ops.filterIsInstance<Op.Unlink>()) {
+                        val name = unlink.link.substringAfterLast('/')
+                        val rank = LinkOrder.CANONICAL.indexOf(name)
+                        val earlierRelinked = relinked.any { LinkOrder.CANONICAL.indexOf(it) in 0 until rank }
+                        assertTrue(
+                            name !in target.functions || earlierRelinked || massStorageReconfigured,
+                            "$name relinked for no reason: $previous -> $desired: ${plan.ops}",
+                        )
+                    }
+                    execute(fs, plan)
+                    val after = read(fs)
+                    assertTrue(LinkOrder.isCanonical(after.configLinks), "${after.configLinks}")
+                    assertEquals(emptyList<String>(), GadgetInvariants.violations(after, target, foreignBefore = before))
+                    previous = desired
+                }
+            }
+        }
+
+    @Test
+    fun `adding a disk to HID without disks fills the placeholder in place, never moving the keyboard or mouse`() {
+        val hid = HidSpec(keyboard = true, mouse = true)
+        val fs = gadgetWith(Desired(hid = hid))
+        val before = read(fs)
+        assertEquals(
+            listOf(GadgetNames.MASS_STORAGE_FUNCTION, GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_WHEEL_MOUSE_FUNCTION),
+            LinkOrder.owned(before.configLinks),
+        )
+        assertEquals("", before.luns.getValue(0).file)
+        val plan = planner.plan(before, Desired(listOf(SlotSpec(0, img(1), LunMode.DISK_RO)), hid))
+        assertFalse(plan.reenumerates, "${plan.ops}")
+        assertEquals(listOf(Op.Write("$massStorage/lun.0/file", img(1))), plan.ops)
+    }
+
+    @Test
+    fun `a CD-ROM into the placeholder detaches mass storage with the HID after it and relinks all in order`() {
+        val hid = HidSpec(keyboard = true, mouse = true)
+        val fs = gadgetWith(Desired(hid = hid))
+        val plan = planner.plan(read(fs), Desired(listOf(SlotSpec(0, iso(1), LunMode.CDROM)), hid))
+        val detach = plan.stages.first().switch!!
+        assertEquals(
+            setOf(massStorageLink, "configs/b.1/hid.bootleg_kbd", "configs/b.1/hid.bootleg_mouse_wheel"),
+            detach.unlinks.map { it.link }.toSet(),
+        )
+        execute(fs, plan)
+        assertEquals(
+            listOf(GadgetNames.MASS_STORAGE_FUNCTION, GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_WHEEL_MOUSE_FUNCTION),
+            LinkOrder.owned(read(fs).configLinks),
+        )
+        // The detached HID functions were relinked as they were, not rebuilt.
+        assertTrue(plan.ops.none { it is Op.Rmdir || (it is Op.Mkdir && "hid" in it.path) }, "${plan.ops}")
+    }
+
+    @Test
+    fun `links an older version left out of order are put back in order`() {
+        // HID linked first, then mass storage: what a disk change used to leave behind.
+        val fs = gadgetWith(Desired(hid = HidSpec(keyboard = true, mouse = true)))
+        fs.write("UDC", "")
+        fs.unlink(massStorageLink)
+        fs.symlink(massStorage, massStorageLink)
+        fs.write("UDC", udc)
+        val legacy = read(fs)
+        assertFalse(LinkOrder.isCanonical(legacy.configLinks))
+        val target = Desired(hid = HidSpec(keyboard = true, mouse = true))
+        val plan = planner.plan(legacy, target)
+        assertTrue(plan.reenumerates)
+        execute(fs, plan)
+        assertTrue(LinkOrder.isCanonical(read(fs).configLinks), "${read(fs).configLinks}")
+        assertEquals(Plan.EMPTY, planner.plan(read(fs), target))
+    }
+}
+
+/** Random HID-only [Desired] (both, one or the other, either mouse layout). */
+fun randomHidOnly(random: Random): Desired {
+    val keyboard = random.nextBoolean()
+    val mouse = !keyboard || random.nextBoolean()
+    return Desired(hid = HidSpec(keyboard, mouse, MouseLayout.entries.random(random)))
 }
 
 /** Random valid [Desired]: dense LUNs, paths from [GadgetRig.HOST_FILES], no writable file twice. */

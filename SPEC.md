@@ -19,7 +19,7 @@ Confirmed on device: configfs gadget `g1` on UDC `11110000.dwc3`;
 | Root | Magisk `su`; app's root grant pre-seeded in Magisk's DB for testing |
 | Disk mode | Auto: `.iso` → read-only CD-ROM if it fits one (≤ 2.36 GB, the kernel's CD-ROM limit), else read-only disk; `.img` → read-only disk; per-slot override: CD-ROM / disk RO / disk RW. A CD-ROM the image doesn't fit is refused, never exported cut off. The mode menu says that a hybrid ISO as a read-only disk boots but Windows won't show its files |
 | Multi-disk | Up to 8 slots exposed at once (one `mass_storage` LUN each) |
-| Composite gadget | Never replace the USB function: add disks/HID next to `ffs.adb` and leave other apps' functions alone |
+| Composite gadget | Never replace the USB function: add disks/HID next to `ffs.adb` and leave other apps' functions alone. Bootleg's functions keep one order (disks, keyboard, mouse) so each keeps its USB interface number (Windows binds drivers by number); while HID is on without disks an empty drive keeps the disks' place |
 | Storage | `/sdcard/bootleg/` (kernel is given the `/data/media/0/...` path, not the FUSE path); can also pick any file on the phone |
 | Catalog | Live-scraped at runtime from each distro's release index/API; **no bundled fallback list**. Images you already downloaded still work offline |
 | Catalog refresh | The last good result per distro shows at once and refreshes in the background when older than 6 h. Each feed (one per scraper) loads, fails and retries on its own; a failed card keeps its saved results and has a Retry. Leaving the screen doesn't cancel a refresh, and no network (or networking blocked for the app) shows "Offline" instead of failing every card |

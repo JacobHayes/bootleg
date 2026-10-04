@@ -152,6 +152,12 @@ interface ConfigFs {
 
     fun list(path: String): List<String>
 
+    /**
+     * A config directory's entries with its links in the order they were linked, oldest first: the
+     * composite's interface order. Configfs lists a config's entries newest first.
+     */
+    fun listInLinkOrder(path: String): List<String>
+
     fun read(path: String): String
 
     fun readLink(path: String): String?

@@ -231,8 +231,13 @@ preflight() {
     if [[ -n $paths && $paths != *"$KERNEL_DIR/"* ]]; then
         fail "Bootleg is exporting someone's media ($paths); turn it off before running L4"
     fi
-    if jq -e '.functions | index("mass_storage.bootleg")' <<<"$state" >/dev/null; then
-        expect_applied OFF # leftovers from an interrupted run
+    # Leftovers from an interrupted run: media in a LUN, or mass storage without HID. Empty LUNs while
+    # HID is on are the placeholder that keeps the HID interface numbers (not a disk; hosts may list an
+    # empty drive), so they stay.
+    if [[ -n ${paths// /} ]] ||
+        jq -e '(.functions | index("mass_storage.bootleg")) and ([.configLinks[] | select(startswith("hid.bootleg"))] | length == 0)' \
+            <<<"$state" >/dev/null; then
+        expect_applied OFF
     fi
 }
 
@@ -356,6 +361,7 @@ gadget_restored() {
 
 # A volume that vanished while mounted makes macOS show "Disk Not Ejected Properly". DiskArbitration
 # logs every mount, unmount and removal, so any whole disk removed with a partition still mounted is one.
+# The placeholder LUN (HID on, no disk) is an empty drive: never mounted, so its removal never counts.
 no_surprise_removals() {
     local pulled
     pulled=$(/usr/bin/log show --start "$run_started_at" --style compact --predicate 'process == "diskarbitrationd" AND

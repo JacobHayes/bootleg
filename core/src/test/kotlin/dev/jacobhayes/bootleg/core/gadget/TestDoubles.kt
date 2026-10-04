@@ -87,6 +87,11 @@ class ScriptedConfigFs(
         return delegate.list(path)
     }
 
+    override fun listInLinkOrder(path: String): List<String> {
+        call("list $path", costs.read)
+        return delegate.listInLinkOrder(path)
+    }
+
     override fun read(path: String): String {
         call("read $path", costs.read)
         return delegate.read(path)

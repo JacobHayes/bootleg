@@ -24,6 +24,9 @@ class RootConfigFs(
 
     override fun list(path: String): List<String> = File(absolute(path)).list()?.sorted() ?: emptyList()
 
+    // Configfs adds each new entry at the head of its directory's list, so readdir shows links newest first.
+    override fun listInLinkOrder(path: String): List<String> = File(absolute(path)).list()?.reversed() ?: emptyList()
+
     override fun read(path: String): String = File(absolute(path)).readText().trimEnd('\n')
 
     override fun readLink(path: String): String? =

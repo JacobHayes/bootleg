@@ -85,7 +85,14 @@ class GadgetPlanner(
     ): Plan {
         val detach = detachStage(current, target, udc)
         val afterDetach = detach?.let { GadgetSimulation.apply(current, it.ops) } ?: current
-        val main = mainStage(afterDetach, target, udc, forceReenumerate && detach == null)
+        val detached =
+            detach
+                ?.switch
+                ?.unlinks
+                .orEmpty()
+                .mapNotNull { current.configLinks[it.link.substringAfterLast('/')] }
+                .toSet()
+        val main = mainStage(afterDetach, target, udc, forceReenumerate && detach == null, detached)
         val mainSwitch = main.switch
         check(detach == null || mainSwitch != null) { "a detached function must be relinked: $main" }
         val detachSwitch = detach?.switch
@@ -148,9 +155,14 @@ class GadgetPlanner(
                     (mode != null && (state.ro != mode.readOnly || state.cdrom != mode.cdrom)) || !state.removable || state.nofua
                 }
         if (!reconfigure) return null
+        // Our links after mass storage go too: bound without it, they would take its interface numbers
+        // for a moment, and Windows binds drivers by number. They come back in order with it.
+        val ownedNames = current.configLinks.keys.filter(GadgetPaths::isOwnedName)
+        val firstDetached = ownedNames.indexOfFirst { it in linkNames }
+        val detachNames = ownedNames.drop(firstDetached)
         // With nothing else linked the UDC can't bind; it stays unbound until the relink.
-        val bindable = (current.configLinks.keys - linkNames).isNotEmpty()
-        val unlinks = linkNames.sorted().map { Op.Unlink(GadgetPaths.configLink(it)) }
+        val bindable = (current.configLinks.keys - detachNames.toSet()).isNotEmpty()
+        val unlinks = detachNames.map { Op.Unlink(GadgetPaths.configLink(it)) }
         return Stage(prepare = emptyList(), switch = Switch(unlinks, emptyList(), if (bindable) bind(udc) else null), cleanup = emptyList())
     }
 
@@ -159,18 +171,25 @@ class GadgetPlanner(
         target: GadgetTarget,
         udc: String,
         forceReenumerate: Boolean,
+        detached: Set<String> = emptySet(),
     ): Stage {
         val massStorage = GadgetNames.MASS_STORAGE_FUNCTION
         val wanted = target.functions
         val ownedFunctions = state.functions.filter(GadgetPaths::isOwnedName).toSet()
         val ownedLinks = state.configLinks.filterKeys(GadgetPaths::isOwnedName)
         val linked = state.configLinks.values.toSet()
-        val wrongLinks = ownedLinks.filter { (name, function) -> name != function || name !in wanted }.keys.sorted()
-        val missingLinks = wanted.filter { ownedLinks[it] != it }
+        val misplaced = ownedLinks.filter { (name, function) -> name != function || name !in wanted }.keys
+        // Links that stay must already be the start of the wanted (canonical) order; the first one that
+        // isn't, and every link of ours after it, is relinked in order (see [LinkOrder]).
+        val kept = ownedLinks.keys.filter { it !in misplaced }
+        val keptPrefix = kept.zip(wanted).takeWhile { (have, want) -> have == want }.size
+        val wrongLinks = (misplaced + kept.drop(keptPrefix)).sorted()
+        val missingLinks = wanted.drop(keptPrefix)
 
         val prepare = mutableListOf<Op>()
-        // An unlinked HID function may be half-written (crash before link), so it is rebuilt.
-        val rebuilt = wanted.filter { it != massStorage && it in ownedFunctions && it !in linked }
+        // An unlinked HID function may be half-written (crash before link), so it is rebuilt; not one
+        // this plan's detach just unlinked.
+        val rebuilt = wanted.filter { it != massStorage && it in ownedFunctions && it !in linked && it !in detached }
         rebuilt.forEach { prepare += Op.Rmdir(GadgetPaths.function(it)) }
         val created = wanted.filter { it !in ownedFunctions || it in rebuilt }
         created.forEach { prepare += Op.Mkdir(GadgetPaths.function(it)) }
@@ -251,6 +270,8 @@ class GadgetPlanner(
                 switch.unlinkedOps.forEach(::reconfigure)
                 state = GadgetSimulation.apply(state, switch.links)
                 check((switch.bind != null) == state.configLinks.isNotEmpty()) { "a switch binds iff something is linked: $switch" }
+                // Every configuration the host can see keeps each function on its interface number.
+                check(LinkOrder.isCanonical(state.configLinks)) { "links out of order at a bind: ${LinkOrder.owned(state.configLinks)}" }
                 switch.bind?.let { state = GadgetSimulation.apply(state, it) }
             }
             stage.cleanup.forEach(::bound)

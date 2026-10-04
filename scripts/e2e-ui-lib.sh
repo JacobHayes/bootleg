@@ -473,11 +473,13 @@ mac_volume_absent() { [[ ! -d /Volumes/$1 ]]; }
 # mac_disk_of VOLUME: prints diskN for a mounted volume.
 mac_disk_of() { diskutil info "/Volumes/$1" | awk '/Part of Whole:/ { print $4 }'; }
 
-# Ejects every external physical disk that the phone's gadget presents (File-Stor Gadget).
+# Ejects every external physical disk that the phone's gadget presents (File-Stor Gadget). The empty
+# placeholder drive (HID on, no disk) has no media to eject, so it is skipped.
 mac_eject_all() {
-    local disk
+    local disk info
     for disk in $(diskutil list external physical | awk '/^\/dev\/disk/ { sub("/dev/", "", $1); print $1 }'); do
-        if diskutil info "$disk" | grep -q 'Media Name:.*Gadget'; then
+        info=$(diskutil info "$disk") || continue
+        if grep -q 'Media Name:.*Gadget' <<<"$info" && ! grep -qE 'Disk Size: +0 B' <<<"$info"; then
             diskutil eject "$disk" >/dev/null 2>&1 || log "WARN could not eject $disk (Mac screen locked?)"
         fi
     done

@@ -64,6 +64,7 @@ object GadgetInvariants {
             state.configLinks.keys
                 .filter { GadgetPaths.isOwnedName(it) && it !in wanted }
                 .forEach { add("unwanted link $it") }
+            if (!LinkOrder.isCanonical(state.configLinks)) add("links out of order: ${LinkOrder.owned(state.configLinks)}")
             addAll(lunViolations(state, allowedRoots))
             if (target.luns.isNotEmpty() &&
                 state.luns.size != target.luns.size

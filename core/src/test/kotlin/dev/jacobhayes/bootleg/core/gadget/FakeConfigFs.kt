@@ -35,7 +35,11 @@ class FakeConfigFs(
 
     private class Link(
         val target: String,
+        /** When it was linked: the kernel appends each linked function to the config's interface list. */
+        val order: Long,
     ) : Node
+
+    private var linkCount = 0L
 
     private val nodes = sortedMapOf<String, Node>()
 
@@ -167,6 +171,18 @@ class FakeConfigFs(
         return children(path).map { it.substringAfterLast('/') }
     }
 
+    /** Links in the order they were made (the composite's interface order), then everything else. */
+    override fun listInLinkOrder(path: String): List<String> {
+        if (nodes[path] !is Dir) throw ConfigFsException("ENOTDIR", path)
+        return children(path).sortedBy { (nodes[it] as? Link)?.order ?: Long.MAX_VALUE }.map { it.substringAfterLast('/') }
+    }
+
+    /** Owned and foreign link names in configs/b.1, in interface order. */
+    fun linkOrder(): List<String> =
+        children(
+            GadgetNames.CONFIG_DIR,
+        ).filter { nodes[it] is Link }.sortedBy { (nodes[it] as Link).order }.map { it.substringAfterLast('/') }
+
     override fun read(path: String): String {
         val node = nodes[path] ?: throw ConfigFsException("ENOENT", path)
         if (node !is Attr) throw ConfigFsException("EISDIR", path)
@@ -251,7 +267,7 @@ class FakeConfigFs(
             boundSymlinkRejections += "$actor $link"
             throw ConfigFsException("EINVAL", "$link: gadget is bound")
         }
-        nodes[link] = Link(target)
+        nodes[link] = Link(target, linkCount++)
     }
 
     override fun unlink(link: String) {

@@ -43,6 +43,30 @@ object LunMarker {
 }
 
 /**
+ * The order Bootleg links its functions in. The kernel numbers a config's interfaces in link order,
+ * and Windows binds each child driver by interface number (`USB\VID_x&PID_y&MI_nn`), so a function
+ * must never move to another function's number: mass storage first, then the keyboard, then the mouse
+ * (either layout, same place).
+ */
+object LinkOrder {
+    val CANONICAL =
+        listOf(
+            GadgetNames.MASS_STORAGE_FUNCTION,
+            GadgetNames.HID_KEYBOARD_FUNCTION,
+            GadgetNames.HID_WHEEL_MOUSE_FUNCTION,
+            GadgetNames.HID_MOUSE_FUNCTION,
+        )
+
+    /** Bootleg's linked functions in link order ([configLinks] is in link order), by target. */
+    fun owned(configLinks: Map<String, String>): List<String> = configLinks.filterKeys(GadgetPaths::isOwnedName).values.toList()
+
+    fun isCanonical(configLinks: Map<String, String>): Boolean {
+        val owned = owned(configLinks)
+        return owned.all { it in CANONICAL } && owned == owned.sortedBy(CANONICAL::indexOf)
+    }
+}
+
+/**
  * The concrete state the planner drives toward: [Desired] with slot intents applied. [lunMarker], if
  * set, is the `inquiry_string` every LUN must carry (see [LunMarker]).
  */
@@ -56,7 +80,7 @@ data class GadgetTarget(
         require(lunMarker == null || lunMarker.length == LunMarker.INQUIRY_STRING_LENGTH) { "bad LUN marker: '$lunMarker'" }
     }
 
-    /** Owned functions to expose, in creation order. */
+    /** Owned functions to expose, in creation and link order ([LinkOrder]). */
     val functions: List<String>
         get() =
             buildList {
@@ -70,18 +94,27 @@ data class GadgetTarget(
 
         fun of(desired: Desired): GadgetTarget = of(Journal(desired = desired))
 
-        fun of(journal: Journal): GadgetTarget =
-            GadgetTarget(
-                luns =
-                    journal.desired.slots.sortedBy { it.lun }.map { slot ->
-                        when (journal.slotIntents[slot.lun] ?: SlotIntent.EXPORTED) {
-                            SlotIntent.EXPORTED -> LunTarget(slot.backingPath, slot.mode)
-                            SlotIntent.HOST_EJECTED, SlotIntent.USER_EJECTED -> LunTarget("", slot.mode)
-                            SlotIntent.FAILED -> LunTarget("", null)
-                        }
-                    },
-                hid = journal.desired.hid,
+        /**
+         * While HID is on without a disk, mass storage stays linked with one empty LUN ([PLACEHOLDER_LUN]):
+         * the keyboard and mouse keep their interface numbers whether or not disks are added.
+         */
+        val PLACEHOLDER_LUN = LunTarget("", LunMode.DISK_RO)
+
+        fun of(journal: Journal): GadgetTarget {
+            val hid = journal.desired.hid
+            val slotLuns =
+                journal.desired.slots.sortedBy { it.lun }.map { slot ->
+                    when (journal.slotIntents[slot.lun] ?: SlotIntent.EXPORTED) {
+                        SlotIntent.EXPORTED -> LunTarget(slot.backingPath, slot.mode)
+                        SlotIntent.HOST_EJECTED, SlotIntent.USER_EJECTED -> LunTarget("", slot.mode)
+                        SlotIntent.FAILED -> LunTarget("", null)
+                    }
+                }
+            return GadgetTarget(
+                luns = slotLuns.ifEmpty { if (hid.keyboard || hid.mouse) listOf(PLACEHOLDER_LUN) else emptyList() },
+                hid = hid,
                 lunMarker = journal.lunInstanceNonce.takeIf { it.isNotEmpty() }?.let(LunMarker::inquiryString),
             )
+        }
     }
 }
