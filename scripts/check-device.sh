@@ -11,6 +11,7 @@
 # device lock is always released. Everything that re-enumerates USB goes over wireless adb.
 #
 # Usage: scripts/check-device.sh [--skip-build]   (--skip-build installs the APK `check` already built)
+#        (env: BOOTLEG_DEVICE_LOCK_HELD=1 when the caller already holds the device lock, which is then kept)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -30,6 +31,7 @@ VOLUME_WAIT_S=30
 HAL_WAIT_S=15
 ADB_WAIT_S=20
 POLL_S=0.25
+FAT_FIXTURE_SIZE_BYTES=16777216
 VOLUMES=(BLCD BLRO BLRW)
 
 skip_build=false
@@ -122,7 +124,7 @@ cleanup() {
             wadb shell "content call --uri $PROVIDER --method OFF" >/dev/null 2>&1 || true
         fi
         wadb shell "su -c 'umount $MOUNT_DIR 2>/dev/null; rmdir $MOUNT_DIR 2>/dev/null; true'" >/dev/null 2>&1 || true
-        rmdir "$LOCK_DIR"
+        [[ ${BOOTLEG_DEVICE_LOCK_HELD:-0} == 1 ]] || rmdir "$LOCK_DIR"
     fi
     local total_ms=$(($(now_ms) - run_started_ms))
     echo
@@ -146,6 +148,11 @@ trap 'echo "FAIL [$current_step]: \"$BASH_COMMAND\" exited $?" >&2' ERR
 # Stages
 
 take_lock() {
+    if [[ ${BOOTLEG_DEVICE_LOCK_HELD:-0} == 1 ]]; then
+        [[ -d $LOCK_DIR ]] || fail "BOOTLEG_DEVICE_LOCK_HELD=1 but $LOCK_DIR doesn't exist"
+        have_lock=true
+        return 0
+    fi
     local deadline_ms=$(($(now_ms) + LOCK_WAIT_S * 1000))
     until mkdir "$LOCK_DIR" 2>/dev/null; do
         (($(now_ms) < deadline_ms)) || fail "device lock $LOCK_DIR still held after ${LOCK_WAIT_S}s"
@@ -175,6 +182,12 @@ make_fat_image() {
     rm -f "$temp.dmg"
 }
 
+# A cached image may come from an older script or another check: it must be the 16 MiB image that
+# holds random.bin (its FAT short-name directory entry), or it is rebuilt.
+fat_fixture_ok() {
+    [[ -f $1 ]] && [[ $(stat -f %z "$1") == "$FAT_FIXTURE_SIZE_BYTES" ]] && LC_ALL=C grep -q -a 'RANDOM  BIN' "$1"
+}
+
 build_fixtures() {
     mkdir -p "$FIXTURE_DIR/content"
     if [[ ! -f $FIXTURE_DIR/content/random.bin ]]; then
@@ -186,8 +199,12 @@ build_fixtures() {
     fi
     [[ -f $FIXTURE_DIR/cd.iso ]] ||
         hdiutil makehybrid -quiet -iso -joliet -default-volume-name BLCD -o "$FIXTURE_DIR/cd.iso" "$FIXTURE_DIR/content"
-    [[ -f $FIXTURE_DIR/ro.img ]] || make_fat_image BLRO "$FIXTURE_DIR/ro.img"
-    [[ -f $FIXTURE_DIR/rw.img ]] || make_fat_image BLRW "$FIXTURE_DIR/rw.img"
+    fat_fixture_ok "$FIXTURE_DIR/ro.img" || make_fat_image BLRO "$FIXTURE_DIR/ro.img"
+    fat_fixture_ok "$FIXTURE_DIR/rw.img" || make_fat_image BLRW "$FIXTURE_DIR/rw.img"
+    local name
+    for name in ro.img rw.img; do
+        fat_fixture_ok "$FIXTURE_DIR/$name" || fail "the freshly built $name is not a 16 MiB image holding random.bin"
+    done
 }
 
 # rw.img changes on every run (the Mac writes to it), so it is pushed fresh each time.
