@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.Eject
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.SdStorage
+import androidx.compose.material.icons.outlined.Usb
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -288,6 +289,7 @@ fun ImagePickerSheetContent(
     images: List<ImageFile>,
     onPick: (String) -> Unit,
     onBrowse: () -> Unit,
+    onNewFlashDrive: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -297,6 +299,15 @@ fun ImagePickerSheetContent(
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         )
         LazyColumn {
+            item {
+                ListItem(
+                    headlineContent = { Text("New flash drive…") },
+                    supportingContent = { Text("A blank, formatted disk the computer can write to") },
+                    leadingContent = { Icon(Icons.Outlined.Usb, contentDescription = null) },
+                    modifier = Modifier.clickable(onClick = onNewFlashDrive),
+                )
+                HorizontalDivider()
+            }
             items(images, key = { it.path }) { image ->
                 ListItem(
                     headlineContent = { Text(image.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },

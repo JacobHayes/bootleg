@@ -40,6 +40,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,11 +50,15 @@ import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.ImageFile
 import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
+import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.ui.common.ConfirmDialog
 import dev.jacobhayes.bootleg.ui.common.EmptyState
 import dev.jacobhayes.bootleg.ui.common.NoticeCard
 import dev.jacobhayes.bootleg.ui.common.Tone
+import dev.jacobhayes.bootleg.ui.library.BlankImageDialog
+import dev.jacobhayes.bootleg.ui.library.storeFreeBytesOrNull
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,6 +77,8 @@ fun DrivesScreen(
     val snackbar = remember { SnackbarHostState() }
     var picker by remember { mutableStateOf<SlotPickerTarget?>(null) }
     var confirmEjectAll by remember { mutableStateOf(false) }
+    var newFlashDriveFor by remember { mutableStateOf<SlotPickerTarget?>(null) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(state.message) {
         state.message?.let {
@@ -122,7 +129,37 @@ fun DrivesScreen(
             images = images,
             onPick = { path -> onImagePicked(controller, target, path) },
             onBrowse = { onBrowseFile { path -> onImagePicked(controller, target, path) } },
+            onNewFlashDrive = { newFlashDriveFor = target },
             onDismiss = { picker = null },
+        )
+    }
+    newFlashDriveFor?.let { target ->
+        BlankImageDialog(
+            freeBytes = ::storeFreeBytesOrNull,
+            existingNames = images.map { it.displayName }.toSet(),
+            onCreate = { request ->
+                scope.launch {
+                    backend
+                        .createBlankImage(request.name, request.sizeBytes, request.format, request.preallocate)
+                        .onSuccess { created ->
+                            // The slots may have changed while it was being created: a gone slot becomes a new one.
+                            val replace = (target as? SlotPickerTarget.Replace)?.takeIf { it.index < controller.state.value.slots.size }
+                            val added =
+                                if (replace != null) {
+                                    controller.replaceImage(replace.index, created.path, LunMode.DISK_RW)
+                                    true
+                                } else {
+                                    controller.addSlot(created.path, LunMode.DISK_RW)
+                                }
+                            if (!added) {
+                                controller.showMessage(
+                                    "Created ${created.displayName}. Every slot is in use, so it's in Library only.",
+                                )
+                            }
+                        }.onFailure { controller.showMessage("Couldn't create the flash drive: ${it.message}") }
+                }
+            },
+            onDismiss = { newFlashDriveFor = null },
         )
     }
     state.forceEjectOffer?.let { lun ->
@@ -332,6 +369,7 @@ private fun ImagePickerSheet(
     images: List<ImageFile>,
     onPick: (String) -> Unit,
     onBrowse: () -> Unit,
+    onNewFlashDrive: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ImagePickerSheetContent(images, onPick = {
@@ -339,6 +377,9 @@ private fun ImagePickerSheet(
         onDismiss()
     }, onBrowse = {
         onBrowse()
+        onDismiss()
+    }, onNewFlashDrive = {
+        onNewFlashDrive()
         onDismiss()
     }, onDismiss = onDismiss)
 }

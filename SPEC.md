@@ -27,7 +27,7 @@ Confirmed on device: configfs gadget `g1` on UDC `11110000.dwc3`;
 | Catalog scope | Supported releases (not EOL), x86_64 + arm64, arch filter defaults to x86_64 |
 | Distros | Desktop: Ubuntu, Fedora, Debian, Mint, Pop!_OS, openSUSE, Arch, NixOS, Omarchy (no Ubuntu flavors, no Manjaro). Server: Ubuntu Server, Debian netinst, Alpine, Rocky, AlmaLinux, Proxmox VE, TrueNAS. Rescue: SystemRescue, GParted Live, Clonezilla, Memtest86+, ShredOS, netboot.xyz. Each tab lists its distros by name, case-insensitively |
 | Downloads | Resumable user-initiated transfer jobs, optional Wi-Fi only, SHA256 checked against the distro's published sums |
-| Blank images | Create sparse images of a chosen size: raw, FAT32 (MBR), exFAT, ext4 |
+| Blank images | Create sparse images of a chosen size: raw, FAT32 (MBR), exFAT, ext4. "New flash drive" in Library and in Drives' image picker (which adds it as a writable slot) |
 | Persistence | Re-expose the last mounted set after reboot (opt-in) |
 | Surfaces | Ongoing notification (what's mounted + Eject) and a Quick Settings tile |
 | HID (phase 2) | Own HID functions: boot-protocol keyboard + mouse. The mouse has a scroll wheel (vertical + horizontal) in a boot-compatible report (HID 1.11 B.2: boot hosts read the first 3 bytes, no negotiation); Settings "Compatible mouse (no wheel)" falls back to the plain 3-byte boot mouse. Touchpad UI (two-finger drag scrolls), on-screen keyboard with F-keys, modifiers (Ctrl/Alt/Option/Cmd/Win/Shift), held + sticky modifiers, boot-key helper (F12/F11/F10/F2/Del/Esc/Option per vendor), paste-as-typing |

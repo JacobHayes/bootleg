@@ -78,16 +78,21 @@ class DrivesController(
             .firstOrNull { it.path == path }
             ?.sizeBytes
 
-    fun addSlot(path: String): Boolean {
+    /** [modeOverride]: a new flash drive is made to be written, so it goes in writable. */
+    fun addSlot(
+        path: String,
+        modeOverride: LunMode? = null,
+    ): Boolean {
         if (!canAddSlot) return false
-        editDraft { it + DraftSlot(path, fresh = true) }
+        editDraft { it + DraftSlot(path, modeOverride, fresh = true) }
         return true
     }
 
     fun replaceImage(
         index: Int,
         path: String,
-    ) = editDraft { slots -> slots.mapIndexed { i, slot -> if (i == index) DraftSlot(path, fresh = true) else slot } }
+        modeOverride: LunMode? = null,
+    ) = editDraft { slots -> slots.mapIndexed { i, slot -> if (i == index) DraftSlot(path, modeOverride, fresh = true) else slot } }
 
     fun setMode(
         index: Int,

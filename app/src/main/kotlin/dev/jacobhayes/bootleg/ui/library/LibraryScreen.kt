@@ -154,6 +154,8 @@ fun LibraryScreen(
                 }
                 if (images.isEmpty() && tasks.isEmpty()) {
                     item { LibraryEmpty(onBlank = { showBlankDialog = true }) }
+                } else {
+                    item(key = "new-flash-drive") { NewFlashDriveButton(onClick = { showBlankDialog = true }) }
                 }
                 items(images, key = { it.path }) { image ->
                     val expectedSha256 = image.verifiedSha256 ?: records[image.displayName]?.expectedSha256
@@ -186,7 +188,7 @@ fun LibraryScreen(
     }
     if (showBlankDialog) {
         BlankImageDialog(
-            freeBytes = { freeBytesOrNull() },
+            freeBytes = ::storeFreeBytesOrNull,
             existingNames = images.map { it.displayName }.toSet(),
             onCreate = { request ->
                 scope.launch {
@@ -217,8 +219,6 @@ fun LibraryScreen(
 /** The app reads images through FUSE; the backend reports kernel (/data/media/0) paths. */
 private fun fusePathOf(path: String): String = if (path.startsWith(StoragePaths.MEDIA_ROOT + "/")) StoragePaths.toFusePath(path) else path
 
-private fun freeBytesOrNull(): Long? = runCatching { android.os.StatFs(StoragePaths.FUSE_ROOT).availableBytes }.getOrNull()
-
 @Composable
 private fun StorageHint() {
     val context = LocalContext.current
@@ -247,7 +247,7 @@ private fun LibraryEmpty(onBlank: () -> Unit) {
             title = "No images yet",
             body = "Download one from the Catalog, add a file from this phone, or create a blank disk image.",
             modifier = Modifier.padding(top = 48.dp),
-            action = { TextButton(onClick = onBlank) { Text("Create blank image") } },
+            action = { NewFlashDriveButton(onClick = onBlank) },
         )
     }
 }

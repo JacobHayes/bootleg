@@ -5,12 +5,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Usb
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
@@ -85,6 +92,22 @@ object BlankImageRules {
         return Verdict(error, warning)
     }
 }
+
+/** Opens [BlankImageDialog]: a blank image is the phone's "flash drive" for the computer. */
+@Composable
+fun NewFlashDriveButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FilledTonalButton(onClick = onClick, modifier = modifier) {
+        Icon(Icons.Outlined.Usb, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("New flash drive")
+    }
+}
+
+/** Free space in the image store, or null if it can't be read. */
+fun storeFreeBytesOrNull(): Long? = runCatching { android.os.StatFs(StoragePaths.FUSE_ROOT).availableBytes }.getOrNull()
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
