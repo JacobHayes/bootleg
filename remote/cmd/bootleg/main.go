@@ -53,7 +53,8 @@ Commands:
                                  turn the USB keyboard/mouse on or off
   tether on|off|status           share the phone's internet over USB (re-plugs
                                  USB, so eject every disk first; off may cut
-                                 this connection if it runs over that USB link)
+                                 this connection if it runs over that USB link;
+                                 macOS, Linux and Windows 10 2004 or later)
   type <text> | type -           type text (from stdin with -), up to 64 KiB
   key <chord> [--repeat N] [--interval 100ms]
                                  tap a chord such as ctrl+alt+delete, cmd+space, f12

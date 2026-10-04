@@ -87,6 +87,11 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
   takes 2–6s to bring the interface's address back.
 - macOS adds a "Pixel 6" network service the first time and orders it above Wi-Fi, so the Mac's
   default route moves to the phone while tethered (and back when the interface goes away).
+- The kernel has NCM, ECM and EEM but no RNDIS (`CONFIG_USB_CONFIGFS_RNDIS` is not set), and
+  Windows ships an NCM driver only from Windows 10 2004, so USB tethering works with macOS, Linux
+  and Windows 10 2004 or later. Windows 7 still configures the composite device (the NCM interface
+  just has no driver), ~3.6s after it connects; Android tethers `ncm0` only once the host has
+  configured the device, and drops and re-adds it on every re-enumeration (ours included).
 - Tethering ends on a USB mode change (`svc usb setFunctions mtp`), Android's own switch, and
   unplugging (Android resets the USB functions on disconnect). Airplane mode keeps it on with no
   upstream until Wi-Fi returns. Android announces every change with the sticky

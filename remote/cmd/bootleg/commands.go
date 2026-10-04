@@ -409,6 +409,10 @@ func hidCommand(ctx context.Context, call *invocation, c *client) error {
 	return err
 }
 
+// tetherHostNote: the phone's kernel has NCM but no RNDIS, and Windows has an
+// inbox NCM driver only from Windows 10 2004.
+const tetherHostNote = "USB tethering works with macOS, Linux, and Windows 10 (2004) or later."
+
 func tetherText(tether *protocol.TetherState) string {
 	if tether == nil {
 		return "unknown"
@@ -445,6 +449,9 @@ func tetherCommand(ctx context.Context, call *invocation, c *client) error {
 		return fmt.Errorf("malformed tether.set reply: %w", err)
 	}
 	fmt.Fprintf(call.stdout, "USB tethering: %s\n", onOff(result.Tether.On))
+	if on {
+		fmt.Fprintln(call.stderr, tetherHostNote)
+	}
 	if result.Warning != "" {
 		fmt.Fprintf(call.stderr, "Warning: %s\n", result.Warning)
 	}

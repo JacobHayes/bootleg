@@ -261,6 +261,9 @@ private const val EJECT_HINT =
         "Drive not showing up? Rescan disks on the computer (Windows: Disk Management, Action, Rescan Disks), " +
         "or turn on Reconnect USB after a disk change in Settings."
 
+/** The phone's kernel tethers over NCM only (no RNDIS); Windows has an inbox NCM driver from 10 2004. */
+private const val TETHER_HOSTS = "Works with macOS, Linux, and Windows 10 (2004) or later."
+
 /**
  * Android's USB tethering next to the drives: it shares the USB connection with them, and switching
  * it re-plugs USB, so it can't change while a disk is exposed.
@@ -289,6 +292,7 @@ private fun TetherCard(
             Column(Modifier.weight(1f)) {
                 Text("USB tethering", style = MaterialTheme.typography.titleMedium)
                 Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(TETHER_HOSTS, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.width(12.dp))
             Switch(
