@@ -599,6 +599,35 @@ class RemoteControllerTest {
             h.advance(RemoteLimits.PUSH_INTERVAL_MS_MIN)
             assertNull(hidField("s1", "link"))
         }
+
+        @Test
+        fun `the state lists the endpoints the computer isn't reading while the link is open`() {
+            h.connect("s1")
+            val on = HidSpec(keyboard = true, mouse = true)
+
+            fun notReading(): List<String>? =
+                h
+                    .pushes("s1", "state")
+                    .last()
+                    .getValue("hid")
+                    .jsonObject["notReading"]
+                    ?.jsonArray
+                    ?.map { it.jsonPrimitive.content }
+
+            h.setDevice(h.device.copy(hid = on, hidLink = HidLinkStatus.OPEN, hidNotReading = setOf(HidKind.MOUSE)))
+            h.advance(RemoteLimits.PUSH_INTERVAL_MS_MIN)
+            assertEquals(listOf("mouse"), notReading())
+            h.setDevice(h.device.copy(hidNotReading = setOf(HidKind.MOUSE, HidKind.KEYBOARD)))
+            h.advance(RemoteLimits.PUSH_INTERVAL_MS_MIN)
+            assertEquals(listOf("keyboard", "mouse"), notReading())
+            h.setDevice(h.device.copy(hidNotReading = emptySet()))
+            h.advance(RemoteLimits.PUSH_INTERVAL_MS_MIN)
+            assertNull(notReading())
+            // Only meaningful while the link is open.
+            h.setDevice(h.device.copy(hidLink = HidLinkStatus.RECONNECTING, hidNotReading = setOf(HidKind.MOUSE)))
+            h.advance(RemoteLimits.PUSH_INTERVAL_MS_MIN)
+            assertNull(notReading())
+        }
     }
 
     @Nested

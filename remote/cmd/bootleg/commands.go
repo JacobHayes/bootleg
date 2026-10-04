@@ -252,12 +252,19 @@ func onOff(value bool) string {
 	return "off"
 }
 
-// hidStatus is the owed-release status, else the link when it isn't plainly open.
+// hidStatus is the owed-release status, else the link when it isn't plainly
+// open, else the endpoints the computer isn't reading.
 func hidStatus(hid protocol.HidState) string {
-	if hid.Status != "" || hid.Link == "open" {
+	if hid.Status != "" {
 		return hid.Status
 	}
-	return hid.Link
+	if hid.Link != "open" {
+		return hid.Link
+	}
+	if len(hid.NotReading) > 0 {
+		return "the computer isn't reading the " + strings.Join(hid.NotReading, " or ")
+	}
+	return ""
 }
 
 func suffix(status string) string {

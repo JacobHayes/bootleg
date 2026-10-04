@@ -1661,6 +1661,10 @@ class RemoteController(
                         null
                     },
                     device.hidLink.wireName.takeIf { device.hid.keyboard || device.hid.mouse },
+                    device.hidNotReading
+                        .takeIf { device.hidLink == HidLinkStatus.OPEN && it.isNotEmpty() }
+                        ?.map { it.wireName }
+                        ?.sorted(),
                 ),
             lease = leaseViewFor(),
             tether = device.usbTethering?.let(::TetherView),

@@ -43,7 +43,11 @@ class RemoteDevice(
 
     override val snapshots: Flow<DeviceSnapshot> =
         combine(backend.journal, backend.images, hid.link, backend.usbTethering) { journal, images, link, tethering ->
-            snapshotOf(journal, images).copy(hidLink = statusOf(link), usbTethering = tethering)
+            snapshotOf(journal, images).copy(
+                hidLink = statusOf(link),
+                hidNotReading = (link as? HidLinkState.Open)?.notReading.orEmpty(),
+                usbTethering = tethering,
+            )
         }.distinctUntilChanged()
 
     companion object {
@@ -51,7 +55,7 @@ class RemoteDevice(
             when (link) {
                 HidLinkState.Stopped -> HidLinkStatus.STOPPED
                 HidLinkState.Opening -> HidLinkStatus.CONNECTING
-                // Whether the host is reading flips with every stalled write; not worth a state push.
+                // Which endpoints the host reads rides along in DeviceSnapshot.hidNotReading.
                 is HidLinkState.Open -> HidLinkStatus.OPEN
                 is HidLinkState.Reconnecting -> HidLinkStatus.RECONNECTING
                 is HidLinkState.Failed -> if (link.restartRequired) HidLinkStatus.RESTART_REQUIRED else HidLinkStatus.FAILED

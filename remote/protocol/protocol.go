@@ -401,6 +401,10 @@ type HidState struct {
 	// Link is the phone's HID session while the keyboard or mouse is on:
 	// stopped, connecting, open, reconnecting, failed or restart_required.
 	Link string `json:"link,omitempty"`
+	// NotReading lists, while Link is open, the endpoints ("keyboard",
+	// "mouse") whose reports the computer isn't reading (firmware and boot
+	// menus often read only the keyboard).
+	NotReading []string `json:"notReading,omitempty"`
 }
 
 // TetherState is state.tether: the phone's USB tethering as Android reports it.

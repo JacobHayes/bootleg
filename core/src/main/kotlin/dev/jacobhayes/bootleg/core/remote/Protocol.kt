@@ -518,6 +518,11 @@ data class HidView(
     val status: String? = null,
     /** The phone's HID session ([HidLinkStatus.wireName]) while the keyboard or mouse is on. */
     val link: String? = null,
+    /**
+     * While [link] is open: the endpoints (`keyboard`, `mouse`) whose reports the computer isn't reading
+     * (firmware and boot menus often read only the keyboard); absent when it reads them all.
+     */
+    val notReading: List<String>? = null,
 )
 
 const val HID_STATUS_RELEASE_PENDING = "release_pending"

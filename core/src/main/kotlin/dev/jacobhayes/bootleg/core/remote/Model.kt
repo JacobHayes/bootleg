@@ -7,6 +7,7 @@ import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
+import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
@@ -212,6 +213,8 @@ data class DeviceSnapshot(
     val hid: HidSpec = HidSpec(),
     val images: List<RemoteImage> = emptyList(),
     val hidLink: HidLinkStatus = HidLinkStatus.STOPPED,
+    /** While [hidLink] is open: the endpoints whose reports the computer isn't reading. */
+    val hidNotReading: Set<HidKind> = emptySet(),
     /** Android's USB tethering; null until Android has reported it. */
     val usbTethering: Boolean? = null,
 )

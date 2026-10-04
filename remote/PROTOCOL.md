@@ -279,7 +279,8 @@ Slot  = {lun: int, imageId: string, name: string, mode: "cdrom"|"disk_ro"|"disk_
 Image = {imageId: string, name: string, sizeBytes: int, defaultMode: "cdrom"|"disk_ro"|"disk_rw",
          verified?: true}
 Hid   = {keyboard: bool, mouse: bool, wheel: bool, status?: "release_pending",
-         link?: "stopped"|"connecting"|"open"|"reconnecting"|"failed"|"restart_required"}
+         link?: "stopped"|"connecting"|"open"|"reconnecting"|"failed"|"restart_required",
+         notReading?: ["keyboard"|"mouse"]}
 Tether = {on: bool}   // the phone's USB tethering, as Android reports it; absent until known
 
 Catalog  = {catalogRev: int, refreshing: bool, truncated: bool, distros: [Distro]}
@@ -309,7 +310,10 @@ turned off. `hid.link` (present while the keyboard or mouse is on) is the phone'
 `stopped` until input opens it, `reconnecting` while the phone reopens its devices (after a USB
 gadget change or re-enumeration; input is refused meanwhile, not queued), `failed` after the
 reopen attempts ran out (the next input retries), and `restart_required` when only restarting the
-phone brings the keyboard and mouse back.
+phone brings the keyboard and mouse back. `hid.notReading` (only while `link` is `open`) lists the
+endpoints whose reports the computer isn't reading: firmware and boot menus often read the keyboard
+but never the mouse, and a sleeping computer reads neither. Input for those is dropped; the others
+work normally.
 
 ### 2.4 Pushes
 
