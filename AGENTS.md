@@ -100,3 +100,10 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
 - Code gets reviewed in small, focused diffs (one logical commit or component at a time), not
   one big diff per phase (Codex `gpt-6-luna`, high effort). Small diffs get faster, sharper
   reviews.
+
+## Local notes
+
+Personal, uncommitted notes for this checkout go in `AGENTS.local.md` (git-ignored). If it
+exists, it's imported here:
+
+@AGENTS.local.md
