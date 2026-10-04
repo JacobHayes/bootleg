@@ -100,6 +100,32 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
   upstream until Wi-Fi returns. Android announces every change with the sticky
   `android.net.conn.TETHER_STATE_CHANGED` broadcast (extra `tetherArray`: tethered interfaces),
   which any app can receive.
+- FunctionFS works as root: `mkdir functions/ffs.<name>`, `mount -t functionfs <name> <dir>`, and a
+  process writes descriptors and strings to `<dir>/ep0`; `ep1..` then appear in descriptor order.
+  This kernel's f_fs (6.1) rejects CDC functional descriptors (type 0x24, so no Union), wants the
+  Microsoft OS descriptor header's `bcdVersion` to be 1, and renumbers interface descriptors,
+  endpoints and strings but **not** an IAD's `bFirstInterface`, which must be the
+  configuration-wide number. Windows 7's usbccgp gave up on the whole composite device (disks
+  included) when an IAD named the wrong interfaces.
+- A config with an unready FunctionFS instance linked (ep0 open, no descriptors yet) can't bind
+  (ENODEV). With mount option `no_disconnect=1`, a process that closes ep0 leaves its function
+  DEACTIVATED: the gadget stays bound (the host sees a dead function), every later bind fails, and
+  opening ep0 again makes the kernel unbind the gadget (links stay, in order) until the new process
+  has written descriptors. ep0 calls on a function that isn't active fail with EBADFD.
+- **ep0 can deadlock a UDC unbind.** f_fs sleeps for the next event, and for a control data stage
+  to complete, holding the function's mutex, and `functionfs_unbind` takes that mutex after
+  queueing UNBIND. The UDC writer, the USB HAL and anything reading `UDC` then sit in D state until
+  the holder is killed (seen with a reader that consumed UNBIND and read again, and with two
+  processes holding one ep0). A nonblocking event read only try-locks the mutex, `ppoll` doesn't
+  hold it, and a data stage's wait ends with EINTR on a signal.
+- Windows 7 binds its inbox RNDIS driver (rndiscmp.inf) to a composite device's IAD function with
+  class EF/04/01 or Microsoft OS compatible ID `RNDIS`/`5162001`, interfaces CDC 02/02/FF + CDC
+  Data, and started it only at interfaces 0-1 (at 4-5: Code 10, nothing sent). Linux's rndis_host
+  without a Union descriptor also assumes interfaces 0/1. Windows keeps each composite child's
+  driver per interface number (`USB\VID_18D1&PID_4EEC&MI_nn`) across class changes too: RNDIS at
+  MI_04 got the old keyboard driver until that device node was uninstalled in Device Manager.
+- A TAP interface (`/dev/tun`, `TUNSETIFF` with `IFF_TAP | IFF_NO_PI`) carries Ethernet frames and
+  is gone with the last fd. Measured over RNDIS, one frame per USB transfer: 6-7 MiB/s phone to PC.
 
 ## Modules
 
@@ -125,6 +151,9 @@ app/       Android app (Compose, Material 3)
   boot/      BOOT_COMPLETED receiver → restore last desired state (opt-in)
 remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI → AAR (gomobile);
            Kotlin implements a typed callback interface. `bootleg` CLI in the same Go module.
+rndis/     Go: the RNDIS device (control messages, PACKET_MSG framing, FunctionFS descriptors) and
+           `cmd/bootleg-rndis`, a static linux/arm64 daemon shipped in the APK as
+           `libbootlegrndis.so` and run by the root service
 ```
 
 ## USB gadget

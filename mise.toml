@@ -17,10 +17,11 @@ _.path = ["{{config_root}}/.android-sdk/platform-tools", "{{config_root}}/script
 lockfile = true
 
 [tasks.check]
-description = "L0-L2: lint, compile (warnings as errors), unit + property + simulation tests, UI screenshot goldens, Go remote tests"
+description = "L0-L2: lint, compile (warnings as errors), unit + property + simulation tests, UI screenshot goldens, Go remote and RNDIS tests"
 run = [
   "./gradlew --console=plain -q ktlintCheck :core:test :app:verifyRoborazziDebug :app:assembleDebug",
   "mise run remote:test",
+  "mise run rndis:test",
 ]
 
 [tasks."check:catalog"]
@@ -103,6 +104,16 @@ run = "mkdir -p ../build/bin && go build -o ../build/bin/bootleg ./cmd/bootleg"
 description = "Vet and unit-test the Go remote module"
 dir = "remote"
 run = "go vet ./... && go test ./..."
+
+[tasks."rndis:test"]
+description = "Vet (host and linux/arm64) and unit-test the Go RNDIS module"
+dir = "rndis"
+run = "go vet ./... && GOOS=linux GOARCH=arm64 go vet ./... && go test ./..."
+
+[tasks."rndis:build"]
+description = "Build the RNDIS daemon (static linux/arm64) into rndis/build/jniLibs for the APK"
+dir = "rndis"
+run = "mkdir -p build/jniLibs/arm64-v8a && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -buildvcs=false -ldflags '-s -w' -o build/jniLibs/arm64-v8a/libbootlegrndis.so ./cmd/bootleg-rndis"
 
 [tasks."remote:keycodes"]
 description = "Regenerate remote/protocol/keycodes.json from core's BrowserKeyCodes (review the diff)"

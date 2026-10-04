@@ -63,6 +63,33 @@ val buildRemoteAar =
         commandLine("mise", "run", "--quiet", "remote:aar")
     }
 
+// The RNDIS daemon (rndis/), a static linux/arm64 executable the root service runs. It ships as a
+// native library so the package manager extracts it (executable) into the app's lib directory.
+val rndisJniLibs = rootProject.layout.projectDirectory.dir("rndis/build/jniLibs")
+val buildRndisDaemon =
+    tasks.register<Exec>("buildRndisDaemon") {
+        description = "Builds rndis/build/jniLibs/arm64-v8a/libbootlegrndis.so (mise run rndis:build)"
+        val rndisDir = rootProject.layout.projectDirectory.dir("rndis")
+        inputs
+            .files(fileTree(rndisDir) { exclude("build/**") })
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+            .withPropertyName("rndisSources")
+        inputs
+            .files(rootProject.layout.projectDirectory.file("mise.toml"), rootProject.layout.projectDirectory.file("mise.lock"))
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+            .withPropertyName("toolchain")
+        outputs.dir(rndisJniLibs).withPropertyName("jniLibs")
+        outputs.cacheIf { true }
+        workingDir = rootProject.projectDir
+        commandLine("mise", "run", "--quiet", "rndis:build")
+    }
+android.sourceSets
+    .getByName("main")
+    .jniLibs
+    .srcDir(rndisJniLibs)
+android.packaging.jniLibs.useLegacyPackaging = true
+tasks.named("preBuild") { dependsOn(buildRndisDaemon) }
+
 roborazzi {
     outputDir.set(file("src/test/screenshots"))
 }
