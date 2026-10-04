@@ -4,10 +4,14 @@ gradle = "latest"
 android-sdk = "latest"
 go = "latest"
 node = "latest" # only for check:device:web (Playwright drives the Mac's Chrome)
+coreutils = "latest" # GNU-compatible `timeout` for the device scripts (macOS has none)
+jq = "latest"
 
 [env]
 ANDROID_HOME = "{{config_root}}/.android-sdk"
 ANDROID_SDK_ROOT = "{{config_root}}/.android-sdk"
+# adb from the project SDK; `timeout` from uutils coreutils (a multicall binary)
+_.path = ["{{config_root}}/.android-sdk/platform-tools", "{{config_root}}/scripts/bin"]
 
 [settings]
 lockfile = true
