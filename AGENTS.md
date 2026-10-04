@@ -63,6 +63,10 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
   `sizeBytes`, `lunCountMax`).
 - **Comments** explain why, not what. Keep them sparse.
 - **Simplicity:** small surface areas, few dependencies, no speculative abstractions.
+- **Lean code and tests:** every line is a maintenance cost. Write the least code that meets the
+  requirement and keeps it safe; no modes or options nobody asked for. Keep tests few and
+  high-value: scenario and property tests that would catch real bugs. Don't write near-duplicate
+  tests or tests that only restate the implementation, and delete them when you find them.
 
 ## Device rules
 
