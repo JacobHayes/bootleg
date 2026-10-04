@@ -285,8 +285,12 @@ async function hidOnF24Off(page) {
 const F24_KEY = { code: "F24", key: "F24", windowsVirtualKeyCode: 0x87, nativeVirtualKeyCode: 0x87 };
 
 async function releaseOnBlur(context, page) {
-  await page.focus("#pad");
   const devtools = await context.newCDPSession(page);
+  // Playwright emulates focus, so every page counts as focused and a tab switch never fires blur or
+  // visibilitychange. With emulation off this page sees real focus changes.
+  await devtools.send("Emulation.setFocusEmulationEnabled", { enabled: false });
+  await page.bringToFront();
+  await page.focus("#pad");
   const before = hidState().written;
   await devtools.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...F24_KEY });
   await until("the F24 down report", () => hidState().written - before >= 1, 5000);
