@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Mouse
 import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material.icons.outlined.Usb
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -44,6 +45,7 @@ fun SettingsScreen(
 ) {
     val wifiOnly by prefs.wifiOnlyDownloads.collectAsState()
     val restore by prefs.restoreAfterReboot.collectAsState()
+    val reconnect by prefs.reconnectAfterDiskChange.collectAsState()
     val mouseLayout by prefs.mouseLayout.collectAsState()
     val context = LocalContext.current
 
@@ -65,6 +67,16 @@ fun SettingsScreen(
                 body = "Expose the last set of drives again when the phone starts. Drives ejected by the computer stay ejected.",
                 checked = restore,
                 onChange = prefs::setRestoreAfterReboot,
+            )
+            SwitchRow(
+                icon = Icons.Outlined.Usb,
+                title = "Reconnect USB after a disk change",
+                body =
+                    "For computers that don't notice a disk added or swapped (the drive stays empty until a rescan). " +
+                        "Reconnecting drops every drive and the keyboard and mouse for a moment, and can interrupt a " +
+                        "computer booting from a drive. Skipped while a writable disk is exposed.",
+                checked = reconnect,
+                onChange = prefs::setReconnectAfterDiskChange,
             )
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionHeader("Keyboard & mouse")

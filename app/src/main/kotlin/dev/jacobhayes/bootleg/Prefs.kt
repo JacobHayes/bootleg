@@ -52,6 +52,16 @@ class Prefs(
         restoreFlow.value = enabled
     }
 
+    private val reconnectAfterDiskChangeFlow = MutableStateFlow(preferences.getBoolean(KEY_RECONNECT_AFTER_DISK_CHANGE, false))
+
+    /** Re-plug USB after a disk goes in or changes in place, for hosts that don't look for new media. */
+    val reconnectAfterDiskChange: StateFlow<Boolean> = reconnectAfterDiskChangeFlow.asStateFlow()
+
+    fun setReconnectAfterDiskChange(enabled: Boolean) {
+        preferences.edit().putBoolean(KEY_RECONNECT_AFTER_DISK_CHANGE, enabled).apply()
+        reconnectAfterDiskChangeFlow.value = enabled
+    }
+
     fun setRemoteEnabled(enabled: Boolean) {
         preferences.edit().putBoolean(KEY_REMOTE_ENABLED, enabled).apply()
         remoteEnabledFlow.value = enabled
@@ -75,6 +85,7 @@ class Prefs(
         const val KEY_COMPATIBLE_MOUSE = "compatible_mouse"
         const val KEY_USB_TETHER_CHOICE = "usb_tether_choice"
         const val KEY_CONTROL_PANE = "control_pane"
+        const val KEY_RECONNECT_AFTER_DISK_CHANGE = "reconnect_after_disk_change"
 
         /** Read by the boot path too, which has no [Prefs] instance. */
         fun mouseLayoutOf(preferences: SharedPreferences): MouseLayout =

@@ -18,6 +18,7 @@ Confirmed on device: configfs gadget `g1` on UDC `11110000.dwc3`;
 | Toolchain | `mise.toml` (all `latest` + `mise.lock`, Java on 21 LTS); SDK in `.android-sdk/` |
 | Root | Magisk `su`; app's root grant pre-seeded in Magisk's DB for testing |
 | Disk mode | Auto: `.iso` → read-only CD-ROM if it fits one (≤ 2.36 GB, the kernel's CD-ROM limit), else read-only disk; `.img` → read-only disk; per-slot override: CD-ROM / disk RO / disk RW. A CD-ROM the image doesn't fit is refused, never exported cut off. The mode menu says that a hybrid ISO as a read-only disk boots but Windows won't show its files |
+| Media changes | A disk added or swapped on an exposed drive goes in without reconnecting USB; hosts that don't look for new media (Windows with media-change polling off) need a rescan. Settings "Reconnect USB after a disk change" (default off) re-plugs USB after such a change, unless a writable disk is exposed. Drives says how to rescan |
 | Multi-disk | Up to 8 slots exposed at once (one `mass_storage` LUN each) |
 | Composite gadget | Never replace the USB function: add disks/HID next to `ffs.adb` and leave other apps' functions alone. Bootleg's functions keep one order (disks, keyboard, mouse) so each keeps its USB interface number (Windows binds drivers by number); while HID is on without disks an empty drive keeps the disks' place |
 | Storage | `/sdcard/bootleg/` (kernel is given the `/data/media/0/...` path, not the FUSE path); can also pick any file on the phone |

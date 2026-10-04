@@ -55,7 +55,7 @@ import kotlinx.coroutines.withTimeout
 class BootlegBackendImpl(
     private val context: Context,
     private val scope: CoroutineScope,
-    prefs: Prefs,
+    private val prefs: Prefs,
 ) : BootlegBackend {
     private val rootStatusFlow = MutableStateFlow<RootStatus>(RootStatus.Unknown)
     private val gadgetStateFlow = MutableStateFlow<GadgetState?>(null)
@@ -118,14 +118,17 @@ class BootlegBackendImpl(
         imagesFlow.value = listed.map { it.toImageFile() }
     }
 
-    override suspend fun apply(desired: Desired): ApplyResult = userGadgetCall { it.apply(BootlegJson.encodeToString(desired)) }
+    override suspend fun apply(desired: Desired): ApplyResult =
+        userGadgetCall {
+            it.apply(BootlegJson.encodeToString(desired), prefs.reconnectAfterDiskChange.value)
+        }
 
     override suspend fun eject(
         lun: Int,
         force: Boolean,
     ): ApplyResult = userGadgetCall { it.eject(lun, force) }
 
-    override suspend fun reinsert(lun: Int): ApplyResult = userGadgetCall { it.reinsert(lun) }
+    override suspend fun reinsert(lun: Int): ApplyResult = userGadgetCall { it.reinsert(lun, prefs.reconnectAfterDiskChange.value) }
 
     override suspend fun bootlegOff(): ApplyResult = userGadgetCall { it.bootlegOff() }
 

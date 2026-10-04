@@ -55,6 +55,48 @@ class DefaultGadgetController(
         return converge(journal, state, foreignBefore = state, allowEmergencyOff = true)
     }
 
+    /**
+     * [apply], then [reconnectAfterMediaChange]: with [reconnect] (the Settings switch), a disk that went
+     * in or changed in place is followed by a re-plug, so hosts that don't poll for media notice it.
+     */
+    fun apply(
+        desired: Desired,
+        reconnect: Boolean,
+    ): ApplyResult {
+        val before = reader.read()
+        val result = apply(desired)
+        return if (reconnect) reconnectAfterMediaChange(before, result) else result
+    }
+
+    /** [reinsert], then [reconnectAfterMediaChange] as for [apply]. */
+    fun reinsert(
+        lun: Int,
+        reconnect: Boolean,
+    ): ApplyResult {
+        val before = reader.read()
+        val result = reinsert(lun)
+        return if (reconnect) reconnectAfterMediaChange(before, result) else result
+    }
+
+    /**
+     * Re-plugs USB (one re-enumeration with the same gadget) when [result] put media into a LUN in place,
+     * without re-enumerating: some hosts (Windows with media-change polling off) never look again. Skipped
+     * while any LUN has writable media, the changed one included: a re-plug pulls a volume the host may
+     * have mounted and be writing to. Called under the same lock as the change, so nothing comes between.
+     */
+    fun reconnectAfterMediaChange(
+        before: GadgetState,
+        result: ApplyResult,
+    ): ApplyResult {
+        // A partial result doesn't say whether it already re-enumerated; one more re-plug isn't worth guessing.
+        if (result !is ApplyResult.Applied || result.reenumerated) return result
+        val state = reader.read()
+        val changed = state.luns.any { (lun, after) -> after.file.isNotEmpty() && before.luns[lun]?.file != after.file }
+        if (!changed || state.luns.values.any { it.file.isNotEmpty() && !it.ro } || state.udc.isEmpty()) return result
+        val journal = journalStore.load()
+        return converge(journal, state, foreignBefore = state, allowEmergencyOff = true, reenumerate = true)
+    }
+
     /** Re-exports an ejected or failed slot's media. */
     fun reinsert(lun: Int): ApplyResult {
         val quiet = awaitHalQuiet() ?: return halBusy()
@@ -157,6 +199,7 @@ class DefaultGadgetController(
         initialState: GadgetState,
         foreignBefore: GadgetState,
         allowEmergencyOff: Boolean,
+        reenumerate: Boolean = false,
     ): ApplyResult {
         if (initialJournal.udc.isEmpty()) return ApplyResult.NeedsAttention("UDC is unbound and no UDC name is recorded")
         // Journals from before the LUN marker get a nonce here, so the LUNs this converge configures carry it.
@@ -168,7 +211,7 @@ class DefaultGadgetController(
         }
         var state = initialState
         var replanCount = 0
-        var forceReenumerate = false
+        var forceReenumerate = reenumerate
         var reenumerated = false
         var lastProblem: String? = null
         // Each pass either converges, consumes a replan, or fails a slot for the first time.

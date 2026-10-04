@@ -92,13 +92,16 @@ class BootlegRootService : RootService() {
             // Records host ejects on the way: the host emptying a LUN sends no broadcast, so readers poll this.
             override fun readJournal(): String = call { BootlegJson.encodeToString(controller.observe()) }
 
-            override fun apply(desiredJson: String): String =
+            override fun apply(
+                desiredJson: String,
+                reconnect: Boolean,
+            ): String =
                 call {
                     val desired = BootlegJson.decodeFromString<Desired>(desiredJson)
                     BootlegJson.encodeToString(
                         gadgetChange {
                             awaitTetherTransition()
-                            controller.apply(canonicalize(desired))
+                            controller.apply(canonicalize(desired), reconnect)
                         },
                     )
                 }
@@ -108,12 +111,15 @@ class BootlegRootService : RootService() {
                 force: Boolean,
             ): String = call { BootlegJson.encodeToString(gadgetChange { controller.eject(lun, force) }) }
 
-            override fun reinsert(lun: Int): String =
+            override fun reinsert(
+                lun: Int,
+                reconnect: Boolean,
+            ): String =
                 call {
                     BootlegJson.encodeToString(
                         gadgetChange {
                             awaitTetherTransition()
-                            controller.reinsert(lun)
+                            controller.reinsert(lun, reconnect)
                         },
                     )
                 }

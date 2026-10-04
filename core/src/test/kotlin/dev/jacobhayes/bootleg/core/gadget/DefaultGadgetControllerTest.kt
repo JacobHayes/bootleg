@@ -71,6 +71,57 @@ class DefaultGadgetControllerTest {
     }
 
     @Test
+    fun `with reconnect on, a disk swapped in place is followed by one re-plug`() {
+        val rig = GadgetRig()
+        val controller = rig.controller()
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(Desired(listOf(SlotSpec(0, img(1), LunMode.DISK_RO)))))
+        val swap = Desired(listOf(SlotSpec(0, img(2), LunMode.DISK_RO)))
+        val windowsBefore = rig.fs.executorWindowsUs.size
+        val result = assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(swap, reconnect = true))
+        assertTrue(result.reenumerated)
+        assertEquals(windowsBefore + 1, rig.fs.executorWindowsUs.size, "one unbind/bind")
+        assertEquals(
+            img(2),
+            rig
+                .state()
+                .luns
+                .getValue(0)
+                .file,
+        )
+        rig.assertHealthy()
+        // Without the setting the same swap stays in place.
+        val plain =
+            assertInstanceOf(
+                ApplyResult.Applied::class.java,
+                controller.apply(Desired(listOf(SlotSpec(0, img(3), LunMode.DISK_RO))), reconnect = false),
+            )
+        assertFalse(plain.reenumerated)
+    }
+
+    @Test
+    fun `no re-plug while any disk is writable, or when nothing new went in`() {
+        val rig = GadgetRig()
+        val controller = rig.controller()
+        val rw = SlotSpec(1, img(5), LunMode.DISK_RW)
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(Desired(listOf(SlotSpec(0, img(1), LunMode.DISK_RO), rw))))
+        val swapped = controller.apply(Desired(listOf(SlotSpec(0, img(2), LunMode.DISK_RO), rw)), reconnect = true)
+        assertFalse(assertInstanceOf(ApplyResult.Applied::class.java, swapped).reenumerated, "a mounted RW volume would be pulled")
+        assertEquals(
+            img(2),
+            rig
+                .state()
+                .luns
+                .getValue(0)
+                .file,
+        )
+        // An eject (media out, nothing in) needs no re-plug either.
+        val ejected = controller.apply(Desired(listOf(SlotSpec(0, img(2), LunMode.DISK_RO))), reconnect = true)
+        assertInstanceOf(ApplyResult.Applied::class.java, ejected)
+        val again = controller.apply(Desired(listOf(SlotSpec(0, img(2), LunMode.DISK_RO))), reconnect = true)
+        assertFalse(assertInstanceOf(ApplyResult.Applied::class.java, again).reenumerated)
+    }
+
+    @Test
     fun `a CD-ROM that fits exactly is exported`() {
         val rig = GadgetRig()
         rig.fileSizes[iso(1)] = CdromLimits.SIZE_BYTES_MAX

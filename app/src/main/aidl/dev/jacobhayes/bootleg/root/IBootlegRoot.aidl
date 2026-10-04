@@ -7,11 +7,12 @@ interface IBootlegRoot {
     String readGadget();
     // JSON Journal
     String readJournal();
-    // desiredJson: JSON Desired; returns JSON ApplyResult
-    String apply(String desiredJson);
+    // desiredJson: JSON Desired; returns JSON ApplyResult. reconnect: re-plug USB after media went in
+    // or changed in place (skipped while any LUN has writable media), for hosts that never look again.
+    String apply(String desiredJson, boolean reconnect);
     String eject(int lun, boolean force);
     // Re-exports a host-/user-ejected or failed slot.
-    String reinsert(int lun);
+    String reinsert(int lun, boolean reconnect);
     String bootlegOff();
     String reconcile();
     // format: BlankImageFormat name; returns JSON RootImage

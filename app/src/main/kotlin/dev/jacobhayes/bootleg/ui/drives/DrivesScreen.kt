@@ -220,7 +220,9 @@ private fun SlotList(
 /** macOS holds an attached disk (prevent-removal) until it ejects it itself, so the phone's Eject is refused before that. */
 private const val EJECT_HINT =
     "Eject drives on the computer first. macOS keeps an attached disk in use until you eject it there, " +
-        "so Eject here is refused until then (Force eject still works)."
+        "so Eject here is refused until then (Force eject still works).\n\n" +
+        "Drive not showing up? Rescan disks on the computer (Windows: Disk Management, Action, Rescan Disks), " +
+        "or turn on Reconnect USB after a disk change in Settings."
 
 /**
  * Android's USB tethering next to the drives: it shares the USB connection with them, and switching

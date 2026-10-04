@@ -188,6 +188,16 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
   `readJournal` every 3s, which records host ejects (reads only, no HAL wait) for the Drives
   screen, notification and tile. The app also reads the journal whenever it comes to the
   foreground, so a draft never starts from an empty journal while exports are live.
+- **Reconnect after a media change** (Settings, default off: macOS, Linux and Windows with its
+  default media-change polling notice an in-place change). Some hosts never look again after media
+  goes into a LUN in place: Windows 7 with polling off showed nothing (and the kernel served no
+  reads) until Disk Management's Rescan Disks. With the switch on, root's `apply` and `reinsert`
+  compare the LUN files before and after and, when the change applied fully and media went in or changed without a
+  re-enumeration, converge once more with a forced re-enumeration (unbind, bind, same gadget), in the
+  same root call under the gadget lock. It is skipped while any LUN has writable media, the changed
+  one included: the host may have mounted it and be writing. The re-plug drops every drive and the
+  keyboard and mouse for a moment (read-only volumes the host mounted vanish; macOS warns about
+  them), which the Settings text says. Drives tells the user to rescan or turn the switch on.
 - **Eject all** from the notification or tile toasts when the host refused (macOS keeps
   prevent-removal set until it ejects the disk itself, even after an unmount) or the eject failed.
 - **Executor** (root, in-process file IO, no shell per op): before each prepare/cleanup op it
