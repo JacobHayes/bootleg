@@ -120,8 +120,14 @@ enum class HidSendResult {
     /** An owed release-all hasn't reached the host yet; input is refused until it does. */
     RELEASE_PENDING,
 
-    /** Stopped, reconnecting or the host isn't listening. */
+    /** Stopped, reconnecting or a release-all is still owed on that endpoint. */
     UNAVAILABLE,
+
+    /**
+     * The host isn't reading that endpoint (firmware and boot menus often poll only the keyboard). Dropped
+     * on its own: the other endpoint keeps working and nothing is owed, so it raises no barrier.
+     */
+    NOT_READING,
 }
 
 /**

@@ -479,10 +479,16 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
 - Nonblocking writes with a 50ms deadline, a bounded queue (256), and release-all on
   overflow, disconnect, or controller change.
 - `HidSession` (app) owns both relay endpoints and writes from one coroutine. A report the host doesn't take
-  within the deadline means the host stopped polling (asleep, rebooting): queued input is dropped,
-  never replayed late, and new input is refused until the owed release-all (all-zero keyboard and
-  mouse reports) gets through. After 2s of that, or on `ENXIO`/`ESHUTDOWN`, the endpoints are reopened
-  with backoff (250ms doubling to 5s, at most 40 attempts; the next input retries after that).
+  within the deadline means the host isn't reading that endpoint (asleep, rebooting, or firmware and
+  boot menus, which often poll the keyboard but never the mouse). Stalls are per endpoint: that
+  endpoint's queued input is dropped, never replayed late, and its new input is refused
+  (`NOT_READING`) until its owed release-all gets through, which is retried with one nonblocking
+  write every 100ms so it never holds up the other endpoint. The link stays `Open` and lists the
+  endpoints the host isn't reading ("Keyboard connected · the computer isn't reading the mouse"); a
+  stall never closes or reopens anything, since the fds are fine. Only `ENXIO`/`ESHUTDOWN` or a
+  failed write reopen the endpoints, with backoff (250ms doubling to 5s, at most 40 attempts; the
+  next input retries after that). A release owed on an endpoint the host isn't reading doesn't hold
+  the remote's input barrier.
   When root drops the fds itself the session is told and reconnects without waiting for input
   (see HID fds and gadget changes). Release-all also happens on stop, on app background and on queue overflow, and resets the
   on-screen modifier and button state. Keyboard LED output reports are polled while idle.

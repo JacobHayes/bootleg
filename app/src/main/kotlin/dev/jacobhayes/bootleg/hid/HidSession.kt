@@ -36,8 +36,14 @@ enum class HidOffer {
     /** The bounded queue overflowed: everything queued was dropped and a release-all is owed. */
     QUEUE_FULL,
 
-    /** Stopped, reconnecting, or the host isn't reading reports. */
+    /** Stopped, reconnecting, or a release-all is still owed on this endpoint. */
     UNAVAILABLE,
+
+    /**
+     * The host isn't reading this endpoint (asleep, or firmware and boot menus that poll only the
+     * keyboard). Dropped; nothing else is affected and nothing more is owed.
+     */
+    NOT_READING,
 }
 
 /** A nonblocking `/dev/hidgN` file descriptor (or a fake in tests). */
@@ -60,10 +66,16 @@ sealed interface HidLinkState {
 
     data object Opening : HidLinkState
 
-    /** Endpoints are open. [hostListening] is false while the host isn't fetching reports (asleep, off, or not configured). */
+    /**
+     * Endpoints are open. [notReading] are the endpoints whose reports the host isn't fetching (asleep, off,
+     * or firmware and boot menus that poll only the keyboard); their input is dropped, the others' flows.
+     */
     data class Open(
-        val hostListening: Boolean,
-    ) : HidLinkState
+        val notReading: Set<HidKind> = emptySet(),
+    ) : HidLinkState {
+        /** The host reads every endpoint. */
+        val hostListening: Boolean get() = notReading.isEmpty()
+    }
 
     data class Reconnecting(
         val attempt: Int,
@@ -101,6 +113,7 @@ sealed interface HidRelayNotice {
 data class HidSessionStats(
     val reportsWritten: Long = 0,
     val reportsDropped: Long = 0,
+    /** Release-all reports delivered, counted per endpoint. */
     val releaseAllCount: Long = 0,
     val lastError: String? = null,
 )
@@ -110,9 +123,7 @@ data class HidSessionTuning(
     val writeDeadlineMs: Long = HidLimits.REPORT_WRITE_DEADLINE_MS,
     /** Pause between nonblocking write attempts within one deadline. */
     val writeRetryIntervalMs: Long = 1,
-    /** How long writes may keep timing out before the endpoints are reopened. */
-    val stallReopenMs: Long = 2_000,
-    /** Pause between release-all attempts while the host isn't listening. */
+    /** Pause between single nonblocking release-all attempts on an endpoint the host isn't reading. */
     val stallRetryIntervalMs: Long = 100,
     val reopenBackoffInitialMs: Long = 250,
     val reopenBackoffMaxMs: Long = 5_000,
@@ -125,7 +136,7 @@ data class HidSessionTuning(
     init {
         require(queueLengthMax in 1..HidLimits.REPORT_QUEUE_LENGTH_MAX) { "queue length must be 1..${HidLimits.REPORT_QUEUE_LENGTH_MAX}" }
         require(writeDeadlineMs > 0 && writeRetryIntervalMs in 1..writeDeadlineMs) { "bad write deadline: $this" }
-        require(stallReopenMs > writeDeadlineMs && stallRetryIntervalMs > 0) { "bad stall timing: $this" }
+        require(stallRetryIntervalMs > 0) { "bad stall timing: $this" }
         require(reopenBackoffInitialMs in 1..reopenBackoffMaxMs && reopenAttemptCountMax > 0) { "bad reopen backoff: $this" }
         require(ledPollIntervalMs > 0) { "bad LED poll interval: $this" }
         require(reopenWaitMaxMs > 0) { "bad reopen wait: $this" }
@@ -147,16 +158,20 @@ data class HidSessionTuning(
  * Owns the HID file descriptors and writes reports to them from one coroutine.
  *
  * - The queue is bounded; overflow drops it and releases everything.
- * - Each write is nonblocking with a deadline. A host that stops polling (asleep, rebooting) makes
- *   reports time out: queued input is dropped (never replayed late), release-all is retried until
- *   the host takes it, and after [HidSessionTuning.stallReopenMs] the endpoints are reopened.
- * - ENXIO/ESHUTDOWN (function gone, host off) reopen with bounded backoff.
+ * - Each write is nonblocking with a deadline. Stalls are tracked per endpoint: firmware and boot menus
+ *   often poll the keyboard but never the mouse. An endpoint whose report times out is "not reading":
+ *   its queued input is dropped (never replayed late), its new input is refused, and its owed
+ *   release-all is retried with one nonblocking attempt every [HidSessionTuning.stallRetryIntervalMs],
+ *   so it never holds up the other endpoint. A stall never closes or reopens anything: the fds are
+ *   fine, the host just isn't reading.
+ * - ENXIO/ESHUTDOWN (function gone, host off) and write failures reopen with bounded backoff.
  * - When root drops the fds itself ([onRelayNotice]: a gadget change, a re-enumeration by someone
  *   else), the link leaves Open at once, input is refused until the endpoints are reopened and the
  *   release-all is delivered, and the reopen waits until root says opens are safe. A quarantined fd
  *   is terminal: [HidLinkState.Failed] with `restartRequired`.
  * - Every error, overflow and stop owes the host a release-all (all-zero keyboard and mouse
- *   reports); [releaseEpoch] increments so input state (sticky modifiers, held buttons) resets too.
+ *   reports; a stall only its own endpoint's); that endpoint's [releaseEpochs] entry increments so
+ *   its input state (sticky modifiers, held buttons) resets too.
  *
  * [scope] should run on a single thread; [nowMs] is a monotonic clock.
  */
@@ -173,9 +188,9 @@ class HidSession(
     )
 
     /**
-     * Guards [queue] and [releaseAllOwed] together: dropping the queue and owing a release is one step,
-     * and admission checks the barrier in the same step, so no report can be queued between the drop
-     * and the barrier and then reach the host after the release.
+     * Guards [queue], [releaseOwedKinds] and [notReading] together: dropping queued input and owing a
+     * release is one step, and admission checks the barrier in the same step, so no report can be queued
+     * between the drop and the barrier and then reach the host after the release.
      */
     private val queueLock = Any()
     private val queue = ArrayDeque<Pending>()
@@ -186,8 +201,14 @@ class HidSession(
     private var relayClosed: HidRelayNotice.Closed? = null
     private val endpoints = HashMap<HidKind, HidEndpoint>()
 
-    @Volatile private var releaseAllOwed = false
-    private var stallStartMs: Long? = null
+    /** Endpoints owed a release-all; their input is refused until it reaches the host. Guarded by [queueLock]. */
+    private val releaseOwedKinds = mutableSetOf<HidKind>()
+
+    /** Endpoints whose last write timed out: the host isn't reading them. Guarded by [queueLock]. */
+    private val notReading = mutableSetOf<HidKind>()
+
+    /** When each not-reading endpoint was last probed with its owed release (loop thread only). */
+    private val lastProbeMs = HashMap<HidKind, Long>()
     private var failedAttempts = 0
 
     @Volatile private var job: Job? = null
@@ -195,15 +216,18 @@ class HidSession(
     private val stateFlow = MutableStateFlow<HidLinkState>(HidLinkState.Stopped)
     private val statsFlow = MutableStateFlow(HidSessionStats())
     private val ledsFlow = MutableStateFlow<KeyboardLeds?>(null)
-    private val releaseEpochFlow = MutableStateFlow(0)
+    private val releaseEpochFlow = MutableStateFlow(kinds.associateWith { 0 })
     private val queueLengthFlow = MutableStateFlow(0)
 
     val state: StateFlow<HidLinkState> = stateFlow.asStateFlow()
     val stats: StateFlow<HidSessionStats> = statsFlow.asStateFlow()
     val leds: StateFlow<KeyboardLeds?> = ledsFlow.asStateFlow()
 
-    /** Increments whenever input state must be forgotten because everything was (or will be) released. */
-    val releaseEpoch: StateFlow<Int> = releaseEpochFlow.asStateFlow()
+    /**
+     * Per endpoint, increments whenever its input state must be forgotten because it was (or will be)
+     * released. A stall releases only its own endpoint, so the other's held keys or buttons stay known.
+     */
+    val releaseEpochs: StateFlow<Map<HidKind, Int>> = releaseEpochFlow.asStateFlow()
 
     val isRunning: Boolean get() = job?.isActive == true
 
@@ -216,7 +240,6 @@ class HidSession(
         // A quarantined fd only goes away with a restart; reopening would just be refused again.
         if ((stateFlow.value as? HidLinkState.Failed)?.restartRequired == true) return
         failedAttempts = 0
-        stallStartMs = null
         // A notice from before this start is about endpoints that are gone; opening fresh covers it.
         synchronized(queueLock) { relayClosed = null }
         dropQueueAndOweRelease()
@@ -239,14 +262,14 @@ class HidSession(
                 relayClosed = null
                 stateFlow.value = HidLinkState.Stopped
             }
-            bumpReleaseEpoch()
+            bumpReleaseEpoch(kinds)
         }
     }
 
     /**
      * Queues one report. Returns false (and counts it dropped) when the session isn't ready to
-     * deliver it promptly: stopped, reconnecting, the host isn't listening, a release-all is still
-     * owed, or the queue overflowed.
+     * deliver it promptly: stopped, reconnecting, the host isn't reading this endpoint, a release-all
+     * is still owed on it, or the queue overflowed.
      */
     fun send(
         kind: HidKind,
@@ -260,8 +283,8 @@ class HidSession(
     ): HidOffer {
         require(kind in kinds) { "$kind is not part of this session" }
         require(report.size == kind.reportSizeBytes) { "$kind report must be ${kind.reportSizeBytes} bytes, got ${report.size}" }
-        when (val current = stateFlow.value) {
-            is HidLinkState.Open -> if (!current.hostListening) return dropped(HidOffer.UNAVAILABLE)
+        when (stateFlow.value) {
+            is HidLinkState.Open -> Unit
             is HidLinkState.Failed -> {
                 // User input is the signal to try again (start refuses when only a restart helps).
                 start()
@@ -273,8 +296,10 @@ class HidSession(
         val offer =
             synchronized(queueLock) {
                 when {
+                    relayClosed != null -> HidOffer.UNAVAILABLE
+                    kind in notReading -> HidOffer.NOT_READING
                     // Input waits behind the owed release; queued now, it could reach the host after it.
-                    releaseAllOwed || relayClosed != null -> HidOffer.UNAVAILABLE
+                    kind in releaseOwedKinds -> HidOffer.UNAVAILABLE
                     queue.size >= tuning.queueLengthMax -> {
                         droppedCount = dropQueueAndOweReleaseLocked()
                         HidOffer.QUEUE_FULL
@@ -288,12 +313,17 @@ class HidSession(
             }
         countDropped(droppedCount)
         if (offer == HidOffer.QUEUE_FULL) statsFlow.update { it.copy(lastError = "report queue overflowed") }
-        if (offer != HidOffer.UNAVAILABLE) wakeUp.trySend(Unit)
+        if (offer == HidOffer.ACCEPTED || offer == HidOffer.QUEUE_FULL) wakeUp.trySend(Unit)
         return if (offer == HidOffer.ACCEPTED) offer else dropped(offer)
     }
 
-    /** A release-all is owed and hasn't reached the host yet; the remote controller holds input behind it. */
-    val releaseOwed: Boolean get() = isRunning && releaseAllOwed
+    /**
+     * A release-all is owed on an endpoint the host reads and hasn't reached it yet; the remote controller
+     * holds input behind it. One the host isn't reading doesn't count: its input is dropped
+     * ([HidOffer.NOT_READING]) until the host takes the release, which may be never (firmware that
+     * ignores the mouse).
+     */
+    val releaseOwed: Boolean get() = isRunning && synchronized(queueLock) { !notReading.containsAll(releaseOwedKinds) }
 
     /** Owes the host a release-all, e.g. when the app goes to the background. */
     fun releaseAll() {
@@ -355,14 +385,13 @@ class HidSession(
                 }
                 if (!openEndpoints()) continue
             }
-            if (releaseAllOwed) {
-                if (!deliverReleaseAll()) continue
-            }
+            if (!deliverOwedReleases()) continue
             pollLeds()
             val next = synchronized(queueLock) { queue.removeFirstOrNull() }
             if (next == null) {
                 queueLengthFlow.value = 0
-                withTimeoutOrNull(tuning.ledPollIntervalMs) { wakeUp.receive() }
+                // The wait also paces the probes of endpoints the host isn't reading.
+                withTimeoutOrNull(minOf(tuning.ledPollIntervalMs, tuning.stallRetryIntervalMs)) { wakeUp.receive() }
                 continue
             }
             val written = writeOrRecover(next.kind, next.report)
@@ -374,7 +403,6 @@ class HidSession(
     /** Closes what root already dropped and waits out its gadget change; false when only a restart helps. */
     private suspend fun handleRelayClosed(closed: HidRelayNotice.Closed): Boolean {
         closeEndpoints()
-        stallStartMs = null
         dropQueueAndOweRelease()
         if (closed.restartRequired) {
             stateFlow.value = HidLinkState.Failed(closed.reason, restartRequired = true)
@@ -415,37 +443,104 @@ class HidSession(
             stateFlow.value = HidLinkState.Reconnecting(failedAttempts, reason)
             return false
         }
-        stallStartMs = null
         dropQueueAndOweRelease()
-        stateFlow.value = HidLinkState.Open(hostListening = true)
+        synchronized(queueLock) { notReading.clear() }
+        lastProbeMs.clear()
+        stateFlow.value = HidLinkState.Open()
         return true
     }
 
-    /** Returns true once both endpoints took their all-zero report. */
-    private suspend fun deliverReleaseAll(): Boolean {
-        for ((kind, endpoint) in endpoints.toSortedMap()) {
-            val result = writeWithDeadline(kind, endpoint, kind.releaseAllReport)
-            if (!handleResult(result)) {
-                if (result == HidWriteResult.WOULD_BLOCK && endpoints.isNotEmpty()) delay(tuning.stallRetryIntervalMs)
-                return false
+    /**
+     * Delivers every owed release-all: with the write deadline on endpoints the host reads, and with one
+     * nonblocking attempt per [HidSessionTuning.stallRetryIntervalMs] on those it doesn't, so a stalled
+     * endpoint never holds up the other. False when the endpoints were closed (a disconnect, or root
+     * dropped them meanwhile): the loop starts over.
+     */
+    private suspend fun deliverOwedReleases(): Boolean {
+        val owed = synchronized(queueLock) { releaseOwedKinds.toSortedSet() }
+        for (kind in owed) {
+            val endpoint = endpoints[kind] ?: return false
+            val stalled = synchronized(queueLock) { kind in notReading }
+            val result =
+                if (stalled) {
+                    val nowMs = nowMs()
+                    val lastMs = lastProbeMs[kind]
+                    if (lastMs != null && nowMs - lastMs < tuning.stallRetryIntervalMs) continue
+                    lastProbeMs[kind] = nowMs
+                    writeOnce(kind, endpoint, kind.releaseAllReport)
+                } else {
+                    writeWithDeadline(kind, endpoint, kind.releaseAllReport)
+                }
+            when (result) {
+                HidWriteResult.WRITTEN -> if (!releaseDelivered(kind)) return false
+                HidWriteResult.WOULD_BLOCK -> if (!stalled) markNotReading(kind)
+                HidWriteResult.DISCONNECTED -> {
+                    reconnect("HID device disconnected")
+                    return false
+                }
+                HidWriteResult.FAILED -> {
+                    reconnect("HID write failed")
+                    return false
+                }
             }
         }
-        // Nothing was admitted since the barrier went up, so the release is the last thing the host saw.
-        synchronized(queueLock) {
-            check(queue.isEmpty()) { "input was queued behind an owed release" }
-            // Root dropped the fds meanwhile, so this release may not have reached the host; owe it to the reopened endpoints.
-            if (relayClosed != null) return false
-            releaseAllOwed = false
-        }
-        statsFlow.update { it.copy(releaseAllCount = it.releaseAllCount + 1) }
-        markHostListening()
         return true
     }
 
-    private fun markHostListening() {
-        stallStartMs = null
-        failedAttempts = 0
-        if (stateFlow.value != HidLinkState.Open(hostListening = true)) stateFlow.value = HidLinkState.Open(hostListening = true)
+    /** [kind] took its release-all, so its input flows again. False if root dropped the fds meanwhile (the release is owed again). */
+    private fun releaseDelivered(kind: HidKind): Boolean {
+        val recovered =
+            synchronized(queueLock) {
+                // Nothing of this kind was admitted since the barrier went up, so the release is the last thing the host saw.
+                check(queue.none { it.kind == kind }) { "$kind input was queued behind an owed release" }
+                // Root dropped the fds meanwhile, so this release may not have reached the host; owe it to the reopened endpoints.
+                if (relayClosed != null) return false
+                releaseOwedKinds -= kind
+                notReading.remove(kind)
+            }
+        lastProbeMs.remove(kind)
+        resetAttemptsIfRecovered()
+        statsFlow.update { it.copy(releaseAllCount = it.releaseAllCount + 1) }
+        if (recovered) publishOpen()
+        return true
+    }
+
+    /**
+     * The host didn't fetch a [kind] report within the deadline: it isn't reading that endpoint. Its queued
+     * input is dropped and a release owed; the other endpoint carries on, and nothing is reopened.
+     */
+    private fun markNotReading(kind: HidKind) {
+        val dropped =
+            synchronized(queueLock) {
+                val count = queue.count { it.kind == kind }
+                queue.removeAll { it.kind == kind }
+                queueLengthFlow.value = queue.size
+                if (kind !in releaseOwedKinds) bumpReleaseEpoch(setOf(kind))
+                releaseOwedKinds += kind
+                notReading += kind
+                count
+            }
+        countDropped(dropped)
+        lastProbeMs[kind] = nowMs()
+        statsFlow.update { it.copy(lastError = "the computer isn't reading the ${kind.wireName}") }
+        publishOpen()
+    }
+
+    /**
+     * The reopen budget starts over only once every endpoint the host reads has taken its release: one
+     * endpoint recovering while the other keeps failing must not reset it, or the reconnects never end.
+     */
+    private fun resetAttemptsIfRecovered() {
+        if (synchronized(queueLock) { notReading.containsAll(releaseOwedKinds) }) failedAttempts = 0
+    }
+
+    /** Publishes Open with the current not-reading set, unless root has dropped the fds (the loop shows that). */
+    private fun publishOpen() {
+        synchronized(queueLock) {
+            if (relayClosed != null) return
+            val open = HidLinkState.Open(notReading.toSet())
+            if (stateFlow.value != open) stateFlow.value = open
+        }
     }
 
     private suspend fun writeOrRecover(
@@ -453,27 +548,13 @@ class HidSession(
         report: ByteArray,
     ): Boolean {
         val endpoint = endpoints[kind] ?: return false
-        val written = handleResult(writeWithDeadline(kind, endpoint, report))
-        if (written) markHostListening()
-        return written
-    }
-
-    /** Updates link state for a write outcome; returns true only if the report was written. */
-    private fun handleResult(result: HidWriteResult): Boolean {
-        when (result) {
-            // The caller decides when the link counts as healthy (every owed release delivered).
-            HidWriteResult.WRITTEN -> return true
-            HidWriteResult.WOULD_BLOCK -> {
-                val now = nowMs()
-                val stallStart = stallStartMs ?: now.also { stallStartMs = it }
-                // Input the host didn't take within the deadline is stale; never replay it late.
-                dropQueueAndOweRelease()
-                if (now - stallStart >= tuning.stallReopenMs) {
-                    reconnect("host stopped reading reports for ${now - stallStart} ms")
-                } else {
-                    stateFlow.value = HidLinkState.Open(hostListening = false)
-                }
+        when (writeWithDeadline(kind, endpoint, report)) {
+            HidWriteResult.WRITTEN -> {
+                resetAttemptsIfRecovered()
+                return true
             }
+            // Input the host didn't take within the deadline is stale; never replay it late.
+            HidWriteResult.WOULD_BLOCK -> markNotReading(kind)
             HidWriteResult.DISCONNECTED -> reconnect("HID device disconnected")
             HidWriteResult.FAILED -> reconnect("HID write failed")
         }
@@ -485,8 +566,26 @@ class HidSession(
         statsFlow.update { it.copy(lastError = reason) }
         dropQueueAndOweRelease()
         closeEndpoints()
-        stallStartMs = null
         stateFlow.value = HidLinkState.Reconnecting(failedAttempts, reason)
+    }
+
+    /** One nonblocking attempt, counted like [writeWithDeadline]'s. */
+    private fun writeOnce(
+        kind: HidKind,
+        endpoint: HidEndpoint,
+        report: ByteArray,
+    ): HidWriteResult {
+        check(report.size == kind.reportSizeBytes)
+        val result =
+            try {
+                endpoint.write(report)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                HidWriteResult.FAILED
+            }
+        if (result == HidWriteResult.WRITTEN) statsFlow.update { it.copy(reportsWritten = it.reportsWritten + 1) }
+        return result
     }
 
     private suspend fun writeWithDeadline(
@@ -536,8 +635,8 @@ class HidSession(
         val count = queue.size
         queue.clear()
         queueLengthFlow.value = 0
-        if (!releaseAllOwed) bumpReleaseEpoch()
-        releaseAllOwed = true
+        bumpReleaseEpoch(kinds - releaseOwedKinds)
+        releaseOwedKinds += kinds
         return count
     }
 
@@ -545,7 +644,10 @@ class HidSession(
         if (count > 0) statsFlow.update { it.copy(reportsDropped = it.reportsDropped + count) }
     }
 
-    private fun bumpReleaseEpoch() = releaseEpochFlow.update { it + 1 }
+    private fun bumpReleaseEpoch(released: Set<HidKind>) {
+        if (released.isEmpty()) return
+        releaseEpochFlow.update { epochs -> epochs.mapValues { (kind, epoch) -> if (kind in released) epoch + 1 else epoch } }
+    }
 
     private fun closeEndpoints() {
         for (endpoint in endpoints.values) runCatching { endpoint.close() }

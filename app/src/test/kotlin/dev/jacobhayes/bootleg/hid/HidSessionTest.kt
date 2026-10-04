@@ -56,13 +56,15 @@ class HidSessionTest {
         val opened = mutableListOf<FakeEndpoint>()
         var failNext = 0
         var nextResults: () -> HidWriteResult = { HidWriteResult.WRITTEN }
+        var nextMouseResults: (() -> HidWriteResult)? = null
 
         override suspend fun open(kind: HidKind): HidEndpoint {
             if (failNext > 0) {
                 failNext--
                 error("no node yet")
             }
-            return FakeEndpoint(kind, nextResults).also { opened += it }
+            val results = if (kind == HidKind.MOUSE) nextMouseResults ?: nextResults else nextResults
+            return FakeEndpoint(kind, results).also { opened += it }
         }
 
         fun latest(kind: HidKind): FakeEndpoint = opened.last { it.kind == kind }
@@ -82,6 +84,13 @@ class HidSessionTest {
 
     private fun isReleaseAll(report: ByteArray) = report.all { it == 0.toByte() }
 
+    /** Every one of [kinds] had its input state reset since [before]. */
+    private fun released(
+        session: HidSession,
+        before: Map<HidKind, Int>,
+        kinds: Set<HidKind>,
+    ) = kinds.all { session.releaseEpochs.value.getValue(it) > before.getValue(it) }
+
     @Test
     fun `start opens both endpoints and releases everything first`() =
         runTest {
@@ -89,13 +98,13 @@ class HidSessionTest {
             val session = session(opener)
             session.start()
             runCurrent()
-            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            assertEquals(HidLinkState.Open(), session.state.value)
             for (kind in bothKinds) {
                 val reports = opener.latest(kind).reports()
                 assertEquals(1, reports.size)
                 assertTrue(isReleaseAll(reports.single()))
             }
-            assertEquals(1, session.stats.value.releaseAllCount)
+            assertEquals(bothKinds.size.toLong(), session.stats.value.releaseAllCount)
         }
 
     @Test
@@ -140,11 +149,11 @@ class HidSessionTest {
             val session = session(opener, HidSessionTuning(queueLengthMax = 4))
             session.start()
             runCurrent()
-            val epoch = session.releaseEpoch.value
+            val epoch = session.releaseEpochs.value
             // Nothing runs between these sends, so the fifth overflows the queue of four.
             repeat(4) { assertTrue(session.send(HidKind.KEYBOARD, keyboardPress)) }
             assertFalse(session.send(HidKind.KEYBOARD, keyboardPress))
-            assertTrue(session.releaseEpoch.value > epoch)
+            assertTrue(released(session, epoch, bothKinds))
             runCurrent()
             val keyboard = opener.latest(HidKind.KEYBOARD).reports()
             assertTrue(keyboard.none { it.contentEquals(keyboardPress) }, "queued presses must not be replayed")
@@ -167,14 +176,14 @@ class HidSessionTest {
             assertTrue(session.send(HidKind.KEYBOARD, keyboardRelease))
             advanceTimeBy(tuning.writeDeadlineMs + 1)
             runCurrent()
-            assertEquals(HidLinkState.Open(hostListening = false), session.state.value)
-            // Input while the host isn't listening is refused rather than delivered late.
-            assertFalse(session.send(HidKind.KEYBOARD, keyboardPress))
+            assertEquals(HidLinkState.Open(setOf(HidKind.KEYBOARD)), session.state.value)
+            // Input while the host isn't reading is refused rather than delivered late.
+            assertEquals(HidOffer.NOT_READING, session.offer(HidKind.KEYBOARD, keyboardPress))
             // The host wakes up: the owed release-all goes out before anything else.
             keyboard.results = { HidWriteResult.WRITTEN }
             advanceTimeBy(tuning.stallRetryIntervalMs + tuning.writeDeadlineMs)
             runCurrent()
-            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            assertEquals(HidLinkState.Open(), session.state.value)
             val written = keyboard.reports()
             assertTrue(isReleaseAll(written.last()))
             assertTrue(written.none { it.contentEquals(keyboardPress) })
@@ -182,26 +191,162 @@ class HidSessionTest {
         }
 
     @Test
-    fun `blocking for too long reopens the endpoints`() =
+    fun `a long stall never closes or reopens the endpoints`() =
         runTest {
             val opener = FakeOpener()
             val tuning = HidSessionTuning()
             val session = session(opener, tuning)
             session.start()
             runCurrent()
-            val first = opener.latest(HidKind.KEYBOARD)
-            first.results = { HidWriteResult.WOULD_BLOCK }
+            val opensBefore = opener.opened.size
+            val keyboard = opener.latest(HidKind.KEYBOARD)
+            keyboard.results = { HidWriteResult.WOULD_BLOCK }
             session.send(HidKind.KEYBOARD, keyboardPress)
-            advanceTimeBy(tuning.stallReopenMs + tuning.writeDeadlineMs + tuning.stallRetryIntervalMs * 2)
+            advanceTimeBy(60_000)
             runCurrent()
-            assertTrue(first.closed)
-            assertTrue(session.state.value is HidLinkState.Reconnecting, "${session.state.value}")
-            advanceTimeBy(tuning.reopenBackoffMs(1) + 1)
+            assertFalse(keyboard.closed)
+            assertEquals(opensBefore, opener.opened.size)
+            assertEquals(HidLinkState.Open(setOf(HidKind.KEYBOARD)), session.state.value)
+            assertTrue(session.isRunning)
+        }
+
+    @Test
+    fun `a mouse the host never reads leaves the keyboard working (firmware, boot menus)`() =
+        runTest {
+            val opener = FakeOpener()
+            val tuning = HidSessionTuning()
+            val session = session(opener, tuning)
+            session.start()
             runCurrent()
-            val second = opener.latest(HidKind.KEYBOARD)
-            assertTrue(second !== first && !second.closed)
-            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
-            assertTrue(isReleaseAll(second.reports().first()))
+            val opensBefore = opener.opened.size
+            val keyboard = opener.latest(HidKind.KEYBOARD)
+            val mouse = opener.latest(HidKind.MOUSE)
+            mouse.results = { HidWriteResult.WOULD_BLOCK }
+            val epochs = session.releaseEpochs.value
+            // A key held while the mouse stalls stays held: only the mouse's input state is forgotten.
+            assertTrue(session.send(HidKind.KEYBOARD, keyboardPress))
+            runCurrent()
+            // A mouse report queued ahead of keys: the keys still go out once the mouse's deadline passes.
+            assertTrue(session.send(HidKind.MOUSE, mouseMove))
+            assertTrue(session.send(HidKind.KEYBOARD, keyboardRelease))
+            advanceTimeBy(tuning.writeDeadlineMs + 1)
+            runCurrent()
+            assertEquals(HidLinkState.Open(setOf(HidKind.MOUSE)), session.state.value)
+            assertEquals(listOf(keyboardRelease, keyboardPress, keyboardRelease).map { it.toList() }, keyboard.written)
+            assertEquals(epochs.getValue(HidKind.KEYBOARD), session.releaseEpochs.value.getValue(HidKind.KEYBOARD))
+            assertTrue(released(session, epochs, setOf(HidKind.MOUSE)))
+            assertEquals(HidOffer.NOT_READING, session.offer(HidKind.MOUSE, mouseMove))
+            // The owed mouse release doesn't hold anything up: no barrier for the keyboard.
+            assertFalse(session.releaseOwed)
+
+            // Minutes of typing while the mouse is ignored: every key goes out at once, nothing reconnects.
+            repeat(KEY_ROUND_COUNT) { round ->
+                val writtenBefore = keyboard.written.size
+                val startMs = testScheduler.currentTime
+                assertTrue(session.send(HidKind.KEYBOARD, keyboardPress), "round $round")
+                assertTrue(session.send(HidKind.KEYBOARD, keyboardRelease), "round $round")
+                runCurrent()
+                assertEquals(writtenBefore + 2, keyboard.written.size, "round $round")
+                assertEquals(startMs, testScheduler.currentTime, "round $round: a key waited")
+                assertEquals(HidOffer.NOT_READING, session.offer(HidKind.MOUSE, mouseMove))
+                advanceTimeBy(KEY_ROUND_GAP_MS)
+            }
+            assertFalse(keyboard.closed)
+            assertFalse(mouse.closed)
+            assertEquals(opensBefore, opener.opened.size)
+            assertEquals(HidLinkState.Open(setOf(HidKind.MOUSE)), session.state.value)
+            assertTrue(mouse.written.none { it.toByteArray().contentEquals(mouseMove) }, "a stale move must not reach the host")
+
+            // The OS takes over and reads the mouse: its release goes out first, then moves flow again.
+            mouse.results = { HidWriteResult.WRITTEN }
+            advanceTimeBy(tuning.stallRetryIntervalMs + 1)
+            runCurrent()
+            assertEquals(HidLinkState.Open(), session.state.value)
+            assertTrue(isReleaseAll(mouse.reports().last()))
+            assertTrue(session.send(HidKind.MOUSE, mouseMove))
+            runCurrent()
+            assertTrue(mouse.reports().last().contentEquals(mouseMove))
+        }
+
+    @Test
+    fun `a host reading neither endpoint shows not reading, never reconnects, and recovers when it reads again`() =
+        runTest {
+            val opener = FakeOpener()
+            val tuning = HidSessionTuning()
+            val session = session(opener, tuning)
+            session.start()
+            runCurrent()
+            val opensBefore = opener.opened.size
+            val keyboard = opener.latest(HidKind.KEYBOARD)
+            val mouse = opener.latest(HidKind.MOUSE)
+            var attempts = 0
+            keyboard.results = {
+                attempts++
+                HidWriteResult.WOULD_BLOCK
+            }
+            mouse.results = keyboard.results
+            assertTrue(session.send(HidKind.KEYBOARD, keyboardPress))
+            assertTrue(session.send(HidKind.MOUSE, mouseMove))
+            advanceTimeBy(2 * tuning.writeDeadlineMs + 1)
+            runCurrent()
+            assertEquals(HidLinkState.Open(bothKinds), session.state.value)
+            assertFalse(session.releaseOwed)
+            val attemptsAtStall = attempts
+            advanceTimeBy(60_000)
+            runCurrent()
+            assertEquals(HidLinkState.Open(bothKinds), session.state.value)
+            assertEquals(opensBefore, opener.opened.size)
+            assertFalse(keyboard.closed || mouse.closed)
+            // Probing is one nonblocking attempt per endpoint per retry interval, not a busy loop.
+            val probesMax = 2 * (60_000 / tuning.stallRetryIntervalMs + 1)
+            assertTrue(attempts - attemptsAtStall <= probesMax, "${attempts - attemptsAtStall} probes in 60 s")
+            assertEquals(HidOffer.NOT_READING, session.offer(HidKind.KEYBOARD, keyboardPress))
+
+            keyboard.results = { HidWriteResult.WRITTEN }
+            mouse.results = keyboard.results
+            advanceTimeBy(tuning.stallRetryIntervalMs + 1)
+            runCurrent()
+            assertEquals(HidLinkState.Open(), session.state.value)
+            assertTrue(isReleaseAll(keyboard.reports().last()))
+            assertTrue(isReleaseAll(mouse.reports().last()))
+            assertTrue(keyboard.reports().none { it.contentEquals(keyboardPress) })
+            assertTrue(session.send(HidKind.KEYBOARD, keyboardPress))
+        }
+
+    @Test
+    fun `an endpoint whose writes keep failing exhausts the reopen budget even while the other recovers`() =
+        runTest {
+            val opener = FakeOpener()
+            val tuning = HidSessionTuning(reopenAttemptCountMax = 3, reopenBackoffInitialMs = 100, reopenBackoffMaxMs = 100)
+            opener.nextMouseResults = { HidWriteResult.FAILED }
+            val session = session(opener, tuning)
+            session.start()
+            advanceTimeBy(10_000)
+            runCurrent()
+            assertTrue(session.state.value is HidLinkState.Failed, "${session.state.value}")
+            assertFalse(session.isRunning)
+            assertTrue(opener.opened.size <= 2 * (tuning.reopenAttemptCountMax + 1), "${opener.opened.size} opens")
+        }
+
+    @Test
+    fun `a release owed on a read endpoint still holds input back`() =
+        runTest {
+            val opener = FakeOpener()
+            val session = session(opener)
+            session.start()
+            runCurrent()
+            opener.latest(HidKind.MOUSE).results = { HidWriteResult.WOULD_BLOCK }
+            session.send(HidKind.MOUSE, mouseMove)
+            advanceTimeBy(HidSessionTuning().writeDeadlineMs + 1)
+            runCurrent()
+            assertEquals(HidLinkState.Open(setOf(HidKind.MOUSE)), session.state.value)
+            session.releaseAll()
+            // The keyboard's release is owed (and refuses keys) until the loop delivers it.
+            assertTrue(session.releaseOwed)
+            assertEquals(HidOffer.UNAVAILABLE, session.offer(HidKind.KEYBOARD, keyboardPress))
+            runCurrent()
+            assertFalse(session.releaseOwed)
+            assertTrue(session.send(HidKind.KEYBOARD, keyboardPress))
         }
 
     @Test
@@ -214,13 +359,13 @@ class HidSessionTest {
             runCurrent()
             val first = opener.latest(HidKind.MOUSE)
             first.results = { HidWriteResult.DISCONNECTED }
-            val epoch = session.releaseEpoch.value
+            val epoch = session.releaseEpochs.value
             session.send(HidKind.MOUSE, mouseMove)
             runCurrent()
             assertTrue(first.closed)
             assertTrue(opener.latest(HidKind.KEYBOARD).closed)
             assertEquals(HidLinkState.Reconnecting(1, "HID device disconnected"), session.state.value)
-            assertTrue(session.releaseEpoch.value > epoch)
+            assertTrue(released(session, epoch, bothKinds))
             // Not before the backoff.
             advanceTimeBy(tuning.reopenBackoffMs(1) - 1)
             runCurrent()
@@ -250,7 +395,7 @@ class HidSessionTest {
             opener.failNext = 0
             assertFalse(session.send(HidKind.KEYBOARD, keyboardPress))
             runCurrent()
-            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            assertEquals(HidLinkState.Open(), session.state.value)
         }
 
     @Test
@@ -294,7 +439,7 @@ class HidSessionTest {
             assertTrue(keyboard.none { it.contentEquals(keyboardPress) })
             assertTrue(isReleaseAll(keyboard.last()))
             assertTrue(isReleaseAll(opener.latest(HidKind.MOUSE).reports().last()))
-            assertEquals(2, session.stats.value.releaseAllCount)
+            assertEquals(2L * bothKinds.size, session.stats.value.releaseAllCount)
         }
 
     @Test
@@ -340,7 +485,7 @@ class HidSessionTest {
 
             session.onRelayNotice(HidRelayNotice.Reopenable)
             runCurrent()
-            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            assertEquals(HidLinkState.Open(), session.state.value)
             val second = opener.latest(HidKind.KEYBOARD)
             assertTrue(second !== first)
             // Release-all first; nothing offered during the gap was kept for later.
@@ -359,10 +504,10 @@ class HidSessionTest {
             runCurrent()
             assertTrue(session.send(HidKind.KEYBOARD, keyboardPress))
             runCurrent()
-            val epoch = session.releaseEpoch.value
+            val epoch = session.releaseEpochs.value
 
             session.onRelayNotice(gadgetChange)
-            assertTrue(session.releaseEpoch.value > epoch, "input state (held keys, sticky modifiers) is forgotten")
+            assertTrue(released(session, epoch, bothKinds), "input state (held keys, sticky modifiers) is forgotten")
             assertTrue(session.releaseOwed)
             session.onRelayNotice(HidRelayNotice.Reopenable)
             runCurrent()
@@ -387,7 +532,7 @@ class HidSessionTest {
             advanceTimeBy(tuning.reopenWaitMaxMs + 1)
             runCurrent()
             assertTrue(opener.opened.size > opensBefore)
-            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            assertEquals(HidLinkState.Open(), session.state.value)
         }
 
     @Test
@@ -404,7 +549,7 @@ class HidSessionTest {
             assertEquals(HidLinkState.Reconnecting(1, "open failed: no node yet"), session.state.value)
             advanceTimeBy(tuning.reopenBackoffMs(1) + 1)
             runCurrent()
-            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            assertEquals(HidLinkState.Open(), session.state.value)
             assertTrue(isReleaseAll(opener.latest(HidKind.MOUSE).reports().single()))
         }
 
@@ -419,7 +564,7 @@ class HidSessionTest {
             assertTrue(session.state.value is HidLinkState.Reconnecting)
             session.onRelayNotice(HidRelayNotice.Reopenable)
             runCurrent()
-            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            assertEquals(HidLinkState.Open(), session.state.value)
             assertEquals(0L, testScheduler.currentTime)
         }
 
@@ -473,7 +618,7 @@ class HidSessionTest {
             assertEquals(HidLinkState.Stopped, session.state.value)
             session.start()
             runCurrent()
-            assertEquals(HidLinkState.Open(hostListening = true), session.state.value)
+            assertEquals(HidLinkState.Open(), session.state.value)
         }
 
     @Test
@@ -486,7 +631,7 @@ class HidSessionTest {
 
             fun awaitOpen(round: Int) {
                 val deadlineNs = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-                while (session.state.value != HidLinkState.Open(hostListening = true) || session.releaseOwed) {
+                while (session.state.value != HidLinkState.Open() || session.releaseOwed) {
                     check(System.nanoTime() < deadlineNs) { "round $round: link stuck at ${session.state.value}" }
                     Thread.sleep(1)
                 }
@@ -516,7 +661,7 @@ class HidSessionTest {
 
             fun awaitReleased() {
                 val deadlineNs = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-                while (session.state.value != HidLinkState.Open(hostListening = true) || session.releaseOwed) {
+                while (session.state.value != HidLinkState.Open() || session.releaseOwed) {
                     check(System.nanoTime() < deadlineNs) { "release-all never went out: ${session.state.value}" }
                     Thread.sleep(1)
                 }
@@ -588,5 +733,7 @@ class HidSessionTest {
         const val ROUND_COUNT = 50
         const val SENDER_COUNT = 4
         const val OFFERS_PER_SENDER = 40
+        const val KEY_ROUND_COUNT = 300
+        const val KEY_ROUND_GAP_MS = 400L
     }
 }

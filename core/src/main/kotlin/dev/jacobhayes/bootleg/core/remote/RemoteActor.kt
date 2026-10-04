@@ -346,7 +346,8 @@ class RemoteActor(
             is RemoteEffect.DropQueuedInput -> synchronized(lock) { inbound[effect.sessionId]?.removeAll { it is RemoteEvent.Hid } }
             is RemoteEffect.HidSend -> {
                 val result = hid.send(effect.kind, effect.report)
-                if (result != HidSendResult.ACCEPTED) {
+                // NOT_READING drops only that report: the session owes nothing new for it.
+                if (result != HidSendResult.ACCEPTED && result != HidSendResult.NOT_READING) {
                     synchronized(lock) {
                         if (!hidRejectedQueued) {
                             hidRejectedQueued = true

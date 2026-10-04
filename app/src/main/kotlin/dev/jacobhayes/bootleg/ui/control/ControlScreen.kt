@@ -53,6 +53,7 @@ import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.GadgetState
 import dev.jacobhayes.bootleg.core.gadget.MouseLayout
+import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.KeyboardLeds
 import dev.jacobhayes.bootleg.hid.HidController
 import dev.jacobhayes.bootleg.hid.HidLinkState
@@ -283,19 +284,19 @@ internal fun statusOf(
     if (root is RootStatus.Unavailable) return ControlStatus("Needs root: ${root.reason}", StatusTone.PROBLEM)
     if (busy) return ControlStatus("Reconnecting USB…", StatusTone.NEUTRAL)
     if (!enabled) return ControlStatus("USB keyboard and mouse, including BIOS. Enabling briefly reconnects USB.", StatusTone.NEUTRAL)
-    val exposed =
-        gadget != null &&
-            gadget.udc.isNotEmpty() &&
-            gadget.configLinks.values.any { it == GadgetNames.HID_KEYBOARD_FUNCTION || MouseLayout.ofFunction(it) != null }
-    if (!exposed) return ControlStatus("Not on USB yet", StatusTone.NEUTRAL)
+    val linked =
+        if (gadget == null || gadget.udc.isEmpty()) {
+            emptySet()
+        } else {
+            buildSet {
+                if (GadgetNames.HID_KEYBOARD_FUNCTION in gadget.configLinks.values) add(HidKind.KEYBOARD)
+                if (gadget.configLinks.values.any { MouseLayout.ofFunction(it) != null }) add(HidKind.MOUSE)
+            }
+        }
+    if (linked.isEmpty()) return ControlStatus("Not on USB yet", StatusTone.NEUTRAL)
     return when (link) {
         HidLinkState.Stopped, HidLinkState.Opening -> ControlStatus("On USB · connecting…", StatusTone.NEUTRAL)
-        is HidLinkState.Open ->
-            if (link.hostListening) {
-                ControlStatus("Connected · the computer is reading input", StatusTone.GOOD)
-            } else {
-                ControlStatus("Computer not reading input (asleep, off or unplugged?)", StatusTone.PROBLEM)
-            }
+        is HidLinkState.Open -> openStatus(reading = linked - link.notReading, notReading = link.notReading)
         is HidLinkState.Reconnecting -> ControlStatus("Reconnecting (attempt ${link.attempt}): ${link.reason}", StatusTone.PROBLEM)
         is HidLinkState.Failed ->
             if (link.restartRequired) {
@@ -305,3 +306,18 @@ internal fun statusOf(
             }
     }
 }
+
+/** Firmware and boot menus often poll only the keyboard, so one endpoint can be read while the other isn't. */
+private fun openStatus(
+    reading: Set<HidKind>,
+    notReading: Set<HidKind>,
+): ControlStatus =
+    when {
+        notReading.isEmpty() -> ControlStatus("Connected · the computer is reading input", StatusTone.GOOD)
+        reading.isEmpty() -> ControlStatus("Computer not reading input (asleep, off or unplugged?)", StatusTone.PROBLEM)
+        else -> {
+            val connected = reading.joinToString(" and ") { it.wireName }.replaceFirstChar { it.uppercase() }
+            val ignored = notReading.joinToString(" and ") { it.wireName }
+            ControlStatus("$connected connected · the computer isn't reading the $ignored (BIOS or boot menu?)", StatusTone.PROBLEM)
+        }
+    }

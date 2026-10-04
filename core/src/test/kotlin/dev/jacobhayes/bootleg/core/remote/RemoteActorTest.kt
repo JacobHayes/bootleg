@@ -12,6 +12,8 @@ import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.KeyUsage
+import dev.jacobhayes.bootleg.core.hid.KeyboardReport
+import dev.jacobhayes.bootleg.core.hid.Modifier
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
@@ -165,11 +167,15 @@ class RemoteActorTest {
 
         @Volatile override var releaseOwed = false
 
+        /** What a mouse report gets; NOT_READING drops it like firmware that never reads the mouse. */
+        @Volatile var mouseResult = HidSendResult.ACCEPTED
+
         override fun send(
             kind: HidKind,
             report: ByteArray,
         ): HidSendResult {
             fault.hit("hid.send")
+            if (kind == HidKind.MOUSE && mouseResult != HidSendResult.ACCEPTED) return mouseResult
             reports += kind to report
             released = false
             return HidSendResult.ACCEPTED
@@ -388,6 +394,23 @@ class RemoteActorTest {
             Thread.sleep(5)
             hid.reports.isNotEmpty()
         }
+    }
+
+    @Test
+    fun `a mouse the computer isn't reading raises no barrier - held keys and typing carry on`() {
+        actor.start()
+        val epoch = rig.connectAndTake(1L)
+        hid.mouseResult = HidSendResult.NOT_READING
+        actor.hid(1L, HidFrameCodec.encode(HidFrame.KeyDown(epoch, KeyUsage.LEFT_SHIFT)))
+        awaitUntil("shift") { hid.reports.size == 1 }
+        actor.hid(1L, HidFrameCodec.encode(HidFrame.MouseMove(epoch, 5, 5)))
+        actor.hid(1L, HidFrameCodec.encode(HidFrame.KeyDown(epoch, KeyUsage.B)))
+        awaitUntil("shift+B") { hid.reports.size == 2 }
+        val (kind, report) = hid.reports.last()
+        assertEquals(HidKind.KEYBOARD, kind)
+        // Shift is still held: the dropped move didn't clear the remote's key state.
+        assertEquals(KeyboardReport.pressing(Modifier.LEFT_SHIFT.bit, setOf(KeyUsage.B)).encode().toList(), report.toList())
+        assertEquals(0, hid.releases.get())
     }
 
     private enum class Ending { REVOKE, TAKEOVER, CLOSE }

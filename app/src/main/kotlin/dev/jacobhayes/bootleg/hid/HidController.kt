@@ -314,7 +314,7 @@ class HidController(
 
     private suspend fun sendTestSequenceOnMain(sequence: HidTestSequence): HidTestResult {
         val active = ensureSession() ?: error("keyboard and mouse are off")
-        withTimeoutOrNull(TEST_LINK_WAIT_MS) { active.state.first { it == HidLinkState.Open(hostListening = true) } }
+        withTimeoutOrNull(TEST_LINK_WAIT_MS) { active.state.first { it is HidLinkState.Open && it.hostListening } }
             ?: error("HID link not ready: ${active.state.value}")
         active.awaitIdle(TEST_DRAIN_TIMEOUT_MS)
         val before = active.stats.value
@@ -366,6 +366,7 @@ class HidController(
                     HidOffer.ACCEPTED -> HidSendResult.ACCEPTED
                     HidOffer.QUEUE_FULL -> HidSendResult.QUEUE_FULL
                     HidOffer.UNAVAILABLE -> HidSendResult.UNAVAILABLE
+                    HidOffer.NOT_READING -> HidSendResult.NOT_READING
                 }
             }
 
@@ -435,9 +436,14 @@ class HidController(
                 launch { created.leds.collect { ledsFlow.value = it } }
                 launch { created.stats.collect { statsFlow.value = it } }
                 launch {
-                    created.releaseEpoch.collect {
-                        keyboard.reset()
-                        mouse.reset()
+                    // A stall releases only its own endpoint: forget only that one's held keys or buttons.
+                    var previous: Map<HidKind, Int>? = null
+                    created.releaseEpochs.collect { epochs ->
+                        val released =
+                            previous?.let { before -> epochs.filter { (kind, epoch) -> before[kind] != epoch }.keys } ?: epochs.keys
+                        previous = epochs
+                        if (HidKind.KEYBOARD in released) keyboard.reset()
+                        if (HidKind.MOUSE in released) mouse.reset()
                         chipsFlow.value = chipStates()
                     }
                 }
