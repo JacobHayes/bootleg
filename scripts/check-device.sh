@@ -185,7 +185,7 @@ make_fat_image() {
 # A cached image may come from an older script or another check: it must be the 16 MiB image that
 # holds random.bin (its FAT short-name directory entry), or it is rebuilt.
 fat_fixture_ok() {
-    [[ -f $1 ]] && [[ $(stat -f %z "$1") == "$FAT_FIXTURE_SIZE_BYTES" ]] && LC_ALL=C grep -q -a 'RANDOM  BIN' "$1"
+    [[ -f $1 ]] && [[ $(wc -c <"$1" | tr -d " ") == "$FAT_FIXTURE_SIZE_BYTES" ]] && LC_ALL=C grep -q -a 'RANDOM  BIN' "$1"
 }
 
 build_fixtures() {

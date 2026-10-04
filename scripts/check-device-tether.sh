@@ -222,7 +222,7 @@ state=$(call STATE)
 [[ $(jq '[.luns[] | select(.file != "")] | length' <<<"$state") == 0 ]] || fail "disks are exposed; eject them first: $state"
 is_mounted "$VOLUME" && fail "/Volumes/$VOLUME is already mounted; eject it first"
 # Never expose unformatted media: a cached fixture must still be the 16 MiB MBR + FAT image.
-if [[ -f $FIXTURE_DIR/$IMAGE ]] && ! { [[ $(stat -f %z "$FIXTURE_DIR/$IMAGE") == 16777216 ]] &&
+if [[ -f $FIXTURE_DIR/$IMAGE ]] && ! { [[ $(wc -c <"$FIXTURE_DIR/$IMAGE" | tr -d " ") == 16777216 ]] &&
     file -b "$FIXTURE_DIR/$IMAGE" | grep -q 'DOS/MBR boot sector'; }; then
     rm -f "$FIXTURE_DIR/$IMAGE"
 fi
