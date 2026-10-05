@@ -10,7 +10,7 @@
 # NEARBY_WIFI_DEVICES and ACCESS_LOCAL_NETWORK are pre-granted with pm grant (their system dialogs
 # are not what these tests check). Sourced by scripts/e2e-ui.sh.
 
-define_test remote.on-off "Remote switch: node Running with its name and IP, no problem card; off: node stops" --usb
+define_test remote.on-off "Remote switch: node Running with its name and IP, no problem card, notification names it; off: node stops, notification gone" --usb
 define_test remote.hotspot "offline hotspot: URL on a private IPv4, Go listener on the hotspot address only; stop: listener gone" --usb
 define_test remote.pairing-code "offline hotspot pairing code: 6 digits with an expiry countdown" --usb
 
@@ -30,6 +30,8 @@ not_listening_on_any() { ! root "ss -ltn" | grep -q "0.0.0.0:$REMOTE_PORT"; }
 shows_tailscale_ip() { ui_grep_text '100\.[0-9]+\.[0-9]+\.[0-9]+' >/dev/null; }
 shows_network_and_password() { has_text Network && has_text Password; }
 shows_pairing_code() { ui_grep_text '^[0-9]{3} ?[0-9]{3}$' >/dev/null; }
+remote_notification_names() { notification_field text | grep -qF "${1%.}"; }
+no_remote_notification() { ! notification_titles | grep -q '^Remote control'; }
 phone_wifi_connected() { adb shell dumpsys wifi | grep -q 'mWifiInfo SSID'; }
 
 # remote_on: Remote tab, switch on, node Running (an enrolled node; never a browser login).
@@ -85,6 +87,7 @@ test_remote_on_off() {
     check "UI shows the node name ($dns_name)" wait_until 10 has_text "$dns_name"
     check "UI shows a tailscale IP" shows_tailscale_ip
     check "no Remote problem card" not_text "Remote problem"
+    check "notification names the node, not a placeholder" wait_until 10 remote_notification_names "$dns_name"
     shot remote-running
 
     step "Remote off"
@@ -95,6 +98,7 @@ test_remote_on_off() {
     ui toggle "Remote control"
     check "node stops" wait_until 20 remote_stopped
     check "switch off" wait_until 5 remote_switch_off
+    check "notification gone" wait_until 5 no_remote_notification
     shot remote-off
 }
 

@@ -50,6 +50,8 @@ class RemoteNotifications(
         text: String,
     ) = manager.notify(SERVICE_NOTIFICATION_ID, service(title, text))
 
+    fun cancelService() = manager.cancel(SERVICE_NOTIFICATION_ID)
+
     fun showPending(pending: List<PendingApproval>) {
         if (pending.isEmpty()) {
             manager.cancel(PENDING_NOTIFICATION_ID)

@@ -22,10 +22,9 @@ class RemoteService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        val notifications = RemoteNotifications(this).also { it.ensureChannel() }
         startForeground(
             RemoteNotifications.SERVICE_NOTIFICATION_ID,
-            notifications.service("Remote control on", "Starting…"),
+            app.remote.serviceNotification(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
         )
     }

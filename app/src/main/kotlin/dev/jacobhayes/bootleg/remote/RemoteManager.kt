@@ -1,5 +1,6 @@
 package dev.jacobhayes.bootleg.remote
 
+import android.app.Notification
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.ConnectivityManager
@@ -318,6 +319,9 @@ class RemoteManager(
             keepAwake.setActive(false)
             hid.keepSessionInBackground = false
             notifications.cancelPending()
+            // An update between the service's stop and node = null posts a plain ongoing notification
+            // that would outlive the service (and a node started without the service posts one too).
+            notifications.cancelService()
             serviceText = null
             stateFlow.update {
                 it.copy(running = false, keepAwake = false, tailnet = TailnetStatus(), status = RemoteStatus(), hotspot = HotspotState.Off)
@@ -361,8 +365,25 @@ class RemoteManager(
             hid.spec.collect { spec -> if (spec.keyboard || spec.mouse) hid.connect() }
         }
 
+    /**
+     * The foreground-service notification for the current state. [RemoteService] starts with it
+     * rather than a placeholder: the system posts that one asynchronously, so it can land after an
+     * update and would hide it until the content changes again.
+     */
+    fun serviceNotification(): Notification {
+        val (title, text) = serviceContent() ?: ("Remote control on" to "Starting…")
+        return notifications.service(title, text)
+    }
+
     private fun updateServiceNotification() {
-        if (node == null) return
+        val content = serviceContent() ?: return
+        if (serviceText == content) return
+        serviceText = content
+        notifications.updateService(content.first, content.second)
+    }
+
+    private fun serviceContent(): Pair<String, String>? {
+        if (node == null) return null
         val current = state.value
         val connected = current.status.sessions.count { it.auth == AuthStatus.APPROVED }
         val title = if (connected > 0) "Remote control: $connected connected" else "Remote control on"
@@ -377,9 +398,7 @@ class RemoteManager(
                 if (current.status.leaseHolder == LeaseHolder.Local) add("phone has control")
                 if (current.pendingCount > 0) add("${current.pendingCount} waiting for approval")
             }.joinToString(" · ")
-        if (serviceText == title to text) return
-        serviceText = title to text
-        notifications.updateService(title, text)
+        return title to text
     }
 
     private fun registerNetworkCallback(): ConnectivityManager.NetworkCallback? {
