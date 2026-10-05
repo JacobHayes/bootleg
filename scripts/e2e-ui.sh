@@ -2,7 +2,8 @@
 # Runs the on-device UI end-to-end tests (scripts/e2e-ui/*.sh) against the real app, with this Mac
 # as USB host. Each test checks one behaviour, runs in its own subshell and puts back what it
 # changed, so any selection runs alone or in any order. One setup per run: device lock, adb
-# serials, the resident uiautomator dump server; shared fixtures (netboot.xyz.iso, a FAT blank)
+# serials (USB adb only when a selected test runs over it, [usb adb] in --list), the resident
+# uiautomator dump server; shared fixtures (netboot.xyz.iso, a FAT blank)
 # are made on first use and kept on the phone for later runs.
 #
 # Usage: scripts/e2e-ui.sh [--list] [--install] [TEST...]
@@ -181,8 +182,14 @@ current_test=setup
 test_started_ms=$(now_ms)
 log "tests: ${chosen[*]}"
 take_lock
-USB_SERIAL=$(find_usb_serial)
-WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh "$USB_SERIAL")}
+# USB adb drops whenever the gadget re-enumerates: only the --usb tests wait for it.
+needs_usb=false
+for name in "${chosen[@]}"; do
+    if [[ ${TEST_TRANSPORT[$name]} == usb ]]; then needs_usb=true; fi
+done
+USB_SERIAL=""
+if $needs_usb; then USB_SERIAL=$(find_usb_serial); fi
+WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh ${USB_SERIAL:+"$USB_SERIAL"})}
 export USB_SERIAL WIFI_SERIAL
 use_transport wifi
 phone_awake_and_unlocked || die "the phone is locked: unlock it and run again (the tests never unlock it)"
@@ -195,8 +202,10 @@ if [[ ${BOOTLEG_UI_SERVER:-1} == 1 ]]; then
     ui_server_forward
     UI_PORT_WIFI=$UI_SERVER_PORT
     UI_SERVER_PORT=""
-    ANDROID_SERIAL=$USB_SERIAL ui_server_forward
-    UI_PORT_USB=$UI_SERVER_PORT
+    if $needs_usb; then
+        ANDROID_SERIAL=$USB_SERIAL ui_server_forward
+        UI_PORT_USB=$UI_SERVER_PORT
+    fi
     export BOOTLEG_UI_SERVER=1 BOOTLEG_UI_SERVER_JAR=$UI_SERVER_JAR UI_PORT_WIFI UI_PORT_USB
 else
     export BOOTLEG_UI_SERVER=0
