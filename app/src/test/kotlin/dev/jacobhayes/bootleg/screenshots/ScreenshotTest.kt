@@ -267,7 +267,8 @@ class ScreenshotTest {
 
     @Test
     fun settings() {
-        capture("settings") { SettingsScreen(Prefs(context)) }
+        val backend = FakeBootlegBackend()
+        capture("settings") { SettingsScreen(Prefs(context), backend, DrivesController(backend, MainScope())) }
     }
 
     @Test

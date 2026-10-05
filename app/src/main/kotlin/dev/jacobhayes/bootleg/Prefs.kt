@@ -29,7 +29,7 @@ class Prefs(
     /** USB tethering as last chosen through Bootleg (see `TetherChoice`); restore after reboot turns it back on. */
     val usbTetherChoice: StateFlow<Boolean> = usbTetherChoiceFlow.asStateFlow()
 
-    /** The transport USB tethering uses (Drives card); the root call, restore and remote use it. */
+    /** The transport USB tethering uses (Settings); the root call, restore and remote use it. */
     val usbTetherMode: StateFlow<TetherMode> = usbTetherModeFlow.asStateFlow()
 
     fun setUsbTetherMode(mode: TetherMode) {

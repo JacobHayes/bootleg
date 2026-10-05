@@ -51,10 +51,12 @@ Commands:
   reinsert <lun>                 re-insert an ejected disk
   hid on|off [--keyboard] [--mouse]
                                  turn the USB keyboard/mouse on or off
-  tether on|off|status           share the phone's internet over USB (re-plugs
-                                 USB, so eject every disk first; off may cut
-                                 this connection if it runs over that USB link;
-                                 macOS, Linux and Windows 10 2004 or later)
+  tether on|off|status           share the phone's internet over USB in the
+                                 mode set on the phone: NCM (macOS, Linux,
+                                 Windows 10 2004 or later) re-plugs USB, so
+                                 eject every disk first; RNDIS (Windows 7 or
+                                 later, Linux) doesn't; off may cut this
+                                 connection if it runs over that USB link
   type <text> | type -           type text (from stdin with -), up to 64 KiB
   key <chord> [--repeat N] [--interval 100ms]
                                  tap a chord such as ctrl+alt+delete, cmd+space, f12

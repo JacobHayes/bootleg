@@ -27,9 +27,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -115,7 +112,6 @@ fun DrivesScreen(
                 disksExposed = gadget?.let(TetherPolicy::exposedLuns).orEmpty().isNotEmpty(),
                 rootGranted = root is RootStatus.Granted,
                 onToggle = { controller.setUsbTethering(it) },
-                onModeChange = controller::setUsbTetherMode,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
             )
             if (state.slots.isEmpty()) {
@@ -268,16 +264,9 @@ private const val EJECT_HINT =
         "Drive not showing up? Rescan disks on the computer (Windows: Disk Management, Action, Rescan Disks), " +
         "or turn on Reconnect USB after a disk change in Settings."
 
-/** RNDIS has inbox drivers from Windows 7 on (and Linux) but none on macOS; NCM from Windows 10 2004. */
-private fun tetherHosts(mode: TetherMode): String =
-    when (mode) {
-        TetherMode.RNDIS -> "RNDIS: Windows 7 or later and Linux. For a Mac, choose NCM."
-        TetherMode.NCM -> "NCM: macOS, Linux, and Windows 10 (2004) or later."
-    }
-
 /**
- * USB tethering next to the drives, over the chosen transport: RNDIS (Bootleg's adapter) switches
- * without touching USB; NCM (Android's) re-plugs USB, so it can't change while a disk is exposed.
+ * USB tethering next to the drives, over the mode chosen in Settings: RNDIS (Bootleg's adapter)
+ * switches without touching USB; NCM (Android's) re-plugs USB, so it can't change while a disk is exposed.
  */
 @Composable
 private fun TetherCard(
@@ -287,7 +276,6 @@ private fun TetherCard(
     disksExposed: Boolean,
     rootGranted: Boolean,
     onToggle: (Boolean) -> Unit,
-    onModeChange: (TetherMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val blocked = disksExposed && mode == TetherMode.NCM
@@ -295,10 +283,7 @@ private fun TetherCard(
         when {
             busy -> "Switching…"
             tethering == null -> "Checking…"
-            blocked -> "Eject every disk to turn NCM ${if (tethering) "off" else "on"}: it re-plugs USB"
-            tethering -> "On · the computer shares this phone's internet"
-            mode == TetherMode.NCM -> "Off · NCM re-plugs USB (keyboard and mouse drop for a second)"
-            else -> "Off"
+            else -> "${if (tethering) "On" else "Off"} · ${mode.name}"
         }
     OutlinedCard(modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -307,18 +292,11 @@ private fun TetherCard(
             Column(Modifier.weight(1f)) {
                 Text("USB tethering", style = MaterialTheme.typography.titleMedium)
                 Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(tetherHosts(mode), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SingleChoiceSegmentedButtonRow(Modifier.padding(top = 8.dp)) {
-                    TetherMode.entries.forEachIndexed { index, entry ->
-                        SegmentedButton(
-                            selected = entry == mode,
-                            onClick = { onModeChange(entry) },
-                            shape = SegmentedButtonDefaults.itemShape(index, TetherMode.entries.size),
-                            enabled = rootGranted && !busy,
-                            modifier = Modifier.testTag("usb-tethering-mode-${entry.wireName}"),
-                        ) { Text(entry.name) }
-                    }
-                }
+                Text(
+                    if (blocked) "Eject every disk first, or choose RNDIS in Settings" else "Change the mode in Settings",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             Spacer(Modifier.width(12.dp))
             Switch(

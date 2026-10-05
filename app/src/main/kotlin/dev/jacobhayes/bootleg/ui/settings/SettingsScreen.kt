@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
@@ -19,31 +20,70 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.BuildConfig
 import dev.jacobhayes.bootleg.Prefs
+import dev.jacobhayes.bootleg.RootStatus
+import dev.jacobhayes.bootleg.core.tether.TetherMode
+import dev.jacobhayes.bootleg.ui.drives.DrivesController
 
 private const val REPOSITORY_URL = "https://github.com/JacobHayes/bootleg"
 
+/** RNDIS has inbox drivers from Windows 7 on (and Linux) but none on macOS; NCM from Windows 10 2004. */
+private fun tetherModeBody(mode: TetherMode): String =
+    when (mode) {
+        TetherMode.RNDIS ->
+            "Windows 7 and later, and Linux. Not macOS. Switches without re-plugging USB, so it works while disks are exposed."
+        TetherMode.NCM -> "macOS, Linux, and Windows 10 (2004) and later. Re-plugs USB, so it's refused while a disk is exposed."
+    }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(prefs: Prefs) {
+fun SettingsScreen(
+    prefs: Prefs,
+    backend: BootlegBackend,
+    drives: DrivesController,
+) {
     val wifiOnly by prefs.wifiOnlyDownloads.collectAsState()
     val restore by prefs.restoreAfterReboot.collectAsState()
     val reconnect by prefs.reconnectAfterDiskChange.collectAsState()
+    val tetherMode by backend.usbTetherMode.collectAsState()
+    val tetheringBusy by backend.usbTetheringBusy.collectAsState()
+    val root by backend.rootStatus.collectAsState()
+    // A mode change while tethering is on switches over; its result (e.g. refused) shows here.
+    val drivesMessage =
+        drives.state
+            .collectAsState()
+            .value.message
+    val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Settings") }) }) { padding ->
+    LaunchedEffect(drivesMessage) {
+        drivesMessage?.let {
+            snackbar.showSnackbar(it)
+            drives.clearMessage()
+        }
+    }
+
+    Scaffold(topBar = { TopAppBar(title = { Text("Settings") }) }, snackbarHost = { SnackbarHost(snackbar) }) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().verticalScroll(rememberScrollState())) {
             SectionHeader("Downloads")
             SwitchRow(
@@ -72,6 +112,20 @@ fun SettingsScreen(prefs: Prefs) {
                 checked = reconnect,
                 onChange = prefs::setReconnectAfterDiskChange,
             )
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionHeader("USB tethering mode")
+            TetherMode.entries.forEach { mode ->
+                val enabled = root is RootStatus.Granted && !tetheringBusy
+                ListItem(
+                    headlineContent = { Text(mode.name) },
+                    supportingContent = { Text(tetherModeBody(mode)) },
+                    leadingContent = { RadioButton(selected = mode == tetherMode, onClick = null, enabled = enabled) },
+                    modifier =
+                        Modifier
+                            .selectable(mode == tetherMode, enabled = enabled, role = Role.RadioButton) { drives.setUsbTetherMode(mode) }
+                            .testTag("usb-tethering-mode-${mode.wireName}"),
+                )
+            }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionHeader("About")
             ListItem(

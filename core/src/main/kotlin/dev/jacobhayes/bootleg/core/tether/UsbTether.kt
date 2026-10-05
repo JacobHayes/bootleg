@@ -24,7 +24,7 @@ enum class TetherMode(
     ;
 
     companion object {
-        val DEFAULT = RNDIS
+        val DEFAULT = NCM
 
         fun fromWireName(name: String): TetherMode? = entries.firstOrNull { it.wireName == name }
     }

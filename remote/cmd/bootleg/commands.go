@@ -414,7 +414,7 @@ func hidCommand(ctx context.Context, call *invocation, c *client) error {
 // inbox NCM driver only from Windows 10 2004.
 func tetherHostNote(mode string) string {
 	if mode == "rndis" {
-		return "USB tethering (RNDIS) works with Windows 7 or later and Linux; for a Mac, choose NCM on the phone."
+		return "USB tethering (RNDIS) works with Windows 7 or later and Linux; for a Mac, choose NCM in the phone's Settings."
 	}
 	return "USB tethering (NCM) works with macOS, Linux, and Windows 10 (2004) or later."
 }
@@ -439,7 +439,7 @@ func tetherStatusCommand(ctx context.Context, call *invocation, c *client) error
 }
 
 // tetherCommand turns the phone's USB tethering on or off. The phone refuses
-// (disks_exposed) while a disk is exposed: either way USB re-plugs.
+// (disks_exposed) while a disk is exposed in NCM mode: either way USB re-plugs.
 func tetherCommand(ctx context.Context, call *invocation, c *client) error {
 	on := call.args[0] == "on"
 	if !on {

@@ -152,7 +152,7 @@ private fun TabContent(
                 onBack = { onSelectTab(Tab.LIBRARY) },
             )
         Tab.REMOTE -> RemoteRoute(app.remote)
-        Tab.SETTINGS -> SettingsScreen(app.prefs)
+        Tab.SETTINGS -> SettingsScreen(app.prefs, app.backend, app.drives)
     }
 }
 

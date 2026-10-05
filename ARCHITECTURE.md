@@ -671,8 +671,8 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
 
 Bootleg runs no network stack of its own: Android runs DHCP, DNS, NAT, IPv6 and picks the upstream
 (no picker) on whichever interface carries the host's traffic. Carrier entitlement checks stay on
-(`exemptFromEntitlementCheck` is never set). One switch and a mode (`TetherMode`, a preference on
-the Drives card), one transport at a time: **RNDIS** (default) or **NCM**. A request turns the other
+(`exemptFromEntitlementCheck` is never set). One switch and a mode (`TetherMode`, a preference in
+Settings), one transport at a time: **NCM** (default) or **RNDIS**. A request turns the other
 transport off first, then the mode's on (or everything off); an NCM change that would be refused
 (disks exposed) is refused before RNDIS changes. Tethering on is a use of Bootleg: it sets the
 prefix up first when it isn't (`establishPrefix`, without disks; once NCM is on the mode change it
@@ -776,10 +776,10 @@ needs would end NCM).
   (step 3), so the host loses the keyboard and mouse for the whole call (~3–5s), not just the
   ~1s re-plug. `HidSession` sees its writes fail and reopens with its usual backoff once the
   fence lifts; input meanwhile is dropped, never replayed late.
-- **Surfaces:** a "USB tethering" card on Drives (switch, RNDIS/NCM buttons, the hosts the mode
-  serves, the refusal reason while disks are exposed in NCM, and a note that NCM's re-plug briefly
-  drops the keyboard and mouse). Choosing the other mode while tethering is on switches over (a
-  refused switch keeps the old mode). The notification and the Quick Settings tile subtitle mention
+- **Surfaces:** a "USB tethering" card on Drives (switch, on/off and the mode, the refusal reason
+  while disks are exposed in NCM, a pointer to Settings for the mode). Settings lists both modes
+  with the hosts each serves and whether it re-plugs USB. Choosing the other mode while tethering
+  is on switches over (a refused switch keeps the old mode). The notification and the Quick Settings tile subtitle mention
   it when it's on; the remote's `State.tether` carries the mode. Debug hooks `TETHER_ON`,
   `TETHER_OFF`, `TETHER_MODE`, `TETHER_STATE`. The app's broadcast observer counts `bootleg_rndis`
   as tethered too.

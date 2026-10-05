@@ -9,6 +9,7 @@ import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.LunModes
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
@@ -222,7 +223,7 @@ data class DeviceSnapshot(
     /** USB tethering over either transport; null until Android has reported it. */
     val usbTethering: Boolean? = null,
     /** The phone's tethering mode (`TetherMode.wireName`). */
-    val usbTetherMode: String = "rndis",
+    val usbTetherMode: String = TetherMode.DEFAULT.wireName,
 )
 
 /**
