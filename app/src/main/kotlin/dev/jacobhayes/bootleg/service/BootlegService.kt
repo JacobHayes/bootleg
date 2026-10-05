@@ -122,6 +122,8 @@ class BootlegService : Service() {
     override fun onDestroy() {
         if (usbStateRegistered) unregisterReceiver(usbStateReceiver)
         scope.cancel()
+        // A notify() between stopSelf() and here posts a plain ongoing notification that would outlive the service.
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
         super.onDestroy()
     }
 

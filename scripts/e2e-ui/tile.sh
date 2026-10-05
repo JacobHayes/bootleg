@@ -31,7 +31,8 @@ tile_state() {
 tile_checked() { [[ $(tile_state) == true ]]; }
 tile_unchecked() { [[ $(tile_state) == false ]]; }
 notification_listed() { notification_titles | grep -qxF "1 disk exported"; }
-no_notification() { ! notification_titles | grep -q exported; }
+# Neither the drives notification nor the idle one ("Bootleg") a late update could leave behind.
+no_notification() { ! notification_titles | grep -qE 'exported|^Bootleg$'; }
 app_resumed() { adb shell dumpsys activity activities | grep -q "topResumedActivity=.*$ACTIVITY"; }
 app_not_resumed() { ! app_resumed; }
 notification_text_is() { [[ $(notification_field text | head -1) == "$1" ]]; }
