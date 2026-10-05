@@ -9,6 +9,7 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetRig.Companion.img
 import dev.jacobhayes.bootleg.core.gadget.LinkOrder
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
@@ -102,7 +103,7 @@ class RndisTetherTest {
     fun `RNDIS on sets the prefix up, tethers the TAP, then connects the medium, and off is the mirror image`() {
         assertTrue(assertInstanceOf(TetherResult.Changed::class.java, tether.set(true, TetherMode.RNDIS)).active)
         assertEquals(
-            LinkOrder.PREFIX,
+            LinkOrder.prefix(TetherMode.RNDIS),
             rig
                 .state()
                 .configLinks.keys

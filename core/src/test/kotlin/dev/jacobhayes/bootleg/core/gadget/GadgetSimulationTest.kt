@@ -91,11 +91,13 @@ class GadgetSimulationTest {
     fun `crash at every op, then dead-man and a fresh reconcile, converges and keeps host ejects`() {
         repeat(CRASH_SCENARIO_COUNT) { scenario ->
             val random = Random(scenario.toLong())
+            val network = TetherMode.entries[scenario % TetherMode.entries.size]
             val first =
                 randomDesired(
                     random,
                 ).let { if (it.slots.isEmpty()) randomDesired(Random(scenario + 1000L), lunCountMax = 3) else it }
-            val second = randomDesired(random)
+                    .copy(network = network)
+            val second = randomDesired(random).copy(network = network)
             // Keep a host-ejected slot unchanged across the transition when there is one.
             val ejectedLun = if (first.slots.isNotEmpty()) random.nextInt(first.slots.size) else null
             val target =
@@ -141,6 +143,52 @@ class GadgetSimulationTest {
                     val expected = if (ejectedKept && slot.lun == ejectedLun) SlotIntent.HOST_EJECTED else SlotIntent.EXPORTED
                     assertEquals(expected, rig.journal().slotIntents[slot.lun], "$context: lun ${slot.lun} intent")
                 }
+                if (!crashed) break
+                crashAt++
+                assertTrue(crashAt < CRASH_POINT_COUNT_MAX, "plan never finished")
+            }
+        }
+    }
+
+    @Test
+    fun `crash at every op of setting the prefix up or changing its network function, then dead-man and a fresh reconcile, converges`() {
+        val changes = TetherMode.entries.map { null to it } + TetherMode.entries.zipWithNext() + TetherMode.entries.reversed().zipWithNext()
+        for ((from, to) in changes) {
+            var crashAt = 0
+            while (true) {
+                val context = "$from to $to, crash at mutation $crashAt"
+                val rig = GadgetRig()
+                val before = rig.state()
+                if (from != null) {
+                    rig.controller().apply(Desired(hid = HidSpec(keyboard = true), network = from))
+                    rig.hidNodes.reopen()
+                }
+                rig.scripted.crashAt = rig.scripted.mutationCount + crashAt
+                val crashed =
+                    try {
+                        rig.controller().establishPrefix(to)
+                        false
+                    } catch (_: SimulatedCrash) {
+                        true
+                    }
+                rig.scripted.crashAt = null
+                if (crashed) rig.hidNodes.processDied()
+                if (crashed && rig.deadMan.arms.isNotEmpty()) rig.deadMan.fire()
+                val result = rig.settle(rig.controller())
+                rig.hidNodes.reopen()
+                assertTrue(result is ApplyResult.Applied, "$context: $result")
+                assertEquals(to, rig.journal().desired.network, context)
+                assertEquals(
+                    LinkOrder.prefix(to),
+                    rig
+                        .state()
+                        .configLinks.keys
+                        .take(3),
+                    context,
+                )
+                assertEquals(0L, rig.usbFunctions.current(), "$context: Android's USB mode is back")
+                assertEquals(null, rig.journal().usbFunctionsToRestore, context)
+                rig.assertConverged(context, before)
                 if (!crashed) break
                 crashAt++
                 assertTrue(crashAt < CRASH_POINT_COUNT_MAX, "plan never finished")
@@ -238,7 +286,7 @@ class GadgetSimulationTest {
         // The kernel refused our link into the HAL-bound gadget; the controller unbound, linked and rebound.
         assertEquals(listOf("${FakeConfigFs.EXECUTOR} configs/b.1/mass_storage.bootleg"), rig.fs.boundSymlinkRejections)
         assertEquals(2, rig.deadMan.arms.size - armsBefore, "unbound again after the HAL's bind")
-        assertTrue(LinkOrder.prefixFirst(rig.state().configLinks), "the HAL's switch only appends after the prefix")
+        assertTrue(LinkOrder.prefixFirst(rig.state().configLinks, TetherMode.RNDIS), "the HAL's switch only appends after the prefix")
         assertTrue((result as ApplyResult.Applied).reenumerated)
         rig.assertConverged("HAL mid-transition")
     }

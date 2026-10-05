@@ -58,6 +58,13 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
   The kernel refuses to bind a config with no functions linked (EINVAL).
   Unlinking from a bound config force-unbinds it. Forking `getprop` costs ~110ms per read, so USB
   properties are read in-process (`android.os.SystemProperties` by reflection).
+- **A bind that fails after f_ncm has bound panics the kernel.** The composite binds a config's
+  functions in link order; when a later one fails (an unready FunctionFS function: ENODEV), it
+  unbinds the ones already bound, f_ncm included. Repeated, this double-freed in `ncm_unbind`
+  (`kernel BUG at mm/slub.c:404`, `__slab_free ← kfree ← ncm_unbind ← configfs_composite_bind ←
+  gadget_dev_desc_UDC_store`, from the USB HAL's retries while a held RNDIS function was linked after
+  `ncm.bootleg` for ~15s). Every bind attempt is treated as a possible panic once f_ncm is bound
+  ahead of a function that can fail.
 - **An open `/dev/hidgN` across a rebind panics the kernel.** In this kernel
   (`6.1.162-android14-11-g2ec90535fa34`, `drivers/usb/gadget/function/f_hid.c` at `2ec90535fa34`),
   `hidg_bind` runs `cdev_init` + `cdev_device_add` on the function's cdev at every UDC bind and
@@ -168,7 +175,8 @@ rndis/     Go: the RNDIS device (control messages, PACKET_MSG framing, FunctionF
 ## USB gadget
 
 - **Ownership.** Bootleg owns only names containing `bootleg`: `functions/ffs.bootleg_rndis` (and
-  its FunctionFS mount, `/dev/bootleg-rndis`), `functions/hid.bootleg_kbd`,
+  its FunctionFS mount, `/dev/bootleg-rndis`), `functions/ncm.bootleg` (and its netdev
+  `bootleg_ncm0`), `functions/hid.bootleg_kbd`,
   `functions/hid.bootleg_mouse_wheel`, `functions/mass_storage.bootleg`, and same-named links in
   `configs/b.1`. It never writes any other path except `UDC` (unbind/rebind). It does not snapshot
   or restore foreign state; the one thing it asks of the HAL is a round trip through another USB
@@ -177,8 +185,8 @@ rndis/     Go: the RNDIS device (control messages, PACKET_MSG framing, FunctionF
   `Mkdir`, `Write`, `Symlink`, `Unlink`, `Rmdir`, `Bind`). Because the HAL rebinds a few hundred ms
   after any unbind, each stage keeps the unbound window down to relinking:
   - **Prepare** (bound): everything legal on an *unlinked* function: mkdir functions and LUNs,
-    LUN attributes and `file`, HID `subclass`/`protocol`/`report_length`/`report_desc`. A new
-    function is complete before its link appears. On a *linked* function only in-place media swaps
+    LUN attributes and `file`, HID `subclass`/`protocol`/`report_length`/`report_desc`, NCM
+    `ifname`/`host_addr`/`dev_addr`. A new function is complete before its link appears. On a *linked* function only in-place media swaps
     run (`file=""`, then the new path).
   - **Switch**: unbind → unlink removed functions → link new ones → bind. Nothing else.
   - **Cleanup** (bound): rmdir functions (and their LUNs) that are now unlinked and unwanted.
@@ -189,45 +197,68 @@ rndis/     Go: the RNDIS device (control messages, PACKET_MSG framing, FunctionF
   then prepare reconfigures it while bound and unlinked, and a second switch relinks it. Mass
   storage is the last link of ours, so nothing else of ours moves with it.
 
-  **Prefix** (`LinkOrder.PREFIX`): `ffs.bootleg_rndis`, `hid.bootleg_kbd`, `hid.bootleg_mouse_wheel`,
-  linked ahead of every foreign link, so RNDIS is interfaces 0-1 (where Windows starts it, and the
-  IAD's `bFirstInterface` is always 0), the keyboard 2 and the mouse 3. Mass storage follows
-  wherever configfs appends it (after the HAL's links); its and ADB's numbers may shift. The
-  journal's `desired.prefix` is set by Bootleg's first use and cleared only by Bootleg-off; while it
-  is set the prefix stays linked whatever HID and tethering do (HID off relays no input, tethering
-  off reports the cable unplugged). The planner never unlinks a prefix link except in Bootleg-off
-  and establishment, and never relinks one (configfs would append it after the HAL's links). The
-  reader keeps the kernel's link order (`ConfigFs.listInLinkOrder`, readdir reversed); the planner
-  asserts at every bind that ours are in order, the prefix first and its RNDIS function served.
+  **Prefix** (`LinkOrder.prefix(network)`): the network function, `hid.bootleg_kbd`,
+  `hid.bootleg_mouse_wheel`, linked ahead of every foreign link, so the network function is
+  interfaces 0-1 (where Windows starts RNDIS, and an IAD's `bFirstInterface` is always 0), the
+  keyboard 2 and the mouse 3. The network function is the tethering mode's, one at a time:
+  `ncm.bootleg` (the kernel's f_ncm; NCM) or `ffs.bootleg_rndis` (RNDIS). The journal's
+  `desired.network` records which: the first use takes it from the request (the app passes its
+  tethering mode with every apply), and after that only a tethering mode change sets it; an apply
+  keeps the journaled one. Mass storage follows wherever configfs appends it (after the HAL's
+  links); its and ADB's numbers may shift. The journal's `desired.prefix` is set by Bootleg's first
+  use and cleared only by Bootleg-off; while it is set the prefix stays linked whatever HID and
+  tethering do (HID off relays no input, tethering off reports the cable unplugged). The planner
+  never unlinks a prefix link except in Bootleg-off and establishment, and never relinks one
+  (configfs would append it after the HAL's links). The reader keeps the kernel's link order
+  (`ConfigFs.listInLinkOrder`, readdir reversed); the planner asserts at every bind that ours are in
+  order (at most one network function), the prefix first and served (the RNDIS daemon ready, no
+  NCM gate left).
+  - **NCM function.** Made fresh in prepare like a HID function: mkdir, then `ifname`
+    `bootleg_ncm%d` (the kernel needs exactly one `%d`; unset, the netdev is `usb0` and Android's
+    EthernetService claims it), `host_addr` and `dev_addr` (derived from the device serial,
+    locally administered, stable, distinct from RNDIS's). Configfs takes them only while the
+    function is unlinked, and a function that was bound has a registered netdev whose name must
+    not change, so an unlinked `ncm.bootleg` is always removed and made fresh. The netdev appears
+    at the first bind, down (Android ignores it); the reader reads its name back from `ifname`.
 
-  **Establishment** (prefix wanted but not first). Configfs only appends, so Bootleg links the
-  prefix with the RNDIS function *held* (its daemon has ep0 open but no descriptors, so the config
-  can't bind, the HAL's own binds included), has the HAL relink its functions after ours with a
-  round trip through another USB mode, then releases the daemon and binds: the host sees only the
-  final layout. Refused up front while any LUN has media, while Android's USB tethering is on (the
-  mode change would end it), and while a foreign link that isn't the HAL's `functionN` is linked
-  (it would stay ahead of ours). Steps, under the gadget lock and HID fence:
+  **Establishment** (prefix wanted but not first with the journaled network function; this is also
+  a tethering mode change). Configfs only appends, so Bootleg links the prefix with the RNDIS
+  function *held* (its daemon has ep0 open but no descriptors, so the config can't bind, the HAL's
+  own binds included), has the HAL relink its functions after ours with a round trip through
+  another USB mode, then releases the daemon and binds: the host sees only the final layout. In NCM
+  mode the held RNDIS function is a *gate* linked ahead of the prefix (so every bind attempt fails at
+  it before f_ncm binds, see Device facts): once the HAL has relinked, the gate is unlinked, which
+  leaves the prefix first, the config binds, and cleanup stops its daemon and removes it. Without a
+  round trip (nothing foreign linked) NCM needs no gate. Refused up front while any LUN
+  has media, while Android's USB tethering is on (the mode change would end it), and while a foreign
+  link that isn't the HAL's `functionN` is linked (it would stay ahead of ours); a tethering mode
+  change is decided against these before the journal changes. Steps, under the gadget lock and HID
+  fence:
   1. Journal `usbFunctionsToRestore` (`getCurrentFunctions`, root, `UsbManager` by reflection).
   2. Prepare (bound): mkdir and mount the RNDIS function, start its daemon held (a start replaces
-     any daemon); build HID.
-  3. Switch: unbind, unlink ours, link the prefix (a linked function's daemon is replaced only now,
-     so the config is bindable just for the relink, as in any switch); then `setCurrentFunctions(other)` (MTP, or PTP
-     from MTP) and back to the journaled mode, each waiting (≤ 5s, 50ms polls) until the HAL's links
-     have changed and come after ours; then release the daemon and bind. A root process that died
-     after the first mode change finds the mode journaled and the daemon held: it skips the first
-     step and restores the mode before releasing (a dead daemon's restart does too).
-  4. The journal entry is cleared once the prefix is first and served (every plan that releases
-     with a round trip pending restores the mode first).
+     any daemon); build HID and, in NCM mode, the NCM function.
+  3. Switch: unbind, unlink ours (a linked function's daemon is replaced only now, before anything
+     is linked again, so no config the HAL could bind has it next to the new links), link (the gate
+     and) the prefix; then
+     `setCurrentFunctions(other)` (MTP, or PTP from MTP) and back to the journaled mode, each
+     waiting (≤ 5s, 50ms polls) until the HAL's links have changed and come after ours; then
+     release the daemon (or unlink the gate) and bind. A root process that died after the first
+     mode change finds the mode journaled and the daemon held: it skips the first step and restores
+     the mode before releasing (a dead daemon's restart does too) or unlinking the gate (any plan
+     that finds the unserved gate linked first, the prefix right after it, finishes this way).
+  4. The journal entry is cleared once the prefix is first and served; a pending entry counts as
+     not set up, so the mode is restored and verified first.
 
   A failed step sets the journaled mode back (unverified) and fails; the gadget can't bind with the
   held function, so the automatic teardown unlinks everything of ours and binds (ADB back),
   keeping `desired.prefix`. Such a failure isn't retried by itself (each attempt re-plugs USB
-  twice): reconcile reports it until the next apply. With nothing foreign linked step 3 has no
-  round trip. After establishment the prefix stays first through the HAL's own re-plugs.
+  twice): reconcile reports it until the next apply or tethering request. With nothing foreign
+  linked step 3 has no round trip. After establishment the prefix stays first through the HAL's own
+  re-plugs.
 
   **Nothing linked.** The kernel can't bind a config without functions, so when nothing at all is
   linked during a switch (USB debugging off, no other functions) the UDC can't be bound for
-  prepare or cleanup. Only then does work move into the window, as one bounded op list (≤ 80 ops;
+  prepare or cleanup. Only then does work move into the window, as one bounded op list (≤ 88 ops;
   attribute IO ≤ 2ms each) between the unlinks and the links: a detach with nothing else linked
   becomes a single switch (unbind → unlink → reconfigure → relink → bind), an export from nothing
   builds its functions there, and a teardown that leaves nothing linked removes them there and
@@ -365,6 +396,22 @@ rndis/     Go: the RNDIS device (control messages, PACKET_MSG framing, FunctionF
     opened under an earlier bind is still open, or the executor unbinding, unlinking or removing
     a hid function with an fd open, is a hard test failure. The controller and simulator suites
     (crash at every op included) reopen relay fds after every operation.
+- **No failed bind after f_ncm.** Every path that can bind while `ncm.bootleg` is linked keeps the
+  functions ahead of it bindable, or doesn't bind:
+  - our own FunctionFS function (held or dead RNDIS daemon, the gate, a stale one from RNDIS mode)
+    is never linked after f_ncm: the gate goes first, a mode change unlinks the other network
+    function before linking, and the planner asserts it at every relink;
+  - every bind of ours (a switch's, a settle's) first waits (≤ 2s) until each linked FunctionFS
+    function is ready (its mount's `ep1` exists, as the HAL checks), and fails instead of binding;
+    ADB's is briefly unready while adbd reopens it after a re-enumeration;
+  - the HAL binds only once its own FunctionFS functions are ready, so its attempts can fail only
+    at an unready function of ours, which is never after f_ncm;
+  - the dead-man binds as is only while every linked FunctionFS function is ready, else it unlinks
+    ours first;
+  - left open: f_ncm, HID or mass storage failing their own bind (no known cause: Bootleg writes
+    their attributes and the netdev name is unique), and another app linking an unready FunctionFS
+    function after ours.
+  The fake configfs fails such a bind, by anyone, as a hard test failure (`NcmBindHazard`).
 - **Dead-man UDC rebind.** Before every unbind (including a re-unbind after a HAL rebind), the
   executor starts a detached root shell (`sleep 15; [ -z "$(cat UDC)" ] && echo <udc> > UDC`) that
   runs independently of the executor process. If the executor dies mid-transition, the gadget

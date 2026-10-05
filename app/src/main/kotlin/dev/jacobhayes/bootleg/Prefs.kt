@@ -2,7 +2,7 @@ package dev.jacobhayes.bootleg
 
 import android.content.Context
 import android.content.SharedPreferences
-import dev.jacobhayes.bootleg.core.tether.TetherMode
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

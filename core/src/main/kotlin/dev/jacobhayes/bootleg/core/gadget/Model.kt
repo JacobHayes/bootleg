@@ -19,6 +19,16 @@ object GadgetNames {
 
     /** The RNDIS network function: FunctionFS, served by the `bootleg-rndis` daemon. */
     const val RNDIS_FUNCTION = "ffs.bootleg_rndis"
+
+    /** The NCM network function (the kernel's f_ncm); its netdev is named from [NCM_INTERFACE_TEMPLATE]. */
+    const val NCM_FUNCTION = "ncm.bootleg"
+
+    /**
+     * The NCM function's `ifname`: the kernel needs exactly one `%d` and names the netdev at its first
+     * bind (`bootleg_ncm0`). Android's EthernetService claims `usb\d`/`eth\d` netdevs and its own USB
+     * tethering `ncm\d`, so a name of Bootleg's own is left alone by both.
+     */
+    const val NCM_INTERFACE_TEMPLATE = "bootleg_ncm%d"
     const val HID_KEYBOARD_FUNCTION = "hid.bootleg_kbd"
 
     /** The scroll-wheel mouse (see [HidFunctionSpec.MOUSE_REPORT_LENGTH_BYTES]). */
@@ -46,15 +56,37 @@ data class HidSpec(
 )
 
 /**
+ * The prefix's network function, which is also the transport of USB tethering: Bootleg's NCM function
+ * (macOS, Linux, Windows 10 2004 or later) or its RNDIS function (Windows 7 and later, Linux).
+ */
+@Serializable
+enum class TetherMode(
+    val wireName: String,
+) {
+    RNDIS("rndis"),
+    NCM("ncm"),
+    ;
+
+    companion object {
+        val DEFAULT = NCM
+
+        fun fromWireName(name: String): TetherMode? = entries.firstOrNull { it.wireName == name }
+    }
+}
+
+/**
  * What the user wants exposed. LUNs must be dense: 0 until slots.size. [prefix] keeps Bootleg's fixed
- * prefix (RNDIS, keyboard, mouse; see [LinkOrder]) linked while nothing else is wanted; any slot or
- * HID input also wants it. Only Bootleg-off clears it.
+ * prefix (network, keyboard, mouse; see [LinkOrder]) linked while nothing else is wanted; any slot or
+ * HID input also wants it. Only Bootleg-off clears it. [network] is the prefix's network function:
+ * the first use sets it, and after that only a tethering mode change does
+ * ([GadgetController.establishPrefix]).
  */
 @Serializable
 data class Desired(
     val slots: List<SlotSpec> = emptyList(),
     val hid: HidSpec = HidSpec(),
     val prefix: Boolean = false,
+    val network: TetherMode = TetherMode.RNDIS,
 ) {
     val isEmpty: Boolean get() = slots.isEmpty() && !hid.keyboard && !hid.mouse && !prefix
 
@@ -99,6 +131,8 @@ data class GadgetState(
     val usbState: String = "",
     val usbConfig: String = "",
     val rndis: RndisState = RndisState.ABSENT,
+    /** The NCM function's netdev (its `ifname` read back: `bootleg_ncm0` once bound), or null without the function. */
+    val ncmInterface: String? = null,
 )
 
 /** Primitive configfs mutations. Paths are relative to [GadgetNames.GADGET_ROOT]. */
@@ -156,7 +190,8 @@ sealed interface Op {
     /**
      * Has the USB HAL relink its own functions (a round trip through another USB mode and back, see
      * [Journal.usbFunctionsToRestore]), so they come after Bootleg's links. Only while a held RNDIS function
-     * keeps the config unbindable, so the host never sees the layout in between.
+     * (the prefix's own, or in NCM mode a gate linked after it) keeps the config unbindable, so the host
+     * never sees the layout in between.
      */
     @Serializable data object RelinkForeign : Op
 }
@@ -343,8 +378,16 @@ interface GadgetController {
     /** Called on ACTION_USB_STATE / service start: finish interrupted transitions, re-apply drift. */
     fun reconcile(): ApplyResult
 
-    /** Sets up the prefix (marking it wanted) without exporting disks, for tethering; null when there is nothing to do. */
-    fun establishPrefix(): ApplyResult? = null
+    /**
+     * Sets the prefix up with [network] as its network function, without exporting disks, and marks it
+     * wanted (tethering is a use of Bootleg); with the other network function linked this is a mode
+     * change. Null when it is already in place. Refused before anything changes while
+     * [establishmentRefusal] says so.
+     */
+    fun establishPrefix(network: TetherMode): ApplyResult? = null
+
+    /** Why setting the prefix up with [network] (it re-plugs USB) isn't possible now, or null. Changes nothing. */
+    fun establishmentRefusal(network: TetherMode): String? = null
 
     /** Emergency teardown: remove all Bootleg functions and rebind. */
     fun bootlegOff(): ApplyResult

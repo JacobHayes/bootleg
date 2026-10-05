@@ -35,6 +35,12 @@ class GadgetReader(
             usbConfig = props?.usbConfig().orEmpty(),
             // A function nobody here can serve is dead.
             rndis = if (GadgetNames.RNDIS_FUNCTION in functions) rndisDaemon?.state() ?: RndisState.DEAD else RndisState.ABSENT,
+            ncmInterface =
+                if (GadgetNames.NCM_FUNCTION in functions) {
+                    fs.read(GadgetPaths.functionAttribute(GadgetNames.NCM_FUNCTION, "ifname")).trimEnd('\n')
+                } else {
+                    null
+                },
         )
     }
 
@@ -42,6 +48,9 @@ class GadgetReader(
 
     /** Bootleg's own links only: the cheap check run inside the unbound window. */
     fun readOwnedLinks(): Map<String, String> = readLinks(GadgetPaths::isOwnedName)
+
+    /** Every linked function, in link order: cheap enough for the unbound window. */
+    fun readLinkTargets(): List<String> = readLinks { true }.values.toList()
 
     /** In link order (the composite's interface order), which the returned map keeps. */
     private fun readLinks(include: (String) -> Boolean): Map<String, String> =

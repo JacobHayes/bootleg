@@ -18,9 +18,9 @@ class GadgetPlannerTest {
     private val keyboard = "functions/hid.bootleg_kbd"
     private val massStorage = "functions/mass_storage.bootleg"
     private val massStorageLink = "configs/b.1/mass_storage.bootleg"
-    private val prefixLinks = LinkOrder.PREFIX.map { Op.Symlink(GadgetPaths.function(it), GadgetPaths.configLink(it)) }
+    private val prefixLinks = LinkOrder.prefix(TetherMode.RNDIS).map { Op.Symlink(GadgetPaths.function(it), GadgetPaths.configLink(it)) }
     private val hidOn = HidSpec(keyboard = true, mouse = true)
-    private val prefixThenAdb = LinkOrder.PREFIX + "function0"
+    private val prefixThenAdb = LinkOrder.prefix(TetherMode.RNDIS) + "function0"
 
     private fun kernelWith(desired: Desired): PlannerKernel = PlannerKernel().also { it.converge(planner, GadgetTarget.of(desired)) }
 
@@ -34,16 +34,29 @@ class GadgetPlannerTest {
     }
 
     @Test
-    fun `first use links the prefix held, has the HAL relink after it, then releases and binds`() {
-        val kernel = PlannerKernel()
-        val plan = planner.plan(kernel.read(), Desired(prefix = true))
-        val stage = plan.stages.single()
-        assertTrue(stage.prepare.containsAll(listOf(Op.StartRndis, Op.Mkdir(keyboard))), "${stage.prepare}")
-        assertEquals(Switch(emptyList(), prefixLinks, Op.Bind(udc), afterLinks = listOf(Op.RelinkForeign, Op.ReleaseRndis)), stage.switch)
-        kernel.execute(plan)
-        assertEquals(prefixThenAdb, kernel.links())
-        assertEquals(RndisState.READY, kernel.read().rndis)
-        assertEquals(Plan.EMPTY, planner.plan(kernel.read(), Desired(prefix = true)))
+    fun `first use links the prefix with the RNDIS function held, has the HAL relink after it, then releases or unlinks it and binds`() {
+        for (network in TetherMode.entries) {
+            val kernel = PlannerKernel()
+            val desired = Desired(prefix = true, network = network)
+            val stage = planner.plan(kernel.read(), desired).stages.single()
+            assertTrue(stage.prepare.containsAll(listOf(Op.StartRndis, Op.Mkdir(keyboard))), "${stage.prepare}")
+            val prefix = LinkOrder.prefix(network)
+            // In NCM mode the held RNDIS function is only a gate ahead of the prefix, unlinked once the HAL has relinked.
+            val gate = listOf(GadgetNames.RNDIS_FUNCTION)
+            val (held, end) = if (network == TetherMode.RNDIS) prefix to Op.ReleaseRndis else gate + prefix to GadgetPlanner.gateUnlink
+            val links = held.map { Op.Symlink(GadgetPaths.function(it), GadgetPaths.configLink(it)) }
+            assertEquals(Switch(emptyList(), links, Op.Bind(udc), afterLinks = listOf(Op.RelinkForeign, end)), stage.switch)
+            kernel.execute(Plan(listOf(stage)))
+            assertEquals(prefix + "function0", kernel.links())
+            if (network == TetherMode.NCM) {
+                assertEquals("bootleg_ncm0", kernel.read().ncmInterface)
+                assertEquals(listOf("start", "stop"), kernel.daemon.events, "the gate is gone")
+                assertFalse(GadgetNames.RNDIS_FUNCTION in kernel.read().functions)
+            } else {
+                assertEquals(RndisState.READY, kernel.read().rndis)
+            }
+            assertEquals(Plan.EMPTY, planner.plan(kernel.read(), desired))
+        }
     }
 
     @Test
@@ -87,7 +100,7 @@ class GadgetPlannerTest {
             plan.ops,
         )
         kernel.execute(plan)
-        assertTrue(LinkOrder.prefixFirst(kernel.read().configLinks))
+        assertTrue(LinkOrder.prefixFirst(kernel.read().configLinks, TetherMode.RNDIS))
     }
 
     @Test
@@ -182,7 +195,7 @@ class GadgetPlannerTest {
         val fs = kernel.fs
         fs.asActor("other") {
             fs.write("UDC", "")
-            LinkOrder.PREFIX.forEach { fs.unlink(GadgetPaths.configLink(it)) }
+            LinkOrder.prefix(TetherMode.RNDIS).forEach { fs.unlink(GadgetPaths.configLink(it)) }
             prefixLinks.forEach { fs.symlink(it.target, it.link) }
             fs.write("UDC", udc)
         }
@@ -195,25 +208,28 @@ class GadgetPlannerTest {
 
     @Test
     fun `an establishment a crash interrupted resumes from the held daemon, finishing the HAL round trip first`() {
-        val prepare =
-            planner
-                .plan(PlannerKernel().read(), Desired(prefix = true))
-                .stages
-                .single()
-                .prepare
-        // The root process died with the links made and the daemon held, before or after the HAL relinked.
-        for ((afterRelink, roundTripPending) in listOf(false to true, true to true, true to false)) {
-            val kernel = PlannerKernel()
-            kernel.execute(Plan(listOf(Stage(prepare, null, emptyList()))))
-            kernel.fs.write("UDC", "")
-            prefixLinks.forEach { kernel.fs.symlink(it.target, it.link) }
-            if (afterRelink) kernel.execute(Plan(listOf(Stage(emptyList(), null, listOf(Op.RelinkForeign)))))
-            val target = GadgetTarget.of(Desired(prefix = true)).copy(usbRoundTrip = roundTripPending)
-            val resume = planner.plan(kernel.read(), target, udc)
-            assertFalse(Op.StartRndis in resume.ops, "${resume.ops}")
-            assertEquals(roundTripPending, Op.RelinkForeign in resume.ops, "a pending round trip ends before the release: ${resume.ops}")
-            kernel.execute(resume)
-            assertEquals(prefixThenAdb, kernel.links())
+        for (network in TetherMode.entries) {
+            val desired = Desired(prefix = true, network = network)
+            val establishment = planner.plan(PlannerKernel().read(), desired).stages.single()
+            // The root process died with the links made and the daemon held, before or after the HAL relinked.
+            for ((afterRelink, roundTripPending) in listOf(false to true, true to true, true to false)) {
+                val kernel = PlannerKernel()
+                kernel.execute(Plan(listOf(Stage(establishment.prepare, null, emptyList()))))
+                kernel.fs.write("UDC", "")
+                checkNotNull(establishment.switch).links.forEach { kernel.fs.symlink(it.target, it.link) }
+                if (afterRelink) kernel.execute(Plan(listOf(Stage(emptyList(), null, listOf(Op.RelinkForeign)))))
+                val target = GadgetTarget.of(desired).copy(usbRoundTrip = roundTripPending)
+                val resume = planner.plan(kernel.read(), target, udc)
+                assertFalse(Op.StartRndis in resume.ops, "${resume.ops}")
+                assertEquals(
+                    roundTripPending,
+                    Op.RelinkForeign in resume.ops,
+                    "a pending round trip ends before the release: ${resume.ops}",
+                )
+                kernel.execute(resume)
+                assertEquals(LinkOrder.prefix(network) + "function0", kernel.links())
+                assertEquals(emptyList<String>(), GadgetInvariants.violations(kernel.read(), target))
+            }
         }
     }
 
@@ -239,36 +255,32 @@ class GadgetPlannerTest {
     }
 
     @Test
-    fun `Bootleg-off removes everything, and with nothing else linked it all happens inside the window`() {
-        val kernel = PlannerKernel()
-        kernel.fs.asActor("setup") {
-            kernel.fs.write("UDC", "")
-            kernel.fs.unlink("configs/b.1/function0")
+    fun `Bootleg-off removes everything, and with nothing else linked it all happens inside the window`() =
+        TetherMode.entries.forEach { network ->
+            val kernel = PlannerKernel()
+            kernel.fs.asActor("setup") {
+                kernel.fs.write("UDC", "")
+                kernel.fs.unlink("configs/b.1/function0")
+            }
+            val desired = Desired(listOf(SlotSpec(0, iso(1), LunMode.CDROM)), hidOn, network = network)
+            val on = planner.plan(kernel.read(), GadgetTarget.of(desired), udc)
+            assertFalse(Op.RelinkForeign in on.ops, "nothing foreign to relink")
+            assertEquals(network == TetherMode.RNDIS, Op.StartRndis in on.ops, "NCM needs no gate without a round trip")
+            kernel.converge(planner, GadgetTarget.of(desired))
+            assertEquals(udc, kernel.fs.udc)
+            assertEquals(emptyList<String>(), GadgetInvariants.violations(kernel.read(), GadgetTarget.of(desired)))
+            val off = planner.plan(kernel.read(), Desired(), udc)
+            val offSwitch = checkNotNull(off.stages.single().switch)
+            assertEquals(null, offSwitch.bind)
+            if (network == TetherMode.RNDIS) {
+                val rmdir = offSwitch.unlinkedOps.indexOf(Op.Rmdir("functions/ffs.bootleg_rndis"))
+                assertTrue(offSwitch.unlinkedOps.indexOf(Op.StopRndis) in 0 until rmdir)
+            }
+            kernel.execute(off)
+            assertEquals("", kernel.fs.udc)
+            assertEquals(emptyList<String>(), kernel.read().functions.filter(GadgetPaths::isOwnedName))
+            assertEquals(Plan.EMPTY, planner.plan(kernel.read(), Desired(), udc), "unbound with nothing linked is converged")
         }
-        val desired = Desired(listOf(SlotSpec(0, iso(1), LunMode.CDROM)), hidOn)
-        val on = planner.plan(kernel.read(), GadgetTarget.of(desired), udc)
-        assertFalse(Op.RelinkForeign in on.ops, "nothing foreign to relink")
-        kernel.converge(planner, GadgetTarget.of(desired))
-        assertEquals(udc, kernel.fs.udc)
-        assertEquals(emptyList<String>(), GadgetInvariants.violations(kernel.read(), GadgetTarget.of(desired)))
-        val off = planner.plan(kernel.read(), Desired(), udc)
-        val offSwitch = checkNotNull(off.stages.single().switch)
-        assertEquals(null, offSwitch.bind)
-        assertTrue(
-            offSwitch.unlinkedOps.indexOf(Op.StopRndis) in 0 until offSwitch.unlinkedOps.indexOf(Op.Rmdir("functions/ffs.bootleg_rndis")),
-        )
-        kernel.execute(off)
-        assertEquals("", kernel.fs.udc)
-        assertEquals(
-            emptySet<String>(),
-            kernel
-                .read()
-                .functions
-                .filter(GadgetPaths::isOwnedName)
-                .toSet(),
-        )
-        assertEquals(Plan.EMPTY, planner.plan(kernel.read(), Desired(), udc), "unbound with nothing linked is converged")
-    }
 
     @Test
     fun `an unlinked HID function left by a crash is rebuilt`() {
@@ -304,7 +316,8 @@ class GadgetPlannerTest {
                 val random = Random(seed)
                 val kernel = PlannerKernel()
                 repeat(4) {
-                    val desired = randomDesired(random)
+                    // Either network function, so some steps are mode changes.
+                    val desired = randomDesired(random).copy(network = TetherMode.entries.random(random))
                     // No marker (an old journal), or one of two nonces (a new journal adopting older LUNs).
                     val marker = listOf(null, GadgetRig.MARKER, LunMarker.inquiryString("zz99")).random(random)
                     val target = GadgetTarget.of(desired).copy(lunMarker = marker)
@@ -348,25 +361,25 @@ class GadgetPlannerTest {
         runBlocking {
             checkAll(300, Arb.long()) { seed ->
                 val random = Random(seed)
-                val kernel = kernelWith(Desired(prefix = true))
+                val network = TetherMode.entries.random(random)
+                val kernel = kernelWith(Desired(prefix = true, network = network))
                 repeat(6) {
                     if (random.nextInt(8) == 0) kernel.daemon.die()
                     val desired = if (random.nextInt(3) == 0) Desired(hid = HidSpec(random.nextBoolean(), true)) else randomDesired(random)
-                    val target = GadgetTarget.of(desired)
+                    val target = GadgetTarget.of(desired.copy(network = network))
                     val plan = planner.plan(kernel.read(), target)
                     var state = kernel.read()
                     for (op in plan.ops) {
                         state = GadgetSimulation.apply(state, op)
                         if (op is Op.Bind) {
                             assertTrue(LinkOrder.isCanonical(state.configLinks), "bound out of order: $state")
-                            assertTrue(LinkOrder.prefixFirst(state.configLinks), "bound without the prefix first: $state")
-                            assertEquals(RndisState.READY, state.rndis, "bound with the RNDIS function unserved")
+                            assertTrue(LinkOrder.prefixServed(state, network), "bound without the prefix first and served: $state")
                         }
                     }
                     val prefixTouched =
                         plan.ops.filter { op ->
                             (op is Op.Unlink || op is Op.Symlink) &&
-                                GadgetPaths.touchedPaths(op).single().substringAfterLast('/') in LinkOrder.PREFIX
+                                GadgetPaths.touchedPaths(op).single().substringAfterLast('/') in LinkOrder.prefix(network)
                         }
                     assertEquals(emptyList<Op>(), prefixTouched, "the prefix was relinked: ${plan.ops}")
                     kernel.converge(planner, target)

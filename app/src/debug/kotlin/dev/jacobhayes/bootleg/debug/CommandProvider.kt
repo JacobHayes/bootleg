@@ -10,10 +10,10 @@ import dev.jacobhayes.bootleg.BootlegApp
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.core.hid.HidTestSequence
 import dev.jacobhayes.bootleg.core.remote.LeaseHolder
 import dev.jacobhayes.bootleg.core.remote.Principal
-import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.root.BootlegJson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.TimeoutCancellationException

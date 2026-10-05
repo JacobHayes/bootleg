@@ -8,27 +8,9 @@ import dev.jacobhayes.bootleg.core.gadget.HidFunctions
 import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
 import dev.jacobhayes.bootleg.core.gadget.LinkOrder
 import dev.jacobhayes.bootleg.core.gadget.RndisState
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import kotlinx.serialization.Serializable
 import java.io.IOException
-
-/**
- * The transport USB tethering uses, one at a time: Bootleg's own RNDIS function (Windows 7 and
- * later, Linux) or Android's NCM (macOS, Linux, Windows 10 2004 or later).
- */
-@Serializable
-enum class TetherMode(
-    val wireName: String,
-) {
-    RNDIS("rndis"),
-    NCM("ncm"),
-    ;
-
-    companion object {
-        val DEFAULT = NCM
-
-        fun fromWireName(name: String): TetherMode? = entries.firstOrNull { it.wireName == name }
-    }
-}
 
 /** Bounds on one USB tethering change (TigerStyle: every wait is bounded). */
 object TetherLimits {
@@ -366,7 +348,7 @@ class UsbTetherController(
         if (on && !rndisReady(gadget.read())) {
             val exposed = TetherPolicy.exposedLuns(gadget.read())
             if (exposed.isNotEmpty()) return TetherResult.Refused(usbTethered(), exposed, TetherPolicy.DISKS_EXPOSED_REASON)
-            gadget.establishPrefix()?.let { reconcile = it }
+            gadget.establishPrefix(TetherMode.RNDIS)?.let { reconcile = it }
             if (!rndisReady(gadget.read())) return TetherResult.Failed(usbTethered(), "$RNDIS_NOT_READY_REASON: $reconcile")
             reconcile = gadget.reconcile()
         }
@@ -427,7 +409,7 @@ class UsbTetherController(
     }
 
     private fun rndisReady(state: GadgetState): Boolean =
-        LinkOrder.prefixFirst(state.configLinks) && state.rndis == RndisState.READY && state.udc.isNotEmpty()
+        LinkOrder.prefixFirst(state.configLinks, TetherMode.RNDIS) && state.rndis == RndisState.READY && state.udc.isNotEmpty()
 
     /** NCM: Android's USB tethering, which re-plugs USB through the HAL. */
     private fun changeNcm(on: Boolean): TetherResult {
@@ -440,7 +422,7 @@ class UsbTetherController(
         }
         // Once tethering is on, changing the USB mode would end it, so the prefix can't be set up after.
         // Tethering doesn't depend on it: a failure is left for the reconcile below to report.
-        if (on && gadget.establishPrefix() != null) gadgetState = gadget.read()
+        if (on && gadget.establishPrefix(TetherMode.RNDIS) != null) gadgetState = gadget.read()
         // The HAL's re-plug rebinds every linked hid function: no hidg fd (ours or anyone's) may be open across it.
         hidNodes.closeAll()
         val holders = hidNodes.holders((HidFunctions.linked(gadgetState) + HidFunctions.owned(gadgetState)).sorted())

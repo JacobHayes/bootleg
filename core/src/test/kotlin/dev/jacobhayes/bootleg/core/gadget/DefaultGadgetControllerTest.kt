@@ -291,7 +291,8 @@ class DefaultGadgetControllerTest {
         val result = rig.controller().apply(twoDisks)
         assertInstanceOf(ApplyResult.NeedsAttention::class.java, result)
         assertEquals(udc, rig.fs.udc)
-        val armCountMax = (1 + GadgetLimits.REPLAN_COUNT_MAX) * (1 + DefaultGadgetController.SWITCH_REBIND_COUNT_MAX + 3)
+        // A switch makes at most 4 links (the NCM prefix and its gate), each of which the HAL can race.
+        val armCountMax = (1 + GadgetLimits.REPLAN_COUNT_MAX) * (1 + DefaultGadgetController.SWITCH_REBIND_COUNT_MAX + 4)
         assertTrue(rig.deadMan.arms.size <= armCountMax, "${rig.deadMan.arms.size} arms")
         assertEquals(emptyList<String>(), rig.fs.foreignWrites)
     }
@@ -698,7 +699,8 @@ class DefaultGadgetControllerTest {
     fun `a gadget that can't bind falls back to Bootleg-off`() {
         val rig = GadgetRig()
         rig.fs.rejectBind = { links -> links.keys.any { it.contains("bootleg_mouse") } }
-        val result = assertInstanceOf(ApplyResult.Failed::class.java, rig.controller().apply(twoDisks))
+        // RNDIS: with f_ncm ahead of a function that fails its bind, the kernel panics (see NcmBindHazard).
+        val result = assertInstanceOf(ApplyResult.Failed::class.java, rig.controller().apply(twoDisks.copy(network = TetherMode.RNDIS)))
         assertTrue(result.reason.contains("Bootleg-off performed"), result.reason)
         assertEquals(udc, rig.fs.udc)
         assertTrue(rig.state().functions.none(GadgetPaths::isOwnedName))

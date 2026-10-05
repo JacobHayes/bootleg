@@ -1,5 +1,6 @@
 package dev.jacobhayes.bootleg.core.gadget
 
+import java.security.MessageDigest
 import java.security.SecureRandom
 
 /** Flags written to `lun.N/ro` and `lun.N/cdrom` for a mode. */
@@ -45,17 +46,19 @@ object LunMarker {
 /**
  * Where Bootleg's functions sit in the config. The kernel numbers a config's interfaces in link order,
  * and Windows binds each child driver by interface number (`USB\VID_x&PID_y&MI_nn`), so a function
- * must never move to another function's number. The [PREFIX] is linked ahead of every foreign link
- * and never relinked: RNDIS (interfaces 0-1, the only place Windows starts it), the keyboard (2) and
- * the mouse (3). Disks follow it ([DISKS]).
+ * must never move to another function's number. The [prefix] is linked ahead of every foreign link
+ * and never relinked: the network function (NCM or RNDIS, interfaces 0-1, the only place Windows
+ * starts RNDIS), the keyboard (2) and the mouse (3). Disks follow it ([DISKS]).
  */
 object LinkOrder {
-    val PREFIX =
-        listOf(
-            GadgetNames.RNDIS_FUNCTION,
-            GadgetNames.HID_KEYBOARD_FUNCTION,
-            GadgetNames.HID_MOUSE_FUNCTION,
-        )
+    fun networkFunction(network: TetherMode): String =
+        when (network) {
+            TetherMode.RNDIS -> GadgetNames.RNDIS_FUNCTION
+            TetherMode.NCM -> GadgetNames.NCM_FUNCTION
+        }
+
+    fun prefix(network: TetherMode): List<String> =
+        listOf(networkFunction(network), GadgetNames.HID_KEYBOARD_FUNCTION, GadgetNames.HID_MOUSE_FUNCTION)
 
     /**
      * The one rule for disk placement: mass storage is the last link of ours, after the prefix, wherever
@@ -64,26 +67,69 @@ object LinkOrder {
      */
     const val DISKS = GadgetNames.MASS_STORAGE_FUNCTION
 
-    val CANONICAL = PREFIX + DISKS
+    /** Where each linkable function of ours goes; the two network functions share the first place. */
+    private fun place(function: String): Int? =
+        when (function) {
+            GadgetNames.RNDIS_FUNCTION, GadgetNames.NCM_FUNCTION -> 0
+            GadgetNames.HID_KEYBOARD_FUNCTION -> 1
+            GadgetNames.HID_MOUSE_FUNCTION -> 2
+            DISKS -> 3
+            else -> null
+        }
 
     /** Bootleg's linked functions in link order ([configLinks] is in link order), by target. */
     fun owned(configLinks: Map<String, String>): List<String> = configLinks.filterKeys(GadgetPaths::isOwnedName).values.toList()
 
-    /** Ours are a subsequence of [CANONICAL] in that order, each linked under its own name. */
+    /** Ours are in prefix-then-disks order with at most one network function, each linked under its own name. */
     fun isCanonical(configLinks: Map<String, String>): Boolean {
         val owned = owned(configLinks)
-        val ownedNames = configLinks.keys.filter(GadgetPaths::isOwnedName)
-        return owned == ownedNames && owned.all { it in CANONICAL } && owned == owned.sortedBy(CANONICAL::indexOf)
+        val places = owned.map { place(it) ?: return false }
+        return owned == configLinks.keys.filter(GadgetPaths::isOwnedName) && places.zipWithNext().all { (a, b) -> a < b }
     }
 
-    /** The prefix is the first three links of the whole config, foreign ones included. */
-    fun prefixFirst(configLinks: Map<String, String>): Boolean =
-        configLinks.entries.take(PREFIX.size).map { it.key to it.value } == PREFIX.map { it to it }
+    /** The prefix with [network] is the first three links of the whole config, foreign ones included. */
+    fun prefixFirst(
+        configLinks: Map<String, String>,
+        network: TetherMode,
+    ): Boolean = configLinks.entries.take(3).map { it.key to it.value } == prefix(network).map { it to it }
+
+    /** The network function the prefix starts with, or null when no prefix is first. */
+    fun linkedNetwork(configLinks: Map<String, String>): TetherMode? = TetherMode.entries.firstOrNull { prefixFirst(configLinks, it) }
+
+    /**
+     * The prefix with [network] is first and served: the RNDIS daemon ready, or in NCM mode the RNDIS
+     * gate of an establishment gone. Either is done only after the round trip through another USB mode.
+     */
+    fun prefixServed(
+        state: GadgetState,
+        network: TetherMode,
+    ): Boolean =
+        prefixFirst(state.configLinks, network) &&
+            when (network) {
+                TetherMode.RNDIS -> state.rndis == RndisState.READY
+                TetherMode.NCM -> GadgetNames.RNDIS_FUNCTION !in state.configLinks.values
+            }
+}
+
+/**
+ * The NCM function's MAC addresses (`host_addr`, `dev_addr`), derived from [of]'s seed (the phone's
+ * serial) so a computer keeps one adapter and lease for the phone: locally administered unicast, distinct.
+ */
+object NcmAddresses {
+    fun of(seed: String): Pair<String, String> {
+        require(seed.isNotEmpty()) { "empty MAC seed" }
+        val host = MessageDigest.getInstance("SHA-256").digest("bootleg-ncm:$seed".toByteArray()).copyOf(6)
+        host[0] = (host[0].toInt() and 0xFC or 0x02).toByte()
+        val device = host.copyOf().also { it[5] = (it[5].toInt() xor 0x01).toByte() }
+        return format(host) to format(device)
+    }
+
+    private fun format(address: ByteArray): String = address.joinToString(":") { "%02x".format(it.toInt() and 0xFF) }
 }
 
 /**
  * The concrete state the planner drives toward: [Desired] with slot intents applied. [prefix] links
- * the prefix ([LinkOrder.PREFIX]); HID on or off doesn't change the gadget. [usbRoundTrip]: an
+ * the prefix ([LinkOrder.prefix]) with [network]; HID on or off doesn't change the gadget. [usbRoundTrip]: an
  * establishment's USB mode round trip is unfinished ([Journal.usbFunctionsToRestore]). [lunMarker], if set, is
  * the `inquiry_string` every LUN must carry (see [LunMarker]).
  */
@@ -92,6 +138,7 @@ data class GadgetTarget(
     val prefix: Boolean,
     val lunMarker: String? = null,
     val usbRoundTrip: Boolean = false,
+    val network: TetherMode = TetherMode.RNDIS,
 ) {
     init {
         require(luns.size <= GadgetLimits.LUN_COUNT_MAX) { "at most ${GadgetLimits.LUN_COUNT_MAX} LUNs, got ${luns.size}" }
@@ -103,7 +150,7 @@ data class GadgetTarget(
     val functions: List<String>
         get() =
             buildList {
-                if (prefix) addAll(LinkOrder.PREFIX)
+                if (prefix) addAll(LinkOrder.prefix(network))
                 if (luns.isNotEmpty()) add(LinkOrder.DISKS)
             }
 
@@ -126,6 +173,7 @@ data class GadgetTarget(
                 prefix = journal.desired.wantsPrefix,
                 lunMarker = journal.lunInstanceNonce.takeIf { it.isNotEmpty() }?.let(LunMarker::inquiryString),
                 usbRoundTrip = journal.usbFunctionsToRestore != null,
+                network = journal.desired.network,
             )
         }
     }

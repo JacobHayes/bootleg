@@ -23,21 +23,30 @@ class DefaultGadgetController(
     private val rndisDaemon: RndisDaemon? = null,
     /** Android's USB functions, which the HAL relinks after ours when the prefix is established. */
     private val usbFunctions: UsbFunctions? = null,
+    /** Seeds the NCM function's MAC addresses: the phone's serial. */
+    ncmMacSeed: String = "bootleg",
+    /** Whether a FunctionFS function (`ffs.<name>`) has its descriptors written, so it can bind (root: its `ep1` exists). */
+    private val functionFsReady: (function: String) -> Boolean = { true },
 ) : GadgetController {
     private val reader = GadgetReader(fs, rndisDaemon = rndisDaemon)
     private var lastRndisRepairMs: Long? = null
-    private val planner = GadgetPlanner(hidDescriptors)
+    private val planner = GadgetPlanner(hidDescriptors, ncmMacSeed)
     private var lastReconcileMs: Long? = null
     private var reconcileAttemptCount = 0
 
     /**
-     * Why the last prefix establishment failed. Each attempt may re-plug USB (twice, through the HAL),
-     * so it is not retried by itself: reconcile reports it until the next [apply] or [bootlegOff].
+     * Why the last prefix establishment's USB mode round trip failed. Each attempt re-plugs USB (twice,
+     * through the HAL), so it is not retried by itself: reconcile reports it until the next [apply],
+     * [establishPrefix] or [bootlegOff].
      */
     private var establishmentFailure: String? = null
 
-    /** The plan being executed got as far as asking the HAL for its USB mode round trip. */
-    private var roundTripAttempted = false
+    /**
+     * The gadget right after the executed plan's USB mode round trip, if it had one: Android's links are
+     * whatever its mode has, and they are what must survive from then on. Read at once, so links the HAL
+     * drops later (it clears its functions after failed pull-ups) count as lost, not as the reference.
+     */
+    private var relinked: GadgetState? = null
 
     /**
      * When this controller last bound the UDC, until a stable-bound wait confirms the HAL's post-bind
@@ -54,7 +63,8 @@ class DefaultGadgetController(
     /**
      * Applies [desired]. Slots that were host- or user-ejected and are unchanged stay ejected; use
      * [reinsert]. Once Bootleg has been used the prefix stays wanted whatever [desired] says (only
-     * [bootlegOff] forgets it), so turning everything off leaves the prefix idle, not removed.
+     * [bootlegOff] forgets it), so turning everything off leaves the prefix idle, not removed; its
+     * network function then changes only through [establishPrefix].
      */
     override fun apply(desired: Desired): ApplyResult {
         GadgetInvariants.requireValid(desired, allowedRoots)
@@ -70,7 +80,7 @@ class DefaultGadgetController(
                 val keepEjected = previousIntent in EJECTED_INTENTS && previous.desired.slots.getOrNull(slot.lun) == slot
                 slot.lun to if (keepEjected) previousIntent else SlotIntent.EXPORTED
             }
-        val kept = if (previous.desired.wantsPrefix) desired.copy(prefix = true) else desired
+        val kept = if (previous.desired.wantsPrefix) desired.copy(prefix = true, network = previous.desired.network) else desired
         val udc = state.udc.ifEmpty { previous.udc }
         val journal =
             Journal(
@@ -216,22 +226,58 @@ class DefaultGadgetController(
     }
 
     /**
-     * Sets up the prefix, if it isn't in place, without exporting any disk, and records it as wanted
-     * (tethering is a use of Bootleg): RNDIS needs it, and once NCM is on the USB mode change it needs
-     * would end NCM. The journal's slots stay; a later reconcile exports them. Null when there is
-     * nothing to do (or disks have media, so the re-plug isn't allowed now).
+     * Sets the prefix up with [network], if it isn't in place, without exporting any disk, and records
+     * it as wanted (tethering is a use of Bootleg). The journal's slots stay; a later reconcile exports
+     * them. A pending USB mode restoration counts as not in place, so it is finished (and verified)
+     * first. Refusals are decided before the journal changes, so a refused mode change leaves the old
+     * network function wanted.
      */
-    override fun establishPrefix(): ApplyResult? {
+    override fun establishPrefix(network: TetherMode): ApplyResult? {
         val loaded = journalStore.load()
-        val journal = if (loaded.desired.wantsPrefix) loaded else save(loaded.copy(desired = loaded.desired.copy(prefix = true)))
         val current = reader.read()
-        if (LinkOrder.prefixFirst(current.configLinks) && current.rndis == RndisState.READY && current.udc.isNotEmpty()) return null
-        if (current.luns.values.any { it.file.isNotEmpty() }) return null
+        if (loaded.desired.wantsPrefix &&
+            loaded.desired.network == network &&
+            loaded.usbFunctionsToRestore == null &&
+            LinkOrder.prefixServed(current, network) &&
+            current.udc.isNotEmpty()
+        ) {
+            return null
+        }
+        establishmentRefusal(current, loaded, network)?.let { return ApplyResult.NeedsAttention(it) }
+        // A user's request, like an apply: a failed establishment may be tried again.
+        reconcileAttemptCount = 0
+        establishmentFailure = null
+        val journal = save(loaded.copy(desired = loaded.desired.copy(prefix = true, network = network)))
         val quiet = awaitHalQuiet() ?: return halBusy()
         if (!rndisBlocksBind()) settleBound(knownUdc(), quiet.boundSinceMs)?.let { return it.result() }
         val state = reader.read()
         val udcJournal = journal.copy(udc = state.udc.ifEmpty { journal.udc })
         return converge(udcJournal, state, foreignBefore = state, allowEmergencyOff = true, withoutDisks = true)
+    }
+
+    override fun establishmentRefusal(network: TetherMode): String? = establishmentRefusal(reader.read(), journalStore.load(), network)
+
+    /** [prefixRefusal] of the plan that would set the prefix up with [network], and any disk with media. */
+    private fun establishmentRefusal(
+        state: GadgetState,
+        journal: Journal,
+        network: TetherMode,
+    ): String? {
+        // Any media: the re-plug would pull it from the host, and the plan below (without disks) would remove it.
+        val exposed =
+            state.luns
+                .filterValues { it.file.isNotEmpty() }
+                .keys
+                .sorted()
+        if (exposed.isNotEmpty()) return "$PREFIX_DISKS_EXPOSED_REASON (LUNs ${exposed.joinToString()})"
+        val udc = state.udc.ifEmpty { journal.udc }
+        if (udc.isEmpty()) return "UDC is unbound and no UDC name is recorded"
+        val target =
+            GadgetTarget
+                .of(
+                    journal.copy(desired = journal.desired.copy(prefix = true, network = network)),
+                ).copy(luns = emptyList())
+        return prefixRefusal(planner.plan(state, target, udc, repairRndis = rndisRepairAllowed(state)), state)
     }
 
     override fun bootlegOff(): ApplyResult {
@@ -306,7 +352,7 @@ class DefaultGadgetController(
             // The mode to come back to is journaled before the round trip leaves it (never inside a window).
             val original = journal.usbFunctionsToRestore ?: if (establishes) usbFunctions?.current() else null
             journal = save(journal.copy(phase = TransitionPhase.MUTATING, usbFunctionsToRestore = original))
-            roundTripAttempted = false
+            relinked = null
             val outcome = execute(plan, state, journal)
             when (outcome) {
                 is Outcome.Completed -> {
@@ -338,7 +384,6 @@ class DefaultGadgetController(
                     lastProblem = outcome.reason
                 }
             }
-            if (roundTripAttempted && outcome !is Outcome.Completed) establishmentFailure = lastProblem
             // Replanning won't make a holder let go of a hidg node; the refused op changed nothing, so report it now.
             if (outcome is Outcome.Refused) break
             // Wait out the HAL's post-bind drop before reading back; if it won't settle, finish reports it.
@@ -350,7 +395,7 @@ class DefaultGadgetController(
                 }
             }
             state = reader.read()
-            if (roundTripAttempted && outcome is Outcome.Completed) foreignReference = state
+            if (outcome is Outcome.Completed) relinked?.let { foreignReference = it }
             // Someone (HAL, dead-man) bound the UDC mid-transition: the host may have enumerated a
             // half-built gadget, so the next plan re-enumerates even if the topology now looks right.
             if (outcome !is Outcome.Completed && outcome.expectedUdc.isEmpty() && state.udc.isNotEmpty()) forceReenumerate = true
@@ -381,12 +426,8 @@ class DefaultGadgetController(
             }
             state = reader.read()
         }
-        // A served prefix in place means the round trip (verified before the release) is over.
-        if (LinkOrder.prefixFirst(state.configLinks) &&
-            state.rndis == RndisState.READY
-        ) {
-            journal = journal.copy(usbFunctionsToRestore = null)
-        }
+        // A served prefix in place means the round trip (verified before the release or the gate's unlink) is over.
+        if (LinkOrder.prefixServed(state, journal.desired.network)) journal = journal.copy(usbFunctionsToRestore = null)
         val violations = GadgetInvariants.violations(state, target(journal), allowedRoots)
         // A non-IDLE phase tells reconcile that empty LUNs are ours, not host ejects. Lost foreign links
         // are not ours to fix, so they leave the phase IDLE but still fail the operation.
@@ -414,7 +455,10 @@ class DefaultGadgetController(
         // Only the user's Bootleg-off forgets the prefix: the next reconcile sets it up again (no disks).
         if (journal.desired.wantsPrefix) {
             save(
-                journalStore.load().copy(desired = Desired(prefix = true), usbFunctionsToRestore = journal.usbFunctionsToRestore),
+                journalStore.load().copy(
+                    desired = Desired(prefix = true, network = journal.desired.network),
+                    usbFunctionsToRestore = journal.usbFunctionsToRestore,
+                ),
             )
         }
         return ApplyResult.Failed(if (off is ApplyResult.Applied) "$reason; Bootleg-off performed" else "$reason; Bootleg-off failed: $off")
@@ -427,6 +471,7 @@ class DefaultGadgetController(
             try {
                 // A hidg fd open across this bind would panic the kernel when it is closed.
                 hidNodes.closeAll()
+                awaitFunctionFsReady()
                 fs.write(GadgetPaths.UDC, udc)
                 ownBindMs = clock.nowMs()
                 return true
@@ -731,6 +776,7 @@ class DefaultGadgetController(
             }
             is Op.Bind -> {
                 hidNodes.closeAll()
+                awaitFunctionFsReady()
                 fs.write(GadgetPaths.UDC, op.udc)
             }
             is Op.Mkdir -> fs.mkdir(op.path)
@@ -750,6 +796,27 @@ class DefaultGadgetController(
     }
 
     private fun requireRndisDaemon(): RndisDaemon = rndisDaemon ?: throw IOException("no RNDIS daemon support")
+
+    /**
+     * Before a bind of ours with the NCM function linked: a bind that fails after f_ncm has bound (an
+     * unready FunctionFS function linked after it, such as ADB's while adbd reopens it) makes the
+     * composite unbind f_ncm again, and this kernel's `ncm_unbind` double-frees (a panic). So every
+     * linked FunctionFS function must be ready first; waits for it (bounded), else throws instead of
+     * binding.
+     */
+    private fun awaitFunctionFsReady() {
+        val links = reader.readLinkTargets()
+        if (GadgetNames.NCM_FUNCTION !in links) return
+        val functionFs = links.filter { it.startsWith(FUNCTION_FS_PREFIX) }
+        val deadlineMs = clock.nowMs() + FUNCTION_FS_READY_WAIT_MS_MAX
+        repeat(FUNCTION_FS_READY_POLL_COUNT_MAX) {
+            val unready = functionFs.filterNot(functionFsReady)
+            if (unready.isEmpty()) return
+            if (clock.nowMs() >= deadlineMs) throw IOException("$FUNCTION_FS_UNREADY_REASON: $unready")
+            clock.sleepMs(FUNCTION_FS_READY_POLL_INTERVAL_MS)
+        }
+        throw IOException("$FUNCTION_FS_UNREADY_REASON within ${FUNCTION_FS_READY_WAIT_MS_MAX}ms")
+    }
 
     /** A held or dead RNDIS function is linked: no bind can succeed until a plan releases or restarts it. */
     private fun rndisBlocksBind(state: GadgetState = reader.read()): Boolean =
@@ -804,7 +871,6 @@ class DefaultGadgetController(
      */
     private fun relinkForeign(original: Long) {
         val functions = usbFunctions ?: throw IOException("no access to Android's USB functions")
-        roundTripAttempted = true
         try {
             if (functions.current() ==
                 original
@@ -812,8 +878,11 @@ class DefaultGadgetController(
                 setAndAwaitRelink(functions, if (original == UsbFunctions.MTP) UsbFunctions.PTP else UsbFunctions.MTP)
             }
             setAndAwaitRelink(functions, original)
+            relinked = reader.read()
         } catch (e: IOException) {
             runCatching { functions.set(original) }
+            // Only the round trip's own failure: a later step that fails (the release, the gate's unlink) is retried.
+            establishmentFailure = "the USB mode round trip failed: ${e.message}"
             throw e
         }
     }
@@ -1069,6 +1138,13 @@ class DefaultGadgetController(
         const val RELINK_WAIT_MS_MAX = 5_000L
         const val RELINK_POLL_INTERVAL_MS = 50L
         const val RELINK_POLL_COUNT_MAX = (RELINK_WAIT_MS_MAX / RELINK_POLL_INTERVAL_MS).toInt() + 1
+
+        /** adbd reopens its FunctionFS function within ~1s of a re-enumeration. */
+        const val FUNCTION_FS_READY_WAIT_MS_MAX = 2_000L
+        const val FUNCTION_FS_READY_POLL_INTERVAL_MS = 20L
+        const val FUNCTION_FS_READY_POLL_COUNT_MAX = (FUNCTION_FS_READY_WAIT_MS_MAX / FUNCTION_FS_READY_POLL_INTERVAL_MS).toInt() + 1
+        private const val FUNCTION_FS_PREFIX = "ffs."
+        const val FUNCTION_FS_UNREADY_REASON = "not binding with the NCM function linked: FunctionFS functions aren't ready"
 
         /** A dead RNDIS daemon is restarted at most this often; one that keeps dying is left and reported. */
         const val RNDIS_REPAIR_INTERVAL_MS_MIN = 30_000L

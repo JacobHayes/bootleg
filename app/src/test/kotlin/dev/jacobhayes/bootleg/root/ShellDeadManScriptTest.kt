@@ -84,6 +84,27 @@ class ShellDeadManScriptTest {
         assertEquals(setOf("ffs.bootleg_rndis", "hid.bootleg_kbd", "function0"), links())
     }
 
+    @Test
+    fun `with the NCM function linked it binds as is only while every FunctionFS function is ready`() {
+        File(proc, "1").mkdirs()
+        File(proc, "1/mounts").writeText("adb /dev/usb-ffs/adb functionfs rw 0 0\n")
+        val adbEndpoint = File(proc, "1/root/dev/usb-ffs/adb/ep1")
+        mapOf("ncm.bootleg" to "ncm.bootleg", "hid.bootleg_kbd" to "hid.bootleg_kbd", "function0" to "ffs.adb")
+            .forEach { (link, function) -> symlink(File(config, link), "/nonexistent/$function") }
+        // adbd hasn't written its descriptors: no bind with f_ncm linked; ours go first, then ADB binds.
+        run()
+        assertEquals("udc0", udc.readText().trim())
+        assertEquals(setOf("function0"), links())
+        // Ready: the bind is tried as is.
+        udc.writeText("")
+        checkNotNull(adbEndpoint.parentFile).mkdirs()
+        adbEndpoint.writeText("")
+        symlink(File(config, "ncm.bootleg"), "/nonexistent/ncm.bootleg")
+        run()
+        assertEquals("udc0", udc.readText().trim())
+        assertEquals(setOf("ncm.bootleg", "function0"), links())
+    }
+
     private companion object {
         const val RUN_TIMEOUT_S = 10L
     }

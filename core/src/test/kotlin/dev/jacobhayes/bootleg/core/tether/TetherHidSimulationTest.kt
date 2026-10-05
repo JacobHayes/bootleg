@@ -13,6 +13,7 @@ import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.LinkOrder
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -127,7 +128,7 @@ class TetherHidSimulationTest {
         val result = rig.tether().set(on = true)
         assertTrue(result is TetherResult.Changed && result.active, "$result")
         val links = rig.state().configLinks
-        assertEquals(LinkOrder.PREFIX, links.keys.take(3), "the prefix went first, ahead of the HAL's links")
+        assertEquals(LinkOrder.prefix(TetherMode.RNDIS), links.keys.take(3), "the prefix went first, ahead of the HAL's links")
         assertTrue(NCM_FUNCTION in links.values)
         assertEquals(
             GadgetRig.img(1),

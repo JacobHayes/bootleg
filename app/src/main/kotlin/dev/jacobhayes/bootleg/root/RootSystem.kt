@@ -140,6 +140,21 @@ private fun fsyncDirectory(directory: File) {
 internal const val ROOT_STATE_DIRECTORY_MODE = 0b111_000_000 // 0700
 
 /**
+ * Whether a FunctionFS function (`ffs.<instance>`) has its descriptors written, so it can bind: its
+ * mount (in init's namespace, `<instance> <dir> functionfs`) shows `ep1`. Unknown (no mount) is not ready.
+ */
+fun functionFsReady(function: String): Boolean {
+    val instance = function.removePrefix("ffs.")
+    val mountPoint =
+        runCatching { File("/proc/1/mounts").readLines() }
+            .getOrDefault(emptyList())
+            .map { it.split(' ') }
+            .firstOrNull { it.size > 2 && it[0] == instance && it[2] == "functionfs" }
+            ?.get(1) ?: return false
+    return File("/proc/1/root$mountPoint/ep1").exists()
+}
+
+/**
  * The tethering transition marker next to the journal. An unreadable marker counts as unverified
  * and written now, so the gate waits its full window instead of trusting it.
  */
@@ -197,7 +212,9 @@ class FileTetherTransitionStore(
  * When the bind fails, an unserved RNDIS function of ours is the likely cause: unless some process
  * holds a hidg fd (removing a HID function under it panics the kernel once it's closed), the shell
  * unlinks all of Bootleg's functions and binds again, so ADB comes back and nothing of ours sits on
- * another function's interface number. Every write runs under `timeout`.
+ * another function's interface number. With the NCM function linked it binds as is only while every
+ * linked FunctionFS function is ready (a failed bind after f_ncm panics), else goes straight to that.
+ * Every write runs under `timeout`.
  */
 class ShellDeadMan(
     private val gadgetRoot: String = GadgetNames.GADGET_ROOT,
@@ -247,12 +264,18 @@ class ShellDeadMan(
 
         // $1 delay, $2 UDC name, $3 UDC path, $4 token file, $5 token, $6 config dir, $7 write timeout, $8
         // /proc. The token is checked again right before each change, so a disarm while this runs stops
-        // what is left. One `ls` lists every fd: a readlink per fd (~20k of them) takes minutes.
+        // what is left. One `ls` lists every fd: a readlink per fd (~20k of them) takes minutes. With the NCM
+        // function linked the first bind is tried only while every linked FunctionFS function has its ep1:
+        // a bind that fails after f_ncm has bound panics this kernel.
         const val SCRIPT =
-            "sleep \"\$1\"; token_file=\$4 token=\$5; " +
+            "sleep \"\$1\"; token_file=\$4 token=\$5 config=\$6 proc=\$8; " +
                 "ours() { [ \"\$(cat \"\$token_file\")\" = \"\$token\" ]; }; ours || exit 0; " +
                 "[ -z \"\$(timeout \"\$7\" cat \"\$3\")\" ] || exit 0; ours || exit 0; " +
-                "timeout \"\$7\" sh -c 'echo \"\$1\" > \"\$2\"' bind \"\$2\" \"\$3\" && exit 0; " +
+                "ready() { for link in \"\$config\"/*; do f=\$(readlink \"\$link\") || continue; f=\${f##*/}; case \$f in ffs.*) " +
+                "m=\$(awk -v n=\"\${f#ffs.}\" '\$1 == n && \$3 == \"functionfs\" { print \$2 }' \"\$proc/1/mounts\"); " +
+                "[ -n \"\$m\" ] && [ -e \"\$proc/1/root\$m/ep1\" ] || return 1;; esac; done; }; " +
+                "if [ ! -L \"\$6/${GadgetNames.NCM_FUNCTION}\" ] || ready; then " +
+                "timeout \"\$7\" sh -c 'echo \"\$1\" > \"\$2\"' bind \"\$2\" \"\$3\" && exit 0; fi; " +
                 "ls -l \"\$8\"/[0-9]*/fd/ 2>/dev/null | grep -q ' -> /dev/hidg' && exit 0; " +
                 "ours || exit 0; for link in \"\$6\"/*bootleg*; do [ -L \"\$link\" ] && rm \"\$link\"; done; ours || exit 0; " +
                 "timeout \"\$7\" sh -c 'echo \"\$1\" > \"\$2\"' bind \"\$2\" \"\$3\""

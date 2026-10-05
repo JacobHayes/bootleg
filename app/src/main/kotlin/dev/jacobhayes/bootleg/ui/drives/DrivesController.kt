@@ -10,7 +10,7 @@ import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.LunModes
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
-import dev.jacobhayes.bootleg.core.tether.TetherMode
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow

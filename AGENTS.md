@@ -83,6 +83,10 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
   recreate a linked `hid.*` function while any `/dev/hidg*` fd for it is open: closing that fd
   later panics the kernel. Close every hidg fd first (as root, `ls -l /proc/*/fd | grep hidg`
   must print nothing).
+- Never bind the UDC (a `UDC` write, or a USB mode change that makes the HAL bind) while
+  `ncm.bootleg` is linked ahead of a function that can fail its bind (an unready FunctionFS
+  function: a held or dead `ffs.bootleg_rndis`, ADB's while adbd reopens it): the failed bind
+  unbinds f_ncm again, and this kernel double-frees and panics (ARCHITECTURE.md, Device facts).
 - The phone is a shared resource. Serialize device access with the lock directory: take it with
   exactly `mkdir /private/tmp/claude-501/bootleg-device.lock` (retry while it exists; its `owner`
   file says who holds it), then write `pid=<pid> script=<who> started=<time>` to

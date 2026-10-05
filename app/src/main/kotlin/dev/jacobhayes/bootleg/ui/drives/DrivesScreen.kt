@@ -51,7 +51,7 @@ import dev.jacobhayes.bootleg.ImageFile
 import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.LunMode
-import dev.jacobhayes.bootleg.core.tether.TetherMode
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.ui.common.ConfirmDialog
 import dev.jacobhayes.bootleg.ui.common.EmptyState

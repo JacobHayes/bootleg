@@ -15,6 +15,7 @@ import dev.jacobhayes.bootleg.core.gadget.LinkOrder
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.RndisDaemon
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.core.gadget.UsbFunctions
 import dev.jacobhayes.bootleg.core.gadget.UsbProps
 
@@ -31,6 +32,7 @@ fun createGadgetController(
     fileSizeBytes: (path: String) -> Long?,
     rndisDaemon: RndisDaemon,
     usbFunctions: UsbFunctions?,
+    macSeed: String,
 ): DefaultGadgetController =
     DefaultGadgetController(
         fs,
@@ -44,6 +46,8 @@ fun createGadgetController(
         fileSizeBytes = fileSizeBytes,
         rndisDaemon = rndisDaemon,
         usbFunctions = usbFunctions,
+        ncmMacSeed = macSeed,
+        functionFsReady = ::functionFsReady,
     )
 
 /** Which file a path names: two hard links to one inode are the same file. */
@@ -81,7 +85,7 @@ fun canonicalizeDesired(
  */
 fun adoptableDesired(state: GadgetState): Desired? {
     // HID input can't be told from the links (the prefix keeps them linked while off): it starts off.
-    val prefix = LinkOrder.PREFIX.any { it in state.configLinks }
+    val prefix = TetherMode.entries.flatMap(LinkOrder::prefix).any { it in state.configLinks }
     val luns = if (GadgetNames.MASS_STORAGE_FUNCTION in state.configLinks) state.luns else emptyMap()
     if (luns.keys.sorted() != luns.keys.indices.toList() || luns.values.any { it.file.isEmpty() }) return null
     if (luns.isEmpty() && !prefix) return null
@@ -95,5 +99,5 @@ fun adoptableDesired(state: GadgetState): Desired? {
                 }
             SlotSpec(lun, lunState.file, mode)
         }
-    return Desired(slots = slots, prefix = true)
+    return Desired(slots = slots, prefix = true, network = LinkOrder.linkedNetwork(state.configLinks) ?: TetherMode.DEFAULT)
 }

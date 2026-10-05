@@ -270,8 +270,11 @@ class FakeHal(
 
     private fun delayIn(range: LongRange): Long = random.nextLong(range.first, range.last + 1)
 
+    /** Like the HAL's FunctionFS monitor, it binds only once every linked FunctionFS function of its own is ready. */
+    private fun ownFunctionFsReady(): Boolean = fs.linkedFunctions().none { it in fs.unreadyFunctionFs }
+
     private fun rebindIfUnbound() {
-        if (fs.udc.isNotEmpty()) return
+        if (fs.udc.isNotEmpty() || !ownFunctionFsReady()) return
         fs.asActor(FakeConfigFs.HAL) {
             try {
                 fs.write(GadgetPaths.UDC, fs.udcName)
@@ -297,7 +300,7 @@ class FakeHal(
                 fs.symlink(GadgetPaths.function("ffs.$name"), GadgetPaths.configLink("function$index"))
             }
             try {
-                fs.write(GadgetPaths.UDC, fs.udcName)
+                if (ownFunctionFsReady()) fs.write(GadgetPaths.UDC, fs.udcName)
             } catch (_: IOException) {
                 // The real HAL retries later; the controller's reconcile binds in the meantime.
             }
@@ -369,14 +372,20 @@ class RecordingDeadMan(
     }
 
     /**
-     * Runs the detached shell: bind if still unbound; if that fails (an unserved RNDIS function keeps
-     * the config unbindable) and nobody holds a hidg fd, remove all our links and bind again.
+     * Runs the detached shell: bind if still unbound (with the NCM function linked, only while every linked
+     * FunctionFS function is ready: a failed bind after f_ncm panics); if that fails or is skipped and
+     * nobody holds a hidg fd, remove all our links and bind again.
      */
     fun fire() {
         val (udc, _) = arms.lastOrNull() ?: return
         fs.asActor(FakeConfigFs.DEAD_MAN) {
             if (fs.udc.isNotEmpty()) return@asActor
             try {
+                if (GadgetNames.NCM_FUNCTION in fs.linkedFunctions() &&
+                    fs.bindWouldFail()
+                ) {
+                    throw IOException("a FunctionFS function isn't ready")
+                }
                 fs.write(GadgetPaths.UDC, udc)
             } catch (_: IOException) {
                 if (fs.list(GadgetPaths.FUNCTIONS_DIR).any { fs.hidFdHolders(it).isNotEmpty() }) return@asActor
@@ -605,6 +614,7 @@ class GadgetRig(
             fileSizeBytes = { fileSizes[it] },
             rndisDaemon = rndisDaemon,
             usbFunctions = usbFunctions,
+            functionFsReady = fs::functionFsReady,
         )
     }
 

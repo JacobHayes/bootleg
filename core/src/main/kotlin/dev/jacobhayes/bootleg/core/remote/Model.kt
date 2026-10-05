@@ -8,8 +8,8 @@ import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.LunModes
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.core.hid.HidKind
-import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName

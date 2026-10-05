@@ -13,6 +13,14 @@ class HidFdHazard(
 ) : Error(message)
 
 /**
+ * A bind that fails after f_ncm was bound: the composite unbinds it again, and this kernel's `ncm_unbind`
+ * double-frees after enough such cycles (a panic seen on the device). An Error, so nothing catches it.
+ */
+class NcmBindHazard(
+    message: String,
+) : Error(message)
+
+/**
  * In-memory configfs gadget that models the kernel behaviour Bootleg relies on: UDC bind/unbind
  * rules, mass_storage LUN attribute rules, configfs rmdir/link rules and "unlink unbinds".
  * Paths are relative to the gadget root. Mutations by [EXECUTOR] outside Bootleg's names are recorded
@@ -52,6 +60,30 @@ class FakeConfigFs(
 
     /** Makes binding fail for some link sets (link name -> target), like a function whose bind() errors. */
     var rejectBind: (Map<String, String>) -> Boolean = { false }
+
+    /** Foreign FunctionFS functions whose daemon hasn't written its descriptors (adbd reopening): a bind fails at them. */
+    val unreadyFunctionFs = mutableSetOf<String>()
+
+    /** Whether [function] is a FunctionFS function that can bind (ours is up to the RNDIS fake's [rejectBind]). */
+    fun functionFsReady(function: String): Boolean = function !in unreadyFunctionFs
+
+    /** The linked functions in link order. */
+    fun linkedFunctions(): List<String> = linkOrder().map { links().getValue(it).substringAfterLast('/') }
+
+    /**
+     * Where a bind of the current config would fail, or null if it wouldn't: the kernel binds functions in
+     * link order and stops at the first that fails, an unready FunctionFS one (ours, by [rejectBind]); a
+     * [rejectBind] that names no FunctionFS function of ours fails after all of them.
+     */
+    private fun failingIndex(linked: Map<String, String>): Int? {
+        val order = linkedFunctions()
+        val foreign = order.indexOfFirst { it in unreadyFunctionFs }.takeIf { it >= 0 }
+        val ours = if (rejectBind(linked)) order.indexOfFirst { it.startsWith("ffs.bootleg") }.takeIf { it >= 0 } ?: order.size else null
+        return listOfNotNull(foreign, ours).minOrNull()
+    }
+
+    fun bindWouldFail(): Boolean = failingIndex(links()) != null
+
     var actor: String = EXECUTOR
         private set
 
@@ -222,7 +254,7 @@ class FakeConfigFs(
         when {
             path == "UDC" -> writeUdc(value.trim())
             lun != null -> writeLun(path, lun, path.substringAfterLast('/'), value)
-            function != null && function.startsWith("hid.") -> {
+            function != null && (function.startsWith("hid.") || function.startsWith("ncm.")) -> {
                 if (isLinked(function)) throw ConfigFsException("EBUSY", "$path: function is linked")
                 node.bytes = bytes
             }
@@ -301,7 +333,14 @@ class FakeConfigFs(
         if (value != udcName) throw ConfigFsException("ENODEV", "no UDC $value")
         val linked = links()
         if (linked.isEmpty()) throw ConfigFsException("EINVAL", "config has no functions")
-        if (rejectBind(linked)) throw ConfigFsException("EINVAL", "a function failed to bind")
+        val order = linkedFunctions()
+        val failing = failingIndex(linked)
+        if (failing != null) {
+            // An unready function held the window unbindable, so the HAL couldn't race it (an NCM establishment's gate).
+            if (rejectBind(linked) && executorWindowStartUs != null) windowUnbindable = true
+            if (order.take(failing).any { it.startsWith("ncm.") }) throw NcmBindHazard("$actor's bind failed after f_ncm: $order")
+            throw ConfigFsException("ENODEV", "${order.getOrNull(failing) ?: "a function"} failed to bind")
+        }
         for (function in linked.values.map { it.substringAfterLast('/') }.filter { it.startsWith("hid.") }) {
             val reportLength = text("${GadgetPaths.function(function)}/report_length").toIntOrNull() ?: 0
             val descriptor = (nodes["${GadgetPaths.function(function)}/report_desc"] as Attr).bytes
@@ -316,6 +355,10 @@ class FakeConfigFs(
             open.forEach { function -> poisonedHidFds.getOrPut(function) { mutableListOf() } += hidFds.getValue(function) }
         }
         setText("UDC", value)
+        // f_ncm registers its netdev at the function's first bind, which resolves the ifname's %d.
+        for (ncm in linked.values.filter { it.substringAfterLast('/').startsWith("ncm.") }) {
+            setText("$ncm/ifname", text("$ncm/ifname").replace("%d", "0"))
+        }
         executorWindowStartUs?.let { startUs ->
             when {
                 actor != EXECUTOR -> bindsInExecutorWindow += actor
@@ -400,6 +443,11 @@ class FakeConfigFs(
                 attr("$path/report_length", "0")
                 attr("$path/report_desc", "")
                 attr("$path/no_out_endpoint", "0")
+            }
+            "ncm" -> {
+                attr("$path/ifname", "(unnamed net_device)")
+                attr("$path/host_addr", "")
+                attr("$path/dev_addr", "")
             }
         }
     }

@@ -5,11 +5,12 @@ package dev.jacobhayes.bootleg.core.gadget
  * [links] and [afterLinks], then [bind]. The Pixel USB HAL rebinds the UDC a few hundred ms after any
  * unbind, so this window must stay tiny, unless the config can't bind meanwhile.
  *
- * [afterLinks] ([Op.StartRndis], [Op.RelinkForeign], then [Op.ReleaseRndis]) run while a held or dead
- * RNDIS function is linked: nothing can bind such a config (ENODEV), so the window may take seconds
- * without the HAL rebinding into it.
+ * [afterLinks] ([Op.StartRndis], [Op.RelinkForeign], then [Op.ReleaseRndis] or, for the NCM gate, the
+ * RNDIS function's [Op.Unlink]) run while a held or dead RNDIS function is linked: nothing can bind
+ * such a config (ENODEV), so the window may take seconds without the HAL rebinding into it.
  *
- * [unlinkedOps] is empty unless nothing at all is linked after [unlinks]. The kernel refuses to bind a
+ * [unlinkedOps] is empty unless nothing at all is linked after [unlinks], except an establishment's
+ * [Op.StartRndis] of the just unlinked RNDIS function. The kernel refuses to bind a
  * config without functions (EINVAL), so with nothing to keep bound the reconfiguration that normally
  * runs bound (prepare, or cleanup when nothing gets relinked) runs here instead, on unlinked functions,
  * at most [GadgetPlanner.UNLINKED_OP_COUNT_MAX] ops. The host sees no device meanwhile, and the HAL's
@@ -78,7 +79,11 @@ object HidFunctionSpec {
  */
 class GadgetPlanner(
     private val hidDescriptors: HidDescriptorProvider,
+    /** Seeds the NCM function's MAC addresses ([NcmAddresses]): the phone's serial. */
+    ncmMacSeed: String = "bootleg",
 ) {
+    private val ncmAddresses = NcmAddresses.of(ncmMacSeed)
+
     fun plan(
         current: GadgetState,
         desired: Desired,
@@ -101,7 +106,19 @@ class GadgetPlanner(
         val plan =
             when {
                 !target.prefix -> ordinaryPlan(current, target, udc, forceReenumerate)
-                !LinkOrder.prefixFirst(current.configLinks) -> Plan(listOf(establishment(current, target, udc)))
+                // NCM: a root process died before unlinking an establishment's unserved gate: finish it.
+                target.network == TetherMode.NCM && current.rndis != RndisState.READY && gateAheadOfPrefix(current) ->
+                    Plan(
+                        listOf(
+                            Stage(
+                                emptyList(),
+                                Switch(emptyList(), emptyList(), bind(udc), afterLinks = listOfNotNull(roundTrip, gateUnlink)),
+                                removal(current, GadgetNames.RNDIS_FUNCTION),
+                            ),
+                        ),
+                    )
+                !LinkOrder.prefixFirst(current.configLinks, target.network) -> Plan(listOf(establishment(current, target, udc)))
+                target.network == TetherMode.NCM -> ordinaryPlan(current, target, udc, forceReenumerate)
                 // A root process died mid-establishment with the links in place: finish it.
                 current.rndis == RndisState.HELD -> switchOnly(udc, listOfNotNull(roundTrip, Op.ReleaseRndis))
                 current.rndis != RndisState.READY -> {
@@ -121,6 +138,12 @@ class GadgetPlanner(
         return plan
     }
 
+    /** The NCM gate is the first link and the NCM prefix follows it, ahead of everything else. */
+    private fun gateAheadOfPrefix(state: GadgetState): Boolean {
+        val gate = GadgetNames.RNDIS_FUNCTION
+        return state.configLinks.keys.firstOrNull() == gate && LinkOrder.prefixFirst(state.configLinks - gate, TetherMode.NCM)
+    }
+
     /** A switch that only runs [afterLinks] (which keep the config unbindable until the last), then binds. */
     private fun switchOnly(
         udc: String,
@@ -130,10 +153,13 @@ class GadgetPlanner(
     /**
      * Links the prefix ahead of every foreign link. Configfs only appends, so: unlink ours, link the
      * prefix with the RNDIS function held (the config can't bind), have the HAL relink its functions
-     * (they land after ours), release the daemon, bind. Only a fresh daemon starts held: a serving or
-     * dead one is replaced by [Op.StartRndis], while bound if its function is unlinked, else right after
-     * the relink (the old one's function is bindable only for the relink itself, like any switch). Mass
-     * storage comes back in the next plan, after the HAL's links.
+     * (they land after ours), release the daemon, bind. In NCM mode the held RNDIS function is a gate
+     * linked ahead of the prefix and unlinked instead of released (then removed), and it is left out
+     * when there is no round trip to hide; a gate still linked means the prefix isn't first, so a
+     * crashed establishment is simply done again. Only a fresh daemon starts held: a serving or dead one is replaced
+     * by [Op.StartRndis], while bound if its function is unlinked, else inside the switch once its link is
+     * gone and before anything is relinked (no bindable config ever has it next to the new links). Mass storage comes back
+     * in the next plan, after the HAL's links.
      */
     private fun establishment(
         state: GadgetState,
@@ -141,33 +167,42 @@ class GadgetPlanner(
         udc: String,
     ): Stage {
         val rndis = GadgetNames.RNDIS_FUNCTION
+        val roundTrip = target.usbRoundTrip || state.configLinks.keys.any { !GadgetPaths.isOwnedName(it) }
+        val held = target.network == TetherMode.RNDIS || roundTrip
         val prepare = mutableListOf<Op>()
-        val restartLinked = state.rndis != RndisState.HELD && rndis in state.configLinks.values
-        if (rndis !in state.functions) prepare += Op.Mkdir(GadgetPaths.function(rndis))
-        if (state.rndis != RndisState.HELD && !restartLinked) prepare += Op.StartRndis
-        for (function in LinkOrder.PREFIX - rndis) {
-            // An unlinked HID function may be half-written (crash before link): rebuilt.
+        val restartLinked = held && state.rndis != RndisState.HELD && rndis in state.configLinks.values
+        if (held && rndis !in state.functions) prepare += Op.Mkdir(GadgetPaths.function(rndis))
+        if (held && state.rndis != RndisState.HELD && !restartLinked) prepare += Op.StartRndis
+        val prefix = LinkOrder.prefix(target.network)
+        for (function in prefix - rndis) {
+            // An unlinked HID or NCM function may be half-written (crash before link): rebuilt.
             if (function in state.configLinks.values) continue
             if (function in state.functions) prepare += Op.Rmdir(GadgetPaths.function(function))
             prepare += Op.Mkdir(GadgetPaths.function(function))
-            planHidAttributes(function, prepare)
+            planAttributes(function, prepare)
         }
         val unlinks =
             state.configLinks.keys
                 .filter(GadgetPaths::isOwnedName)
                 .map { Op.Unlink(GadgetPaths.configLink(it)) }
-        val links = LinkOrder.PREFIX.map { Op.Symlink(GadgetPaths.function(it), GadgetPaths.configLink(it)) }
-        val foreignLinked = state.configLinks.keys.any { !GadgetPaths.isOwnedName(it) }
+        val gate = held && target.network == TetherMode.NCM
+        // The gate goes first: a bind attempt (the HAL's) then fails before f_ncm is bound and unbound again,
+        // which this kernel can't survive many times. Unlinking it leaves the prefix first.
+        val links = (listOfNotNull(rndis.takeIf { gate }) + prefix).map { Op.Symlink(GadgetPaths.function(it), GadgetPaths.configLink(it)) }
         val afterLinks =
             listOfNotNull(
-                Op.StartRndis.takeIf { restartLinked },
-                Op.RelinkForeign.takeIf { foreignLinked || target.usbRoundTrip },
-                Op.ReleaseRndis,
+                Op.RelinkForeign.takeIf { roundTrip },
+                if (gate) gateUnlink else Op.ReleaseRndis.takeIf { held },
             )
-        // Mass storage is linked again by the next plan; anything else of ours that isn't wanted goes.
-        val unwanted = state.functions.filter { GadgetPaths.isOwnedName(it) && it !in target.functions }
-        val cleanup = unwanted.sorted().flatMap { removal(state, it) }
-        return withinWindowIfUnbindable(state, Stage(prepare, Switch(unlinks, links, bind(udc), afterLinks = afterLinks), cleanup))
+        // Mass storage is linked again by the next plan; anything else of ours that isn't wanted goes, the gate too.
+        val unwanted =
+            state.functions.filter { GadgetPaths.isOwnedName(it) && it !in target.functions } + listOfNotNull(rndis.takeIf { gate })
+        val cleanup = unwanted.toSortedSet().flatMap { removal(state, it) }
+        // A linked serving or dead daemon is replaced once its link is gone and before anything is linked
+        // again, so no config the HAL could bind meanwhile has it next to the new links.
+        val restart = listOfNotNull(Op.StartRndis.takeIf { restartLinked })
+        val switch = Switch(unlinks, links, bind(udc), unlinkedOps = restart, afterLinks = afterLinks)
+        return withinWindowIfUnbindable(state, Stage(prepare, switch, cleanup))
     }
 
     /** Ops that remove an unlinked owned [function]: its LUNs, its daemon, then the function. */
@@ -236,7 +271,11 @@ class GadgetPlanner(
                 bindableAtStart && GadgetPaths.functionOf(GadgetPaths.touchedPaths(op).single()) !in linkedAtStart
             }
         val relinks = switch.links.isNotEmpty()
-        val window = switch.copy(unlinkedOps = moved + if (relinks) emptyList() else stage.cleanup, bind = switch.bind.takeIf { relinks })
+        val window =
+            switch.copy(
+                unlinkedOps = switch.unlinkedOps + moved + if (relinks) emptyList() else stage.cleanup,
+                bind = switch.bind.takeIf { relinks },
+            )
         return Stage(
             prepare = staysBound,
             // Unbound with nothing linked and nothing to change: there is no switch to make.
@@ -309,7 +348,7 @@ class GadgetPlanner(
                 planLuns(state, target, massStorageKept = massStorage in ownedFunctions, prepare)
             }
         }
-        created.forEach { planHidAttributes(it, prepare) }
+        created.forEach { planAttributes(it, prepare) }
 
         val switch =
             if (wrongLinks.isNotEmpty() || missingLinks.isNotEmpty() || forceReenumerate || state.udc.isEmpty()) {
@@ -373,13 +412,26 @@ class GadgetPlanner(
             stage.prepare.forEach(::bound)
             stage.switch?.let { switch ->
                 state = GadgetSimulation.apply(state, listOf(Op.Unbind) + switch.unlinks)
-                check(switch.unlinkedOps.isEmpty() || state.configLinks.isEmpty()) { "window ops while something is linked: $switch" }
+                // A daemon restart is the one window op allowed with foreign links left: it only replaces our unlinked function's daemon.
+                check(
+                    switch.unlinkedOps.all { it == Op.StartRndis } || state.configLinks.isEmpty(),
+                ) { "window ops while something is linked: $switch" }
                 check(switch.unlinkedOps.size <= UNLINKED_OP_COUNT_MAX) { "${switch.unlinkedOps.size} ops inside one window" }
                 switch.unlinkedOps.forEach(::reconfigure)
                 state = GadgetSimulation.apply(state, switch.links)
+                // An unserved RNDIS function after f_ncm would fail binds after f_ncm bound, which this kernel can't survive.
+                val owned = LinkOrder.owned(state.configLinks)
                 check(
-                    switch.afterLinks.isEmpty() || switch.afterLinks.last() is Op.ReleaseRndis,
-                ) { "a release must end the window: $switch" }
+                    GadgetNames.NCM_FUNCTION !in owned ||
+                        owned.indexOf(GadgetNames.RNDIS_FUNCTION) < owned.indexOf(GadgetNames.NCM_FUNCTION),
+                ) { "the RNDIS function linked after the NCM function: $owned" }
+                // Both network functions linked must never be a config anyone could bind: the gate is held first.
+                check(
+                    GadgetNames.NCM_FUNCTION !in owned || GadgetNames.RNDIS_FUNCTION !in owned || state.rndis != RndisState.READY,
+                ) { "both network functions linked with the RNDIS function serving: $owned" }
+                check(
+                    switch.afterLinks.isEmpty() || switch.afterLinks.last().let { it is Op.ReleaseRndis || it == gateUnlink },
+                ) { "a release or the gate's unlink must end the window: $switch" }
                 switch.afterLinks.forEach(::unbindable)
                 check((switch.bind != null) == state.configLinks.isNotEmpty()) { "a switch binds iff something is linked: $switch" }
                 // Every configuration the host can see keeps each function on its interface number.
@@ -387,7 +439,7 @@ class GadgetPlanner(
                 if (switch.bind != null) {
                     val ours = LinkOrder.owned(state.configLinks)
                     check(
-                        !target.prefix || ours.isEmpty() || LinkOrder.prefixFirst(state.configLinks),
+                        !target.prefix || ours.isEmpty() || LinkOrder.prefixFirst(state.configLinks, target.network),
                     ) { "the prefix isn't first at a bind: $state" }
                     check(
                         GadgetNames.RNDIS_FUNCTION !in ours || state.rndis == RndisState.READY,
@@ -481,7 +533,8 @@ class GadgetPlanner(
         target: GadgetTarget,
     ): Boolean = target.lunMarker != null && lun.inquiryString != null && lun.inquiryString != target.lunMarker
 
-    private fun planHidAttributes(
+    /** Attributes of a fresh (never bound) HID or NCM function; the kernel takes them only while it is unlinked. */
+    private fun planAttributes(
         function: String,
         ops: MutableList<Op>,
     ) {
@@ -491,6 +544,13 @@ class GadgetPlanner(
                     Triple(HidFunctionSpec.KEYBOARD_PROTOCOL, HidFunctionSpec.KEYBOARD_REPORT_LENGTH_BYTES, hidDescriptors.keyboard())
                 GadgetNames.HID_MOUSE_FUNCTION ->
                     Triple(HidFunctionSpec.MOUSE_PROTOCOL, HidFunctionSpec.MOUSE_REPORT_LENGTH_BYTES, hidDescriptors.mouse())
+                GadgetNames.NCM_FUNCTION -> {
+                    val (hostAddress, deviceAddress) = ncmAddresses
+                    ops += Op.Write(GadgetPaths.functionAttribute(function, "ifname"), GadgetNames.NCM_INTERFACE_TEMPLATE)
+                    ops += Op.Write(GadgetPaths.functionAttribute(function, "host_addr"), hostAddress)
+                    ops += Op.Write(GadgetPaths.functionAttribute(function, "dev_addr"), deviceAddress)
+                    return
+                }
                 else -> return
             }
         require(descriptor.isNotEmpty()) { "$function: empty HID report descriptor" }
@@ -503,10 +563,14 @@ class GadgetPlanner(
     companion object {
         /**
          * Ops one window may run while nothing is linked. Worst case: 7 LUN mkdirs or rmdirs, 7 writes for
-         * each of 8 LUNs (file, ro, cdrom, removable, nofua, inquiry_string, file), the function mkdir and 2
-         * rebuilt HID functions (rmdir, mkdir, 4 attributes each): 76; or a cleanup of 7 LUNs and 3 functions.
+         * each of 8 LUNs (file, ro, cdrom, removable, nofua, inquiry_string, file), the function mkdir, 2
+         * rebuilt HID functions (rmdir, mkdir, 4 attributes each) and a rebuilt NCM function (rmdir, mkdir,
+         * 3 attributes): 81; or a cleanup of 7 LUNs and 4 functions.
          */
-        const val UNLINKED_OP_COUNT_MAX = 80
+        const val UNLINKED_OP_COUNT_MAX = 88
+
+        /** Ends an NCM establishment's window: the RNDIS gate goes, and the config can bind. */
+        val gateUnlink = Op.Unlink(GadgetPaths.configLink(GadgetNames.RNDIS_FUNCTION))
 
         /** Kernel defaults for a freshly created LUN. */
         val DEFAULT_LUN = LunState(file = "", ro = false, cdrom = false, removable = true, nofua = false, inquiryString = "")
@@ -524,7 +588,15 @@ object GadgetSimulation {
     ): GadgetState =
         when (op) {
             Op.Unbind -> state.copy(udc = "")
-            is Op.Bind -> state.copy(udc = op.udc)
+            // The NCM function registers its netdev at its first bind, which resolves the ifname's %d.
+            is Op.Bind ->
+                state.copy(
+                    udc = op.udc,
+                    ncmInterface =
+                        state.ncmInterface?.let {
+                            if (GadgetNames.NCM_FUNCTION in state.configLinks.values) it.replace("%d", "0") else it
+                        },
+                )
             is Op.Mkdir -> {
                 val lun = GadgetPaths.lunOf(op.path)
                 val function = functionName(op.path)
@@ -532,6 +604,8 @@ object GadgetSimulation {
                     lun != null -> state.copy(luns = (state.luns + (lun to GadgetPlanner.DEFAULT_LUN)).toSortedMap())
                     function == GadgetNames.MASS_STORAGE_FUNCTION ->
                         state.copy(functions = state.functions + function, luns = sortedMapOf(0 to GadgetPlanner.DEFAULT_LUN))
+                    // Its ifname is unknown until written; the planner writes it right away.
+                    function == GadgetNames.NCM_FUNCTION -> state.copy(functions = state.functions + function, ncmInterface = "")
                     function != null -> state.copy(functions = state.functions + function)
                     else -> state
                 }
@@ -543,6 +617,7 @@ object GadgetSimulation {
                     lun != null -> state.copy(luns = state.luns - lun)
                     function == GadgetNames.MASS_STORAGE_FUNCTION -> state.copy(functions = state.functions - function, luns = emptyMap())
                     function == GadgetNames.RNDIS_FUNCTION -> state.copy(functions = state.functions - function, rndis = RndisState.ABSENT)
+                    function == GadgetNames.NCM_FUNCTION -> state.copy(functions = state.functions - function, ncmInterface = null)
                     function != null -> state.copy(functions = state.functions - function)
                     else -> state
                 }
@@ -552,6 +627,7 @@ object GadgetSimulation {
                 val lunState = lun?.let { state.luns[it] }
                 when {
                     op.path == GadgetPaths.UDC -> state.copy(udc = op.value)
+                    op.path == GadgetPaths.functionAttribute(GadgetNames.NCM_FUNCTION, "ifname") -> state.copy(ncmInterface = op.value)
                     lun == null || lunState == null -> state
                     else -> state.copy(luns = state.luns + (lun to applyLunWrite(lunState, op.path.substringAfterLast('/'), op.value)))
                 }

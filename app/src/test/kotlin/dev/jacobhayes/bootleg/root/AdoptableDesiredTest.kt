@@ -7,6 +7,7 @@ import dev.jacobhayes.bootleg.core.gadget.LinkOrder
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.LunState
 import dev.jacobhayes.bootleg.core.gadget.SlotSpec
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
@@ -21,22 +22,24 @@ class AdoptableDesiredTest {
     ) = GadgetState("udc", links.toSet(), links.associateWith { it }, luns)
 
     @Test
-    fun `a linked prefix adopts as the idle prefix, HID off`() {
-        assertEquals(Desired(prefix = true), adoptableDesired(state(LinkOrder.PREFIX, emptyMap())))
+    fun `a linked prefix adopts as the idle prefix with its network function, HID off`() {
+        for (network in TetherMode.entries) {
+            assertEquals(Desired(prefix = true, network = network), adoptableDesired(state(LinkOrder.prefix(network), emptyMap())))
+        }
     }
 
     @Test
     fun `nothing of Bootleg's, or an empty LUN, can't be adopted`() {
         assertNull(adoptableDesired(state(emptyList(), emptyMap())))
-        assertNull(adoptableDesired(state(LinkOrder.PREFIX + ms, mapOf(0 to empty))))
+        assertNull(adoptableDesired(state(LinkOrder.prefix(TetherMode.RNDIS) + ms, mapOf(0 to empty))))
     }
 
     @Test
     fun `exported LUNs adopt as slots behind the prefix`() {
         val file = "/data/media/0/bootleg/a.img"
         assertEquals(
-            Desired(listOf(SlotSpec(0, file, LunMode.DISK_RO)), prefix = true),
-            adoptableDesired(state(LinkOrder.PREFIX + ms, mapOf(0 to empty.copy(file = file)))),
+            Desired(listOf(SlotSpec(0, file, LunMode.DISK_RO)), prefix = true, network = TetherMode.RNDIS),
+            adoptableDesired(state(LinkOrder.prefix(TetherMode.RNDIS) + ms, mapOf(0 to empty.copy(file = file)))),
         )
     }
 }

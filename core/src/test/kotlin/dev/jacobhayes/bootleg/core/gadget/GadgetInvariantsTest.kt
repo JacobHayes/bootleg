@@ -12,11 +12,11 @@ import org.junit.jupiter.api.assertThrows
 class GadgetInvariantsTest {
     private val roots = GadgetInvariants.ALLOWED_ROOTS_DEFAULT
     private val lun = LunState(img(1), ro = false, cdrom = false, removable = true, nofua = false)
-    private val prefix = LinkOrder.PREFIX.associateWith { it }
+    private val prefix = LinkOrder.prefix(TetherMode.RNDIS).associateWith { it }
     private val good =
         GadgetState(
             udc = FakeConfigFs.PIXEL_UDC,
-            functions = setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION) + LinkOrder.PREFIX,
+            functions = setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION) + LinkOrder.prefix(TetherMode.RNDIS),
             configLinks = prefix + mapOf("function0" to "ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION to GadgetNames.MASS_STORAGE_FUNCTION),
             luns = mapOf(0 to lun),
             rndis = RndisState.READY,

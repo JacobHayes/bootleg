@@ -21,8 +21,8 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetState
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.core.hid.HidKind
-import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.hid.HidEndpoint
@@ -122,9 +122,11 @@ class BootlegBackendImpl(
         imagesFlow.value = listed.map { it.toImageFile() }
     }
 
+    /** The tethering mode goes along: a first use sets the prefix up with it (root keeps an established one). */
     override suspend fun apply(desired: Desired): ApplyResult =
         userGadgetCall {
-            it.apply(BootlegJson.encodeToString(desired), prefs.reconnectAfterDiskChange.value)
+            val withNetwork = desired.copy(network = prefs.usbTetherMode.value)
+            it.apply(BootlegJson.encodeToString(withNetwork), prefs.reconnectAfterDiskChange.value)
         }
 
     override suspend fun eject(

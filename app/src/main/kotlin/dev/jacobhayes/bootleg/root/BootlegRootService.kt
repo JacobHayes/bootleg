@@ -10,11 +10,11 @@ import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
 import dev.jacobhayes.bootleg.core.gadget.Desired
 import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
 import dev.jacobhayes.bootleg.core.gadget.RndisState
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.core.gadget.TransitionPhase
 import dev.jacobhayes.bootleg.core.hid.HidDescriptors
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.tether.TetherLimits
-import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.UsbTetherController
 import dev.jacobhayes.bootleg.download.BackgroundJobScheduling
 import java.io.File
@@ -77,11 +77,12 @@ class BootlegRootService : RootService() {
 
     override fun onCreate() {
         super.onCreate()
+        // The network adapters' MAC addresses derive from it: a computer keeps one adapter and lease for the phone.
+        val macSeed = RootCommands.runChecked(listOf("getprop", "ro.serialno")).trim().ifEmpty { "unknown" }
         rndisDaemons =
             RndisDaemons(
                 apkBinary = File(applicationInfo.nativeLibraryDir, RndisDaemons.APK_BINARY_NAME),
-                // The adapters' MAC addresses derive from it: a computer keeps one adapter and lease for the phone.
-                macSeed = RootCommands.runChecked(listOf("getprop", "ro.serialno")).trim().ifEmpty { "unknown" },
+                macSeed = macSeed,
                 clock = clock,
                 onExit = ::onRndisDaemonExit,
             )
@@ -102,6 +103,7 @@ class BootlegRootService : RootService() {
                 rndisDaemon = rndisDaemons,
                 // Without it the prefix is refused (and reported), never set up blind.
                 usbFunctions = runCatching { RootUsbFunctions(this) }.onFailure { Log.w(TAG, "no UsbManager functions", it) }.getOrNull(),
+                macSeed = macSeed,
             )
         runCatching { images.sweepStaleLoopDevices() }.onFailure { Log.w(TAG, "loop sweep failed", it) }
         // Without a journal, reconcile would tear down whatever Bootleg exported before; adopt it instead.

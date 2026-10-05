@@ -42,7 +42,7 @@ import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.BuildConfig
 import dev.jacobhayes.bootleg.Prefs
 import dev.jacobhayes.bootleg.RootStatus
-import dev.jacobhayes.bootleg.core.tether.TetherMode
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.ui.drives.DrivesController
 
 private const val REPOSITORY_URL = "https://github.com/JacobHayes/bootleg"

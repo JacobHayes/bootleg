@@ -13,7 +13,7 @@ import java.io.IOException
 class PrefixControllerTest {
     private val udc = FakeConfigFs.PIXEL_UDC
     private val disk = Desired(listOf(SlotSpec(0, img(1), LunMode.DISK_RO)))
-    private val prefixThenAdb = LinkOrder.PREFIX + "function0"
+    private val prefixThenAdb = LinkOrder.prefix(TetherMode.RNDIS) + "function0"
 
     private fun GadgetRig.links() = state().configLinks.keys.toList()
 
@@ -21,22 +21,48 @@ class PrefixControllerTest {
 
     @Test
     fun `first use links the prefix ahead of ADB through a USB mode round trip the host never sees`() {
-        for ((startMode, through) in listOf(0L to UsbFunctions.MTP, UsbFunctions.MTP to UsbFunctions.PTP)) {
-            for (halDelayMs in listOf(0L, 400L)) {
-                val rig = GadgetRig()
-                if (startMode != 0L) rig.hal.setFunctions("mtp,adb")
-                rig.clock.sleepMs(HAL_SETTLE_MS)
-                rig.usbFunctions.halDelayMs = halDelayMs
-                assertInstanceOf(ApplyResult.Applied::class.java, rig.controller().apply(Desired(prefix = true)))
-                assertEquals(LinkOrder.PREFIX, rig.links().take(3))
-                assertEquals(listOf(through, startMode), rig.usbFunctions.sets, "through another mode and back")
-                assertNull(rig.journal().usbFunctionsToRestore)
-                assertEquals(listOf("start", "release"), rig.rndisDaemon.events)
-                // The HAL tried to bind after each of its switches; the held function refused both.
-                assertEquals(emptyList<String>(), rig.fs.bindsInExecutorWindow)
-                assertTrue(rig.deadMan.disarmCount > 0, "the watchdog is disarmed once the transition is over")
+        for (network in TetherMode.entries) {
+            for ((startMode, through) in listOf(0L to UsbFunctions.MTP, UsbFunctions.MTP to UsbFunctions.PTP)) {
+                for (halDelayMs in listOf(0L, 400L)) {
+                    val rig = GadgetRig()
+                    if (startMode != 0L) rig.hal.setFunctions("mtp,adb")
+                    rig.clock.sleepMs(HAL_SETTLE_MS)
+                    rig.usbFunctions.halDelayMs = halDelayMs
+                    assertInstanceOf(ApplyResult.Applied::class.java, rig.controller().apply(Desired(prefix = true, network = network)))
+                    assertEquals(LinkOrder.prefix(network), rig.links().take(3))
+                    assertEquals(listOf(through, startMode), rig.usbFunctions.sets, "through another mode and back")
+                    assertNull(rig.journal().usbFunctionsToRestore)
+                    // In NCM mode the held RNDIS function is a gate, removed once the HAL has relinked.
+                    assertEquals(listOf("start", if (network == TetherMode.RNDIS) "release" else "stop"), rig.rndisDaemon.events)
+                    // The HAL tried to bind after each of its switches; the held function refused both.
+                    assertEquals(emptyList<String>(), rig.fs.bindsInExecutorWindow)
+                    assertTrue(rig.deadMan.disarmCount > 0, "the watchdog is disarmed once the transition is over")
+                }
             }
         }
+    }
+
+    @Test
+    fun `a mode change re-establishes the prefix, is refused before anything changes while a disk has media, and apply never makes one`() {
+        val rig = GadgetRig()
+        val controller = rig.controller()
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(disk))
+        val sets = rig.usbFunctions.sets.size
+        val refused = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.establishPrefix(TetherMode.NCM))
+        assertTrue(refused.reason.contains(DefaultGadgetController.PREFIX_DISKS_EXPOSED_REASON), refused.reason)
+        assertEquals(refused.reason, controller.establishmentRefusal(TetherMode.NCM))
+        assertEquals(TetherMode.RNDIS, rig.journal().desired.network, "the old network function is still wanted")
+        assertEquals(sets, rig.usbFunctions.sets.size, "nothing re-plugged")
+        assertEquals(LinkOrder.prefix(TetherMode.RNDIS), rig.links().take(3))
+        controller.eject(0, force = false)
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.establishPrefix(TetherMode.NCM))
+        assertEquals(LinkOrder.prefix(TetherMode.NCM) + "function0", rig.links())
+        assertFalse(GadgetNames.RNDIS_FUNCTION in rig.state().functions, "the old network function is gone")
+        assertEquals(TetherMode.NCM, rig.journal().desired.network)
+        assertNull(controller.establishPrefix(TetherMode.NCM), "already in place")
+        // Disks and HID keep the network function they find.
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(disk.copy(network = TetherMode.RNDIS)))
+        assertEquals(LinkOrder.prefix(TetherMode.NCM) + "function0" + GadgetNames.MASS_STORAGE_FUNCTION, rig.links())
     }
 
     @Test
@@ -83,6 +109,30 @@ class PrefixControllerTest {
     }
 
     @Test
+    fun `with the NCM function linked no bind fails after it, since binds wait for FunctionFS, and the dead-man unlinks ours first`() {
+        val rig = GadgetRig()
+        val controller = rig.controller()
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(Desired(prefix = true, network = TetherMode.NCM)))
+        // adbd reopens its function around our re-plug: the bind waits for it (a failed one would throw NcmBindHazard).
+        rig.fs.unreadyFunctionFs += "ffs.adb"
+        rig.clock.schedule(ADB_REOPEN_MS) { rig.fs.unreadyFunctionFs -= "ffs.adb" }
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(disk))
+        // It never comes back: nothing binds, and once it does, reconcile finishes.
+        rig.fs.unreadyFunctionFs += "ffs.adb"
+        assertFalse(controller.apply(disk.copy(slots = disk.slots.map { it.copy(mode = LunMode.CDROM) })) is ApplyResult.Applied)
+        rig.fs.unreadyFunctionFs -= "ffs.adb"
+        rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)
+        assertFalse(rig.controller().reconcile() is ApplyResult.Failed)
+        // A root process died with the gadget unbound: the dead-man never tries a bind with f_ncm linked.
+        rig.hal.rebindDelayMs = null
+        rig.fs.write(GadgetPaths.UDC, "")
+        rig.deadMan.arm(udc, GadgetLimits.DEAD_MAN_REBIND_DELAY_S)
+        rig.deadMan.fire()
+        assertEquals(udc, rig.fs.udc, "ADB is back")
+        assertEquals(listOf("function0"), rig.links())
+    }
+
+    @Test
     fun `a failed establishment gives Android its mode back, brings ADB back, and waits for the next apply`() {
         val rig = GadgetRig()
         rig.usbFunctions.halDelayMs = null
@@ -100,7 +150,7 @@ class PrefixControllerTest {
         assertEquals(sets, rig.usbFunctions.sets.size, "reconcile doesn't re-plug USB again")
         rig.usbFunctions.halDelayMs = 0
         assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(Desired(prefix = true)))
-        assertEquals(LinkOrder.PREFIX, rig.links().take(3))
+        assertEquals(LinkOrder.prefix(TetherMode.RNDIS), rig.links().take(3))
     }
 
     @Test
@@ -153,7 +203,7 @@ class PrefixControllerTest {
             rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)
             assertInstanceOf(ApplyResult.Applied::class.java, controller.reconcile())
             assertEquals(RndisState.READY, rig.state().rndis)
-            assertEquals(LinkOrder.PREFIX, rig.links().take(3), "restarted in place: the prefix kept its place")
+            assertEquals(LinkOrder.prefix(TetherMode.RNDIS), rig.links().take(3), "restarted in place: the prefix kept its place")
             // It dies again right away: left dead and reported until the interval has passed.
             rig.rndisDaemon.die()
             rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)
@@ -202,5 +252,6 @@ class PrefixControllerTest {
 
     private companion object {
         const val HAL_SETTLE_MS = 2_000L
+        const val ADB_REOPEN_MS = 500L
     }
 }

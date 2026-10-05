@@ -12,8 +12,8 @@ import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.LunState
 import dev.jacobhayes.bootleg.core.gadget.RndisState
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.core.hid.HidKind
-import dev.jacobhayes.bootleg.core.tether.TetherMode
 import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.hid.HidEndpoint
@@ -180,14 +180,14 @@ class FakeBootlegBackend(
                         nofua = false,
                     )
             }
-        val prefix = if (journal.desired.wantsPrefix) LinkOrder.PREFIX else emptyList()
+        val prefix = if (journal.desired.wantsPrefix) LinkOrder.prefix(journal.desired.network) else emptyList()
         val functions = (if (luns.isEmpty()) setOf("ffs.adb") else setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION)) + prefix
         return GadgetState(
             udc = FAKE_UDC,
             functions = functions,
             configLinks = prefix.associateWith { it },
             luns = luns,
-            rndis = if (prefix.isEmpty()) RndisState.ABSENT else RndisState.READY,
+            rndis = if (GadgetNames.RNDIS_FUNCTION in prefix) RndisState.READY else RndisState.ABSENT,
         )
     }
 
