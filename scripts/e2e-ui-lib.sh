@@ -467,7 +467,8 @@ drives_off() {
 
 # --- Mac -------------------------------------------------------------------------------------------
 
-mac_volume_present() { [[ -d /Volumes/$1 ]]; }
+# The mount point shows up a moment before diskutil can resolve it; checks right after need both.
+mac_volume_present() { [[ -d /Volumes/$1 ]] && diskutil info "/Volumes/$1" >/dev/null 2>&1; }
 mac_volume_absent() { [[ ! -d /Volumes/$1 ]]; }
 
 # mac_disk_of VOLUME: prints diskN for a mounted volume.
