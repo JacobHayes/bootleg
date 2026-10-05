@@ -3,7 +3,7 @@
 # as USB host. Each test checks one behaviour, runs in its own subshell and puts back what it
 # changed, so any selection runs alone or in any order. One setup per run: device lock, adb
 # serials, the resident uiautomator dump server; shared fixtures (netboot.xyz.iso, a FAT blank)
-# are made on first use.
+# are made on first use and kept on the phone for later runs.
 #
 # Usage: scripts/e2e-ui.sh [--list] [--install] [TEST...]
 #   TEST       a test name (drives.iso-cdrom), an area (drives) or a glob ('blank.*', '*eject*').
@@ -123,7 +123,7 @@ TEARDOWN_PROBE_TIMEOUT_S=10
 UI_SERVER_BUILD_TIMEOUT_S=120
 
 suite_finish() {
-    local status=$? fixture
+    local status=$?
     trap - EXIT
     # Teardown is bounded (a quick probe, then bounded adb calls): it finishes, then frees the phone.
     trap '' INT TERM HUP
@@ -132,16 +132,10 @@ suite_finish() {
     # A transport that doesn't answer a quick probe would make every teardown call wait out its
     # own bound: skip the phone side then.
     if [[ -n ${WIFI_SERIAL:-} ]] && ! UI_ADB_CALL_TIMEOUT_S=$TEARDOWN_PROBE_TIMEOUT_S wifi_adb_ready; then
-        log "FAIL wireless adb $WIFI_SERIAL doesn't answer; skipped the phone teardown (fixtures, the dump helper)"
+        log "FAIL wireless adb $WIFI_SERIAL doesn't answer; skipped the phone teardown (the dump helper)"
         suite_status=1
     elif [[ -n ${WIFI_SERIAL:-} ]]; then
         use_transport wifi
-        for fixture in "$RUN_DIR"/created-*; do
-            [[ -e $fixture ]] || continue
-            fixture=${fixture##*/created-}
-            log "removing fixture $fixture"
-            (launch_app && delete_from_library "$fixture") || { log "FAIL could not delete fixture $fixture"; suite_status=1; }
-        done
         ui_server_stop
         [[ -z ${UI_PORT_USB:-} ]] || adb -s "$USB_SERIAL" forward --remove "tcp:$UI_PORT_USB" >/dev/null 2>&1 || true
     fi

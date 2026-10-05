@@ -65,7 +65,8 @@ expose_two() {
     need_fat_fixture
     add_slot "$ISO"
     add_slot "$FAT_FIXTURE"
-    check "FAT slot defaults to Auto · Disk (read-only)" has_text "Auto · Disk (read-only)"
+    # The kept fixture must never be written: stop before applying if it isn't read-only.
+    require "FAT slot defaults to Auto · Disk (read-only)" has_text "Auto · Disk (read-only)"
     apply_drives
     require "Mac mounts $ISO_VOLUME" wait_until "$MOUNT_WAIT_S" mac_volume_present "$ISO_VOLUME"
     require "Mac mounts $FAT_VOLUME" wait_until "$MOUNT_WAIT_S" mac_volume_present "$FAT_VOLUME"

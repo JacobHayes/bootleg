@@ -494,7 +494,7 @@ host_hid_rows() {
 
 gadget_vendor_id() { root 'cat /config/usb_gadget/g1/idVendor' | tr 'A-F' 'a-f' | sed 's/^0x0*/0x/'; }
 
-# --- fixtures shared by several tests (created once per run, removed by the runner) ------------------
+# --- fixtures shared by several tests (made on first use, kept on the phone for later runs) ---------
 
 # shellcheck disable=SC2034 # used by the tests
 ISO=netboot.xyz.iso ISO_VOLUME=iPXE FAT_FIXTURE=e2e-drives-fat.img FAT_VOLUME=BOOTLEG
@@ -507,13 +507,27 @@ need_iso() {
     require "fixture $ISO downloaded" wait_until "$CATALOG_DOWNLOAD_WAIT_S" download_verified "$ISO"
 }
 
-# need_fat_fixture: a 64 MB FAT32 blank in the Library, created through the UI; the runner deletes
-# it after the last test.
+FIXTURE_HASH_DIR=/data/local/tmp/bootleg-e2e-fixtures
+
+fixture_sha() { root "sha256sum $STORE/$1" | awk '{ print $1 }'; }
+fixture_recorded_sha() { adb shell "cat $FIXTURE_HASH_DIR/$1.sha256 2>/dev/null" | tr -d '\r'; }
+
+# need_fat_fixture: a 64 MB FAT32 blank in the Library, created through the UI and kept for later
+# runs. Tests only expose it read-only; its hash, recorded on the phone when it is created, must
+# still match, or it is deleted and created again.
 need_fat_fixture() {
-    in_store "$FAT_FIXTURE" && return 0
+    local sha
+    if in_store "$FAT_FIXTURE"; then
+        sha=$(fixture_sha "$FAT_FIXTURE")
+        [[ -n $sha && $sha == "$(fixture_recorded_sha "$FAT_FIXTURE")" ]] && return 0
+        log "fixture: $FAT_FIXTURE changed or has no recorded hash; creating it again"
+        require "stale fixture $FAT_FIXTURE deleted" delete_from_library "$FAT_FIXTURE"
+    fi
     log "fixture: creating $FAT_FIXTURE"
     create_blank "$FAT_FIXTURE" 0.064 FAT32
-    : >"$RUN_DIR/created-$FAT_FIXTURE"
+    sha=$(fixture_sha "$FAT_FIXTURE")
+    require "fixture $FAT_FIXTURE hashed" test -n "$sha"
+    adb shell "mkdir -p $FIXTURE_HASH_DIR && echo $sha >$FIXTURE_HASH_DIR/$FAT_FIXTURE.sha256"
 }
 
 # --- catalog helpers (the catalog tests and need_iso) ------------------------------------------------
