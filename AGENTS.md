@@ -84,8 +84,11 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
   later panics the kernel. Close every hidg fd first (as root, `ls -l /proc/*/fd | grep hidg`
   must print nothing).
 - The phone is a shared resource. Serialize device access with the lock directory: take it with
-  exactly `mkdir /private/tmp/claude-501/bootleg-device.lock` (retry while it exists), release
-  it with `rmdir /private/tmp/claude-501/bootleg-device.lock`.
+  exactly `mkdir /private/tmp/claude-501/bootleg-device.lock` (retry while it exists; its `owner`
+  file says who holds it), then write `pid=<pid> script=<who> started=<time>` to
+  `/private/tmp/claude-501/bootleg-device.lock/owner`. Release only a lock you took: remove the
+  owner file, then `rmdir /private/tmp/claude-501/bootleg-device.lock`. Scripts do this with
+  `scripts/device-lock.sh`.
 - Never run `magisk --sqlite` queries that can return NULL columns (e.g. `sqlite_master`):
   Magisk turns each value into a string from `sqlite3_column_text`, and a NULL crashes `magiskd`.
   Every `su` then fails until the phone reboots, and the reboot needs a manual unlock.

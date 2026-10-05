@@ -19,10 +19,11 @@
 #        BOOTLEG_DEVICE_LOCK_HELD=1 when the caller already holds the device lock, which is then kept)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/device-lock.sh
+source scripts/device-lock.sh
 
 WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
 USB_SERIAL=$(scripts/usb-serial.sh)
-LOCK_DIR=/private/tmp/claude-501/bootleg-device.lock
 PROVIDER=content://dev.jacobhayes.bootleg.debug
 GADGET=/config/usb_gadget/g1
 CLI=build/bin/bootleg
@@ -152,7 +153,7 @@ cleanup() {
         fi
         # The fixture has to live in the library while the check runs; don't leave it there.
         wadb shell rm -f "$PHONE_IMAGE" >/dev/null 2>&1 || true
-        [[ ${BOOTLEG_DEVICE_LOCK_HELD:-0} == 1 ]] || rmdir "$LOCK_DIR"
+        device_lock_release
     fi
     local total_ms=$(($(now_ms) - run_started_ms))
     echo
@@ -172,16 +173,7 @@ trap 'exit 129' HUP
 # ---------------------------------------------------------------------------------------------
 
 take_lock() {
-    if [[ ${BOOTLEG_DEVICE_LOCK_HELD:-0} == 1 ]]; then
-        [[ -d $LOCK_DIR ]] || fail "BOOTLEG_DEVICE_LOCK_HELD=1 but $LOCK_DIR doesn't exist"
-        have_lock=true
-        return 0
-    fi
-    local deadline_ms=$(($(now_ms) + LOCK_WAIT_S * 1000))
-    until mkdir "$LOCK_DIR" 2>/dev/null; do
-        (($(now_ms) < deadline_ms)) || fail "device lock $LOCK_DIR still held after ${LOCK_WAIT_S}s"
-        sleep 1
-    done
+    device_lock_take check-device-remote "$LOCK_WAIT_S" || fail "no device lock"
     have_lock=true
 }
 

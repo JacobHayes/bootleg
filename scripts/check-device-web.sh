@@ -18,9 +18,10 @@
 #        screenshots, BOOTLEG_DEVICE_LOCK_HELD=1 when the caller already holds the device lock)
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/device-lock.sh
+source scripts/device-lock.sh
 
 WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
-LOCK_DIR=/private/tmp/claude-501/bootleg-device.lock
 PROVIDER=content://dev.jacobhayes.bootleg.debug
 GADGET=/config/usb_gadget/g1
 WORK_DIR=build/web-check
@@ -37,7 +38,6 @@ POLL_S=0.25
 now_ms() { local ns; ns=$(date +%s%N); echo $((ns / 1000000)); }
 run_started_ms=$(now_ms)
 have_lock=false
-took_lock=false
 remote_on=false
 volume=
 
@@ -88,7 +88,7 @@ cleanup() {
             wadb shell content call --uri "$PROVIDER" --method OFF >/dev/null 2>&1 || true
         fi
         wadb shell rm -f "$PHONE_IMAGE" >/dev/null 2>&1 || true
-        if $took_lock; then rmdir "$LOCK_DIR"; fi
+        device_lock_release
     fi
     local total_ms=$(($(now_ms) - run_started_ms))
     printf '%s  %d.%ds total (with setup and cleanup)\n' "$([[ $status == 0 ]] && echo PASS || echo FAIL)" $((total_ms / 1000)) $((total_ms % 1000 / 100))
@@ -111,18 +111,8 @@ install_deps() {
 }
 
 take_lock() {
-    if [[ ${BOOTLEG_DEVICE_LOCK_HELD:-} == 1 ]]; then
-        [[ -d $LOCK_DIR ]] || fail "BOOTLEG_DEVICE_LOCK_HELD=1 but $LOCK_DIR doesn't exist"
-        have_lock=true
-        return
-    fi
-    local deadline_ms=$(($(now_ms) + LOCK_WAIT_S * 1000))
-    until mkdir "$LOCK_DIR" 2>/dev/null; do
-        (($(now_ms) < deadline_ms)) || fail "device lock $LOCK_DIR still held after ${LOCK_WAIT_S}s"
-        sleep 1
-    done
+    device_lock_take check-device-web "$LOCK_WAIT_S" || fail "no device lock"
     have_lock=true
-    took_lock=true
 }
 
 preflight() {

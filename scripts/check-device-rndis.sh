@@ -12,9 +12,10 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/device-lock.sh
+source scripts/device-lock.sh
 WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
 USB_SERIAL=${BOOTLEG_USB_SERIAL:-$(scripts/usb-serial.sh)}
-LOCK=/private/tmp/claude-501/bootleg-device.lock
 LOCK_WAIT_S_MAX=120
 PREFIX_WAIT_S_MAX=30
 WAIT_S_MAX=20
@@ -94,20 +95,10 @@ mac_has_prefix() { [[ $(mac_interfaces) == "$MAC_PREFIX"* ]]; }
 # Preflight before taking anything over: nothing here is undone by cleanup.
 command -v jq >/dev/null || fail "jq is required"
 [[ ! -d /Volumes/$VOLUME ]] || fail "/Volumes/$VOLUME is already mounted; eject it first"
-if [[ ${BOOTLEG_DEVICE_LOCK_HELD:-0} == 1 ]]; then
-    [[ -d $LOCK ]] || fail "BOOTLEG_DEVICE_LOCK_HELD=1 but $LOCK doesn't exist"
-else
-    deadline=$((SECONDS + LOCK_WAIT_S_MAX))
-    until mkdir "$LOCK" 2>/dev/null; do
-        [[ $SECONDS -lt $deadline ]] || fail "device lock $LOCK still held after ${LOCK_WAIT_S_MAX}s"
-        sleep 1
-    done
-    lock_taken=1
-fi
+device_lock_take check-device-rndis "$LOCK_WAIT_S_MAX" || fail "no device lock"
 
 # Cleanup acts only on what this run changed, and never removes a disk unless a successful state
 # read shows the Mac let go of it.
-lock_taken=${lock_taken:-0}
 exported=0
 tether_on=0
 functions_before=
@@ -139,7 +130,7 @@ cleanup() {
             echo "check-device-rndis: WARN: HID not put back to $hid_before" >&2
     fi
     [[ -z $mode_before ]] || call TETHER_MODE --extra "mode:s:$mode_before" >/dev/null || true
-    [[ $lock_taken == 0 ]] || rmdir "$LOCK"
+    device_lock_release
     exit "$status"
 }
 trap cleanup EXIT

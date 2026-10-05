@@ -17,9 +17,10 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/device-lock.sh
+source scripts/device-lock.sh
 WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
 USB_SERIAL=${BOOTLEG_USB_SERIAL:-$(scripts/usb-serial.sh)}
-LOCK=/private/tmp/claude-501/bootleg-device.lock
 LOCK_WAIT_S_MAX=120
 INTERFACE_WAIT_S_MAX=20
 VOLUME_WAIT_S_MAX=20
@@ -112,7 +113,6 @@ expect_type() { # $1: JSON, $2: expected result type suffix
     [[ $(jq -r .type <<<"$1") == *"$2" ]] || fail "expected $2, got $1"
 }
 
-lock_taken=0
 tether_on=0
 volume_seen=0
 disk_exposed=0
@@ -144,7 +144,7 @@ cleanup() {
     # re-plugging USB (root serializes it anyway; this keeps the script's own order honest).
     if [[ $tether_on == 1 ]] && ! wait_quietly "$TETHER_SETTLE_WAIT_S_MAX" tether_settled; then
         echo "check-device-tether: WARN: a tethering change is still in flight after ${TETHER_SETTLE_WAIT_S_MAX}s; left drives, tethering and HID as they are" >&2
-        if [[ $lock_taken == 1 ]]; then rmdir "$LOCK"; fi
+        device_lock_release
         exit 1
     fi
     # Removing the disk is safe only once the Mac has ejected it (the phone sees LUN 0 emptied:
@@ -170,7 +170,7 @@ cleanup() {
     # Tethering off and a HID change re-plug USB too, which would pull the still-mounted volume.
     if [[ $volume_released == 0 ]]; then
         echo "check-device-tether: WARN: left tethering and HID as they are while the disk is exposed" >&2
-        if [[ $lock_taken == 1 ]]; then rmdir "$LOCK"; fi
+        device_lock_release
         exit 1
     fi
     if [[ $tether_on == 1 ]] && tethered; then
@@ -184,7 +184,7 @@ cleanup() {
     if [[ -n $mode_before ]]; then
         call TETHER_MODE --extra "mode:s:$mode_before" >/dev/null || echo "check-device-tether: WARN: tethering mode not put back to $mode_before" >&2
     fi
-    if [[ $lock_taken == 1 ]]; then rmdir "$LOCK"; fi
+    device_lock_release
     exit "$status"
 }
 # wait_quietly SECONDS COMMAND...: like wait_until, but returns 1 on timeout instead of failing (for cleanup).
@@ -202,15 +202,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-if [[ ${BOOTLEG_DEVICE_LOCK_HELD:-0} != 1 ]]; then
-    waited=0
-    until mkdir "$LOCK" 2>/dev/null; do
-        [[ $waited -lt $LOCK_WAIT_S_MAX ]] || fail "device lock $LOCK still held after ${LOCK_WAIT_S_MAX}s"
-        sleep 1
-        waited=$((waited + 1))
-    done
-    lock_taken=1
-fi
+device_lock_take check-device-tether "$LOCK_WAIT_S_MAX" || fail "no device lock"
 
 [[ $(wadb shell dumpsys window | tr -d '\r' | grep -o 'isKeyguardShowing=[a-z]*' | head -1) == isKeyguardShowing=false ]] ||
     fail "the phone is locked; unlock it first"

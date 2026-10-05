@@ -28,7 +28,6 @@ set -eu
 
 WIRELESS=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
 USB=$(scripts/usb-serial.sh)
-LOCK=/private/tmp/claude-501/bootleg-device.lock
 LOCK_WAIT_S_MAX=120
 ENUMERATE_WAIT_S_MAX=10
 ADB_RETURN_WAIT_S_MAX=20
@@ -40,6 +39,7 @@ CAPTURE_READY_WAIT_S_MAX=10
 # Wireless adb can hang on a dead transport: every call is bounded.
 ADB="timeout --foreground --kill-after=5 120 adb -s $WIRELESS"
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+. "$ROOT/scripts/device-lock.sh"
 CAPTURE_SOURCE=$ROOT/scripts/hidcapture.swift
 CAPTURE_BINARY=$ROOT/build/hidcapture
 CAPTURE_OUTPUT=$(mktemp "${TMPDIR:-/tmp}/bootleg-hidcapture.XXXXXX")
@@ -51,7 +51,6 @@ fail() {
 step() { echo "check-device-hid: $*"; }
 
 hid_enabled=0
-lock_taken=0
 capture_pid=
 
 # Runs once on any exit: HID off if we turned it on, stop the capture, release the lock.
@@ -79,7 +78,7 @@ cleanup() {
         esac
     fi
     rm -f "$CAPTURE_OUTPUT"
-    if [ "$lock_taken" = 1 ]; then rmdir "$LOCK"; fi
+    device_lock_release
     exit "$status"
 }
 trap cleanup EXIT
@@ -87,15 +86,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-if [ "${BOOTLEG_DEVICE_LOCK_HELD:-0}" != 1 ]; then
-    waited=0
-    until mkdir "$LOCK" 2>/dev/null; do
-        [ "$waited" -lt "$LOCK_WAIT_S_MAX" ] || fail "device lock $LOCK still held after ${LOCK_WAIT_S_MAX}s"
-        sleep 1
-        waited=$((waited + 1))
-    done
-    lock_taken=1
-fi
+device_lock_take check-device-hid "$LOCK_WAIT_S_MAX" || fail "no device lock"
 
 # Debug provider call; prints the JSON payload.
 call() {

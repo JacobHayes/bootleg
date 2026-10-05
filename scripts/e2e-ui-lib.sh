@@ -14,8 +14,9 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 # shellcheck source=scripts/ui.sh
 source scripts/ui.sh
+# shellcheck source=scripts/device-lock.sh
+source scripts/device-lock.sh
 
-LOCK_DIR=/private/tmp/claude-501/bootleg-device.lock
 LOCK_WAIT_S=600
 PACKAGE=dev.jacobhayes.bootleg
 ACTIVITY=$PACKAGE/.MainActivity
@@ -102,25 +103,13 @@ on_cleanup() { cleanups=("$1" "${cleanups[@]}"); }
 
 # --- device lock and serials -----------------------------------------------------------------------
 
-have_lock=false
 take_lock() {
-    [[ ${BOOTLEG_DEVICE_LOCK_HELD:-0} == 1 ]] && return 0
-    local waited=0
-    until mkdir "$LOCK_DIR" 2>/dev/null; do
-        # The runner's INT/TERM trap only sets the flag, so the wait has to look at it.
-        ! ${interrupted:-false} || die "interrupted while waiting for the device lock"
-        ((waited < LOCK_WAIT_S)) || die "device lock $LOCK_DIR still held after ${LOCK_WAIT_S}s"
-        ((waited % 30 == 0)) && log "waiting for the device lock..."
-        sleep 1
-        waited=$((waited + 1))
-    done
-    have_lock=true
+    device_lock_take e2e-ui "$LOCK_WAIT_S" || die "no device lock"
     log "device lock taken"
 }
 
 release_lock() {
-    if $have_lock; then rmdir "$LOCK_DIR" && log "device lock released"; fi
-    have_lock=false
+    [[ -z $device_lock_owner_line ]] || { device_lock_release && log "device lock released"; }
 }
 
 # USB adb is briefly gone while another run re-enumerates the gadget: retry for a while.
