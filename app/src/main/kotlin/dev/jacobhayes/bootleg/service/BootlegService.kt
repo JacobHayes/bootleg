@@ -52,7 +52,13 @@ class BootlegService : Service() {
     override fun onCreate() {
         super.onCreate()
         createChannel()
-        startForeground(NOTIFICATION_ID, buildNotification(null, tethering = false), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        // The current state, not a placeholder: the system posts this one asynchronously, so it can
+        // land after the first notify() from onStartCommand and would hide it until the state changes again.
+        startForeground(
+            NOTIFICATION_ID,
+            buildNotification(backend.gadgetState.value, backend.usbTethering.value == true),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE,
+        )
     }
 
     override fun onStartCommand(
