@@ -224,6 +224,9 @@ class ShellDeadMan(
 object ConfinedFiles {
     private const val TAG = "ConfinedFiles"
 
+    /** Init's root directory: a path walked through it resolves against init's mounts. */
+    private const val INIT_ROOT = "/proc/1/root"
+
     // The SDK has no O_DIRECTORY, so directories are checked with fstat after the open. O_NONBLOCK: a
     // FIFO must fail that check, not hang the binder thread in open().
     private val OPEN_FLAGS = OsConstants.O_RDONLY or OsConstants.O_NOFOLLOW or OsConstants.O_CLOEXEC or OsConstants.O_NONBLOCK
@@ -337,8 +340,10 @@ object ConfinedFiles {
         confined: ConfinedPath,
         block: (parent: ParcelFileDescriptor, rootDevice: Long) -> T,
     ): T {
-        // The root itself (/data/media/0) is a system path owned by root, so it is trusted.
-        var directory = open(confined.root.trimEnd('/'), confined)
+        // The root itself (/data/media/0) is a system path owned by root, so it is trusted. It is opened
+        // in init's mount namespace: ours is the app's, and once it is gone (an APK update) the kernel
+        // would report an exported file under it as '/media/0/...', which reconcile takes for other media.
+        var directory = open("$INIT_ROOT${confined.root.trimEnd('/')}", confined)
         try {
             val rootStat = Os.fstat(directory.fileDescriptor)
             require(OsConstants.S_ISDIR(rootStat.st_mode)) { "allowed root is not a directory: ${confined.root}" }

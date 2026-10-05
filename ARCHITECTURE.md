@@ -31,7 +31,10 @@ See SPEC.md for the requirements. This file covers how Bootleg is built.
   partition is its ISO9660 one, so a hybrid ISO exported as a read-only disk boots but shows no
   files in Explorer.
 - Writing `/proc/self/fd/N` (an O_NOFOLLOW fd held by the root process) into `lun.N/file` works,
-  and `file` reads back as the real path (`/data/media/0/bootleg/x.img`).
+  and `file` reads back as the real path (`/data/media/0/bootleg/x.img`). The kernel prints it
+  through the opener's mounts: opened in the root process's own namespace (the app's), it reads
+  `/media/0/bootleg/x.img` once that namespace is gone (an APK update), so opens start from init's
+  root (`/proc/1/root/data/media/0`).
 - macOS sets prevent-removal on a mounted LUN, so a normal eject (`file=""`) fails with EBUSY.
   `forced_eject=1` empties the LUN, but macOS keeps the volume "mounted" (â‰¥ 30s; accessing it hangs)
   until the next re-enumeration. Ejecting on the Mac (`diskutil eject`) clears the LUN by itself
@@ -365,7 +368,8 @@ remote/    Go (phase 3): tsnet node + HTTP/WebSocket server + embedded web UI â†
 
   Image paths (`/sdcard/...` is mapped to `/data/media/0/...`) must be normalized (no `.`, `..` or
   empty components), inside an allowed root (`/data/media/0/`), and regular files; a path through
-  a symlink is rejected. Root walks the path from a directory fd of the root, opening each
+  a symlink is rejected. Root walks the path from a directory fd of the root (opened in init's
+  mount namespace through `/proc/1/root`), opening each
   component `O_NOFOLLOW` relative to the previous fd (`/proc/self/fd/<dirfd>/<name>`, since
   `android.system.Os` has no `openat`), so a directory swapped for a symlink mid-check can't
   redirect it. Each directory and the final file are checked with `fstat` (directory, then
