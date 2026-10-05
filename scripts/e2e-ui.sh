@@ -19,12 +19,11 @@
 #
 # Environment: BOOTLEG_WIFI_SERIAL / BOOTLEG_USB_SERIAL override the detected adb serials;
 # BOOTLEG_DEVICE_LOCK_HELD=1 when the caller already holds the device lock; BOOTLEG_UI_SERVER=0
-# falls back to `uiautomator dump` (slow); E2E_SETUP_TIMEOUT_S bounds the one-time setup once the
-# lock is held (default 240).
+# falls back to `uiautomator dump` (slow).
 #
-# Bounds: every adb call (scripts/ui.sh) and helper request has a timeout. A signal (INT, TERM,
-# HUP) during setup exits at once; during the tests it skips the rest after the running test. The
-# device lock is released on every exit but SIGKILL.
+# Bounds: every adb call (scripts/ui.sh), helper request and helper build step has a timeout. A
+# signal (INT, TERM, HUP) during setup exits at once; during the tests it skips the rest after the
+# running test. The device lock is released on every exit but SIGKILL.
 # shellcheck source=scripts/e2e-ui-lib.sh
 source "$(dirname "$0")/e2e-ui-lib.sh"
 
@@ -120,50 +119,18 @@ export UI_LAST_DUMP_FILE=$RUN_DIR/last-dump.xml
 interrupted=false
 results=()
 suite_status=0
-E2E_SETUP_TIMEOUT_S=${E2E_SETUP_TIMEOUT_S:-240}
 TEARDOWN_PROBE_TIMEOUT_S=10
-setup_watchdog_pid=
-
-# kill_descendants PID: TERM to every process below PID (depth first), except the calling shell.
-kill_descendants() {
-    local child
-    for child in $(pgrep -P "$1"); do
-        [[ $child == "$BASHPID" ]] && continue
-        kill_descendants "$child"
-        kill -TERM "$child" 2>/dev/null
-    done
-}
-
-# setup_watchdog_start: once the lock is held, a setup that runs past E2E_SETUP_TIMEOUT_S (a hung
-# transport) is stopped: TERM to the runner, then to everything it waits on (a pipeline's reader
-# waits for its writer), so the EXIT trap runs and releases the lock.
-setup_watchdog_start() {
-    (
-        sleep "$E2E_SETUP_TIMEOUT_S"
-        echo "e2e-ui: setup still running after ${E2E_SETUP_TIMEOUT_S}s; stopping" >&2
-        kill -TERM $$ 2>/dev/null
-        kill_descendants $$
-    ) &
-    setup_watchdog_pid=$!
-}
-
-setup_watchdog_stop() {
-    [[ -n $setup_watchdog_pid ]] || return 0
-    kill "$setup_watchdog_pid" 2>/dev/null || true
-    wait "$setup_watchdog_pid" 2>/dev/null || true
-    setup_watchdog_pid=
-}
+UI_SERVER_BUILD_TIMEOUT_S=120
 
 suite_finish() {
     local status=$? fixture
     trap - EXIT
     # Teardown is bounded (a quick probe, then bounded adb calls): it finishes, then frees the phone.
     trap '' INT TERM HUP
-    setup_watchdog_stop
     current_test=teardown
     current_step=teardown
-    # A transport that doesn't answer a quick probe (the usual reason a setup timed out) would make
-    # every teardown call wait out its own bound: skip the phone side then.
+    # A transport that doesn't answer a quick probe would make every teardown call wait out its
+    # own bound: skip the phone side then.
     if [[ -n ${WIFI_SERIAL:-} ]] && ! UI_ADB_CALL_TIMEOUT_S=$TEARDOWN_PROBE_TIMEOUT_S wifi_adb_ready; then
         log "FAIL wireless adb $WIFI_SERIAL doesn't answer; skipped the phone teardown (fixtures, the dump helper)"
         suite_status=1
@@ -196,14 +163,14 @@ build_ui_server() {
     [[ $UI_SERVER_JAR -nt scripts/e2e-ui/UiDumpServer.java ]] && return 0
     build_tools=$(find "$sdk/build-tools" -mindepth 1 -maxdepth 1 | sort -V | tail -1)
     platform=$(find "$sdk/platforms" -mindepth 1 -maxdepth 1 | sort -V | tail -1)
-    java_bin=$(dirname "$(command -v javac || mise which javac)")
+    java_bin=$(dirname "$(command -v javac || timeout --foreground --kill-after=5 "$UI_SERVER_BUILD_TIMEOUT_S" mise which javac)")
     classes=$RESULTS_DIR/ui-dump-server-classes
     rm -rf "$classes"
     mkdir -p "$classes"
     log "building the device helper ($UI_SERVER_JAR)"
-    if ! "$java_bin/javac" -nowarn -Xlint:none --release 17 -cp "$platform/android.jar" -d "$classes" \
+    if ! timeout --foreground --kill-after=5 "$UI_SERVER_BUILD_TIMEOUT_S" "$java_bin/javac" -nowarn -Xlint:none --release 17 -cp "$platform/android.jar" -d "$classes" \
         scripts/e2e-ui/UiDumpServer.java >"$RESULTS_DIR/ui-dump-server-build.log" 2>&1 ||
-        ! PATH=$java_bin:$PATH "$build_tools/d8" --min-api 30 --lib "$platform/android.jar" --output "$UI_SERVER_JAR" \
+        ! PATH=$java_bin:$PATH timeout --foreground --kill-after=5 "$UI_SERVER_BUILD_TIMEOUT_S" "$build_tools/d8" --min-api 30 --lib "$platform/android.jar" --output "$UI_SERVER_JAR" \
             "$classes"/dev/jacobhayes/bootleg/e2e/*.class >>"$RESULTS_DIR/ui-dump-server-build.log" 2>&1; then
         cat "$RESULTS_DIR/ui-dump-server-build.log" >&2
         die "could not build the device helper"
@@ -229,7 +196,6 @@ current_test=setup
 test_started_ms=$(now_ms)
 log "tests: ${chosen[*]}"
 take_lock
-setup_watchdog_start
 USB_SERIAL=$(find_usb_serial)
 WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh "$USB_SERIAL")}
 export USB_SERIAL WIFI_SERIAL
@@ -252,7 +218,6 @@ else
 fi
 mkdir -p "$RESULTS_DIR"
 [[ -s $RESULTS_FILE ]] || echo "$RESULTS_HEADER" >"$RESULTS_FILE"
-setup_watchdog_stop
 # The tests stop between tests: the running one finishes and cleans up first.
 trap 'interrupted=true' INT TERM HUP
 log "setup done"

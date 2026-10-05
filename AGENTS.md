@@ -47,8 +47,7 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
   phone drops a volume, and fails if DiskArbitration saw a mounted volume vanish.
 - L4 scripts bound every adb call (`timeout`; wireless adb can hang), release the device lock on
   EXIT, INT, TERM and HUP, and never change HID or the gadget while a change they started is still
-  in flight (debug calls are synchronous; a tethering change is waited out first). The UI runner
-  also bounds its one-time setup (`E2E_SETUP_TIMEOUT_S`, 240s) once it holds the lock.
+  in flight (debug calls are synchronous; a tethering change is waited out first).
 - Tests for network code are tagged `live` and stay out of the default run. Offline tests replay
   recorded fixtures.
 - A change isn't done until `mise run check` passes. Changes that touch the device run
