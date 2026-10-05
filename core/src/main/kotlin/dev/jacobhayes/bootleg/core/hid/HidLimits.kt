@@ -11,6 +11,9 @@ object HidLimits {
     /** How long root waits for USB to stay bound again after someone else re-enumerated, before allowing HID opens anyway. */
     const val RELAY_SETTLE_WAIT_MS_MAX = 30_000L
 
+    /** How long a worse link status must last before the status line shows it ([DropHold]; display only). */
+    const val LINK_DROP_HOLD_MS = 3_000L
+
     /** Paste-as-typing input, measured in UTF-8 bytes. */
     const val PASTE_SIZE_BYTES_MAX = 64 * 1024
 

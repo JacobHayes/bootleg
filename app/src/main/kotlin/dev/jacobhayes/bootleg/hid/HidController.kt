@@ -8,7 +8,9 @@ import dev.jacobhayes.bootleg.BootlegBackend
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.HidSpec
 import dev.jacobhayes.bootleg.core.hid.BootKey
+import dev.jacobhayes.bootleg.core.hid.DropHold
 import dev.jacobhayes.bootleg.core.hid.HidKind
+import dev.jacobhayes.bootleg.core.hid.HidLimits
 import dev.jacobhayes.bootleg.core.hid.HidTestSequence
 import dev.jacobhayes.bootleg.core.hid.KeyUsage
 import dev.jacobhayes.bootleg.core.hid.KeyboardInput
@@ -41,6 +43,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -113,6 +116,20 @@ class HidController(
                 it.desired.hid
             }.stateIn(scope, SharingStarted.Eagerly, backend.journal.value.desired.hid)
     val link: StateFlow<HidLinkState> = linkFlow.asStateFlow()
+
+    /** [link] as status lines show it: a host enumerating and resetting while it boots doesn't flicker. Display only. */
+    val shownLink: StateFlow<HidLinkState> =
+        DropHold<HidLinkState>(HidLimits.LINK_DROP_HOLD_MS) { it.displayRank }.let { hold ->
+            // Monotonic like SystemClock, which is only a stub in JVM unit tests.
+            fun nowMs() = System.nanoTime() / 1_000_000
+            linkFlow
+                .transformLatest { value ->
+                    emit(hold.observe(value, nowMs()))
+                    val showsAtMs = hold.dropShowsAtMs ?: return@transformLatest
+                    delay(showsAtMs - nowMs())
+                    emit(hold.shownAt(nowMs()))
+                }.stateIn(scope, SharingStarted.Eagerly, HidLinkState.Stopped)
+        }
     val leds: StateFlow<KeyboardLeds?> = ledsFlow.asStateFlow()
     val stats: StateFlow<HidSessionStats> = statsFlow.asStateFlow()
     val chips: StateFlow<Map<Modifier, ModifierChipState>> = chipsFlow.asStateFlow()

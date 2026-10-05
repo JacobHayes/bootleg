@@ -629,7 +629,10 @@ The Wi-Fi hi-perf mode is dropped because it's deprecated. Disk export needs non
   next input retries after that). A release owed on an endpoint the host isn't reading doesn't hold
   the remote's input barrier.
   When root drops the fds itself the session is told and reconnects without waiting for input
-  (see HID fds and gadget changes). Release-all also happens on stop, on app background and on queue overflow, and resets the
+  (see HID fds and gadget changes). The status lines (Control tab, remote) show the link through `DropHold`
+  (core): a better state shows at once, a worse one only after it has lasted
+  `HidLimits.LINK_DROP_HOLD_MS` (3s), a stop at once, so a host enumerating, resetting and handing
+  off from firmware to the OS doesn't flicker. Only display reads the held state. Release-all also happens on stop, on app background and on queue overflow, and resets the
   on-screen modifier and button state. Keyboard LED output reports are polled while idle. A
   session the app's background closed (screen off, another app) is reopened when an activity
   starts again, after that stop has finished, so the link doesn't sit at Stopped until the next

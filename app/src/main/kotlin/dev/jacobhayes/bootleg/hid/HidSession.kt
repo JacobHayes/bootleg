@@ -90,6 +90,18 @@ sealed interface HidLinkState {
         val reason: String,
         val restartRequired: Boolean = false,
     ) : HidLinkState
+
+    /**
+     * How connected the link looks, for [dev.jacobhayes.bootleg.core.hid.DropHold]: the more endpoints the
+     * host reads the higher. A stop is deliberate (switch off, background, gadget change) and shows at once.
+     */
+    val displayRank: Int?
+        get() =
+            when (this) {
+                Stopped -> null
+                Opening, is Reconnecting, is Failed -> 0
+                is Open -> 1 + HidKind.entries.size - notReading.size
+            }
 }
 
 /** What the root relay tells the session when it drops the session's fds on its own (see `IHidRelayClient`). */

@@ -74,7 +74,7 @@ fun ControlScreen(
 ) {
     val spec by hid.spec.collectAsState()
     val busy by hid.busy.collectAsState()
-    val link by hid.link.collectAsState()
+    val link by hid.shownLink.collectAsState()
     val chips by hid.chips.collectAsState()
     val leds by hid.leds.collectAsState()
     val job by hid.job.collectAsState()

@@ -45,7 +45,7 @@ class RemoteDevice(
         combine(
             backend.journal,
             backend.images,
-            hid.link,
+            hid.shownLink,
             backend.usbTethering,
             backend.usbTetherMode,
         ) { journal, images, link, tethering, mode ->
