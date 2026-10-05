@@ -74,8 +74,8 @@ description = "L4 UI: drive the real app through its UI, one small test per beha
 run = "bash scripts/e2e-ui.sh"
 
 [tasks.deploy]
-description = "Install the debug app on the phone and pre-grant root + storage access"
-run = ["./gradlew --console=plain -q :app:installDebug", "sh scripts/grant-root.sh"]
+description = "Build the debug app, install it on the phone unless it already has this build, and pre-grant root + storage access"
+run = ["./gradlew --console=plain -q :app:assembleDebug", "sh scripts/install-apk.sh"]
 
 [tasks."screenshots:record"]
 description = "Re-record the UI screenshot goldens in app/src/test/screenshots (look at the diff before committing)"

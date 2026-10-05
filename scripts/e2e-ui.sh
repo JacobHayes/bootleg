@@ -9,8 +9,8 @@
 #   TEST       a test name (drives.iso-cdrom), an area (drives) or a glob ('blank.*', '*eject*').
 #              Default: every test that isn't opt-in. Opt-in tests run only when named exactly.
 #   --list     print the tests and exit
-#   --install  install app/build/outputs/apk/debug/app-debug.apk first if it differs from the
-#              installed one, and pre-grant root (scripts/grant-root.sh). Otherwise the installed
+#   --install  install app/build/outputs/apk/debug/app-debug.apk first unless the phone already
+#              has this build, and pre-grant root (scripts/install-apk.sh). Otherwise the installed
 #              app is used as is (`mise run deploy`).
 #
 # Results: one TSV row per test appended to build/e2e-ui/results.tsv (run id, start time, test,
@@ -178,18 +178,9 @@ build_ui_server() {
 }
 
 install_app() {
-    local local_sha installed_sha installed_path
-    [[ -f $APK ]] || die "--install: $APK missing (./gradlew :app:assembleDebug)"
-    local_sha=$(shasum -a 256 "$APK" | awk '{ print $1 }')
-    installed_path=$(adb shell pm path "$PACKAGE" | tr -d '\r' | sed -n 's/^package://p' | head -1)
-    installed_sha=$([[ -n $installed_path ]] && adb shell sha256sum "$installed_path" | awk '{ print $1 }')
-    if [[ $local_sha == "$installed_sha" ]]; then
-        log "installed app matches $APK"
-        return 0
-    fi
-    log "installing $APK"
-    adb install -r "$APK" >/dev/null
-    scripts/grant-root.sh "$ANDROID_SERIAL" >/dev/null
+    local output
+    output=$(sh scripts/install-apk.sh "$ANDROID_SERIAL" "$APK")
+    log "$output"
 }
 
 current_test=setup

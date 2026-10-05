@@ -165,11 +165,10 @@ install_app() {
     [[ $(uadb get-state 2>/dev/null) == device ]] || fail "phone $USB_SERIAL is not connected over USB"
     if $skip_build; then
         [[ -f $APK ]] || fail "$APK is missing; run without --skip-build"
-        uadb install -r -t "$APK" >/dev/null
     else
-        ANDROID_SERIAL=$USB_SERIAL ./gradlew --console=plain -q :app:installDebug >/dev/null
+        ./gradlew --console=plain -q :app:assembleDebug >/dev/null
     fi
-    sh scripts/grant-root.sh "$USB_SERIAL" >/dev/null
+    sh scripts/install-apk.sh "$USB_SERIAL" "$APK" >/dev/null
 }
 
 # Deterministic content, built once and cached; only images that are missing get rebuilt.
