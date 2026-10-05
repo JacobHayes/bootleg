@@ -82,7 +82,7 @@ object RemoteLimits {
     // Device (gadget) operations.
     const val DEVICE_OP_TIMEOUT_MS = 10_000L
 
-    /** `tether.set`: Android's change, the HAL's re-plug and a gadget reconcile (≈ 60 s worst case plus margin, with HID closed until a left marker is waited out). */
+    /** `tether.set`: a first use or a mode change sets the prefix up (a gadget change with a USB mode round trip) before Android's start. */
     const val TETHER_OP_TIMEOUT_MS = 75_000L
 
     const val IMAGE_COUNT_MAX = 512

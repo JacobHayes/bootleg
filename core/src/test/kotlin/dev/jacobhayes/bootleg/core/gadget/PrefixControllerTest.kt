@@ -13,7 +13,7 @@ import java.io.IOException
 class PrefixControllerTest {
     private val udc = FakeConfigFs.PIXEL_UDC
     private val disk = Desired(listOf(SlotSpec(0, img(1), LunMode.DISK_RO)))
-    private val prefixThenAdb = LinkOrder.prefix(TetherMode.RNDIS) + "function0"
+    private val prefixThenAdb = LinkOrder.prefix(TetherMode.DEFAULT) + "function0"
 
     private fun GadgetRig.links() = state().configLinks.keys.toList()
 
@@ -46,7 +46,7 @@ class PrefixControllerTest {
     fun `a mode change re-establishes the prefix, is refused before anything changes while a disk has media, and apply never makes one`() {
         val rig = GadgetRig()
         val controller = rig.controller()
-        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(disk))
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(disk.copy(network = TetherMode.RNDIS)))
         val sets = rig.usbFunctions.sets.size
         val refused = assertInstanceOf(ApplyResult.NeedsAttention::class.java, controller.establishPrefix(TetherMode.NCM))
         assertTrue(refused.reason.contains(DefaultGadgetController.PREFIX_DISKS_EXPOSED_REASON), refused.reason)
@@ -150,7 +150,7 @@ class PrefixControllerTest {
         assertEquals(sets, rig.usbFunctions.sets.size, "reconcile doesn't re-plug USB again")
         rig.usbFunctions.halDelayMs = 0
         assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(Desired(prefix = true)))
-        assertEquals(LinkOrder.prefix(TetherMode.RNDIS), rig.links().take(3))
+        assertEquals(LinkOrder.prefix(TetherMode.DEFAULT), rig.links().take(3))
     }
 
     @Test
@@ -186,14 +186,14 @@ class PrefixControllerTest {
         assertEquals(0L, usb.current(), "back in the original mode before the release")
         assertNull(rig.journal().usbFunctionsToRestore)
         assertEquals(prefixThenAdb, rig.links())
-        assertEquals(RndisState.READY, rig.state().rndis)
+        assertTrue(LinkOrder.prefixServed(rig.state(), TetherMode.DEFAULT))
     }
 
     @Test
     fun `a dead daemon is restarted in place once nothing has media, at most once per interval`() {
         val rig = GadgetRig()
         val controller = rig.controller()
-        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(disk))
+        assertInstanceOf(ApplyResult.Applied::class.java, controller.apply(disk.copy(network = TetherMode.RNDIS)))
         rig.rndisDaemon.die()
         assertEquals(udc, rig.fs.udc, "with no_disconnect the gadget stays bound and the disk keeps working")
         rig.clock.sleepMs(GadgetLimits.RECONCILE_INTERVAL_MS_MIN)

@@ -299,7 +299,7 @@ func (p *fakePhone) Command(id int64, raw string) {
 		p.state.Hid.Wheel = p.state.Hid.Mouse && p.wheel
 		reply(nil)
 	case protocol.TypeTetherSet:
-		// Like the phone: any slot with media refuses it, since switching re-plugs USB.
+		// Like the phone when it has to switch the tethering mode (a re-plug): any slot with media refuses it.
 		for _, slot := range p.state.Slots {
 			if slot.Status == "" || slot.Status == "exported" {
 				fail(protocol.ErrorDisksExposed)

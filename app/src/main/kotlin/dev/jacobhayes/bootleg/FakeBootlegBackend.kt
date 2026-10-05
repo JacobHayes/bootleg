@@ -60,18 +60,21 @@ class FakeBootlegBackend(
         modeFlow.value = mode
     }
 
-    /** Same rule as the root side: NCM is refused while a LUN holds media. */
+    /** Same rule as the root side: on in another mode than the prefix's is refused while a LUN holds media. */
     override suspend fun setUsbTethering(on: Boolean): TetherResult {
         delay(latencyMs)
         val active = tetheringFlow.value == true
-        if (on == active) return TetherResult.Unchanged(active)
+        val desired = journalFlow.value.desired
+        val modeChange = on && desired.wantsPrefix && desired.network != modeFlow.value
+        if (on == active && !modeChange) return TetherResult.Unchanged(active)
         val exposed = gadgetFlow.value?.let(TetherPolicy::exposedLuns).orEmpty()
-        if (exposed.isNotEmpty() && modeFlow.value == TetherMode.NCM) {
-            return TetherResult.Refused(active, exposed, TetherPolicy.DISKS_EXPOSED_REASON)
+        if (modeChange && exposed.isNotEmpty()) return TetherResult.Refused(active, exposed, TetherPolicy.DISKS_EXPOSED_REASON)
+        if (on) {
+            journalFlow.update { it.copy(desired = it.desired.copy(prefix = true, network = modeFlow.value)) }
+            gadgetFlow.value = stateFor(journalFlow.value)
         }
         tetheringFlow.value = on
-        val state = checkNotNull(gadgetFlow.value)
-        return TetherResult.Changed(on, ApplyResult.Applied(state, reenumerated = false), switchSettled = true)
+        return TetherResult.Changed(on)
     }
 
     override suspend fun refreshImages() = delay(latencyMs)

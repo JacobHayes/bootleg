@@ -18,13 +18,15 @@ class GadgetPlannerTest {
     private val keyboard = "functions/hid.bootleg_kbd"
     private val massStorage = "functions/mass_storage.bootleg"
     private val massStorageLink = "configs/b.1/mass_storage.bootleg"
-    private val prefixLinks = LinkOrder.prefix(TetherMode.RNDIS).map { Op.Symlink(GadgetPaths.function(it), GadgetPaths.configLink(it)) }
     private val hidOn = HidSpec(keyboard = true, mouse = true)
-    private val prefixThenAdb = LinkOrder.prefix(TetherMode.RNDIS) + "function0"
+    private val prefixThenAdb = LinkOrder.prefix(TetherMode.DEFAULT) + "function0"
 
     private fun kernelWith(desired: Desired): PlannerKernel = PlannerKernel().also { it.converge(planner, GadgetTarget.of(desired)) }
 
-    private fun cdrom(path: String) = Desired(listOf(SlotSpec(0, path, LunMode.CDROM)))
+    private fun cdrom(
+        path: String,
+        network: TetherMode = TetherMode.DEFAULT,
+    ) = Desired(listOf(SlotSpec(0, path, LunMode.CDROM)), network = network)
 
     private fun PlannerKernel.links() = read().configLinks.keys.toList()
 
@@ -100,7 +102,7 @@ class GadgetPlannerTest {
             plan.ops,
         )
         kernel.execute(plan)
-        assertTrue(LinkOrder.prefixFirst(kernel.read().configLinks, TetherMode.RNDIS))
+        assertTrue(LinkOrder.prefixFirst(kernel.read().configLinks, TetherMode.DEFAULT))
     }
 
     @Test
@@ -191,18 +193,20 @@ class GadgetPlannerTest {
 
     @Test
     fun `a prefix that lost its place is relinked in one switch with a fresh held daemon, never bound without it`() {
-        val kernel = kernelWith(Desired(prefix = true))
+        val desired = Desired(prefix = true, network = TetherMode.RNDIS)
+        val prefix = LinkOrder.prefix(TetherMode.RNDIS)
+        val kernel = kernelWith(desired)
         val fs = kernel.fs
         fs.asActor("other") {
             fs.write("UDC", "")
-            LinkOrder.prefix(TetherMode.RNDIS).forEach { fs.unlink(GadgetPaths.configLink(it)) }
-            prefixLinks.forEach { fs.symlink(it.target, it.link) }
+            prefix.forEach { fs.unlink(GadgetPaths.configLink(it)) }
+            prefix.forEach { fs.symlink(GadgetPaths.function(it), GadgetPaths.configLink(it)) }
             fs.write("UDC", udc)
         }
-        val plan = planner.plan(kernel.read(), Desired(prefix = true))
+        val plan = planner.plan(kernel.read(), desired)
         assertEquals(1, plan.ops.count { it is Op.Bind }, "${plan.ops}")
         kernel.execute(plan)
-        assertEquals(prefixThenAdb, kernel.links())
+        assertEquals(prefix + "function0", kernel.links())
         assertEquals(listOf("start", "release", "start", "release"), kernel.daemon.events)
     }
 
@@ -235,23 +239,24 @@ class GadgetPlannerTest {
 
     @Test
     fun `a dead daemon is restarted in place, or waits while only in-place work is needed`() {
-        val kernel = kernelWith(cdrom(iso(1)))
+        val rndis = TetherMode.RNDIS
+        val kernel = kernelWith(cdrom(iso(1), rndis))
         kernel.daemon.die()
         val restart = listOf(Op.Unbind, Op.StartRndis, Op.ReleaseRndis, Op.Bind(udc))
-        val swap = planner.plan(kernel.read(), GadgetTarget.of(cdrom(iso(2))), repairRndis = false)
+        val swap = planner.plan(kernel.read(), GadgetTarget.of(cdrom(iso(2), rndis)), repairRndis = false)
         assertEquals(listOf(Op.Write("$massStorage/lun.0/file", ""), Op.Write("$massStorage/lun.0/file", iso(2))), swap.ops)
-        val disk = GadgetTarget.of(Desired(listOf(SlotSpec(0, img(1), LunMode.DISK_RW))))
+        val disk = GadgetTarget.of(Desired(listOf(SlotSpec(0, img(1), LunMode.DISK_RW)), network = rndis))
         assertEquals(restart, planner.plan(kernel.read(), disk, repairRndis = false).ops, "any switch restarts it first")
-        assertEquals(Plan.EMPTY, planner.plan(kernel.read(), GadgetTarget.of(cdrom(iso(1))), repairRndis = false))
-        val pending = GadgetTarget.of(cdrom(iso(1))).copy(usbRoundTrip = true)
+        assertEquals(Plan.EMPTY, planner.plan(kernel.read(), GadgetTarget.of(cdrom(iso(1), rndis)), repairRndis = false))
+        val pending = GadgetTarget.of(cdrom(iso(1), rndis)).copy(usbRoundTrip = true)
         assertEquals(
             listOf(Op.Unbind, Op.StartRndis, Op.RelinkForeign, Op.ReleaseRndis, Op.Bind(udc)),
             planner.plan(kernel.read(), pending).ops,
         )
-        val plan = planner.plan(kernel.read(), GadgetTarget.of(cdrom(iso(1))))
+        val plan = planner.plan(kernel.read(), GadgetTarget.of(cdrom(iso(1), rndis)))
         assertEquals(restart, plan.ops)
         kernel.execute(plan)
-        assertEquals(prefixThenAdb + GadgetNames.MASS_STORAGE_FUNCTION, kernel.links())
+        assertEquals(LinkOrder.prefix(rndis) + "function0" + GadgetNames.MASS_STORAGE_FUNCTION, kernel.links())
     }
 
     @Test

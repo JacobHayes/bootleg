@@ -23,8 +23,10 @@ hid_written() { call HID_STATE | jq '.written'; }
 host_has_hid() { [[ -n $(host_hid_rows "$HID_VENDOR_ID" 1 6) && -n $(host_hid_rows "$HID_VENDOR_ID" 1 2) ]]; }
 hid_enabled() { ui_checked "Keyboard & mouse"; }
 hid_disabled() { ! ui_checked "Keyboard & mouse"; }
-HID_PREFIX_LINKS="ffs.bootleg_rndis,hid.bootleg_kbd,hid.bootleg_mouse_wheel"
-prefix_linked_first() { [[ $(call STATE | jq -r '.configLinks | keys_unsorted[:3] | join(",")') == "$HID_PREFIX_LINKS" ]]; }
+# The prefix starts with the tethering mode's network function (NCM or RNDIS).
+prefix_linked_first() {
+    [[ $(call STATE | jq -r '.configLinks | keys_unsorted[:3] | join(",")') =~ ^(ncm\.bootleg|ffs\.bootleg_rndis),hid\.bootleg_kbd,hid\.bootleg_mouse_wheel$ ]]
+}
 # 0: a heads-up is pinned, 1: none, 2: SystemUI's dump failed (neither).
 heads_up_pinned() {
     local dump

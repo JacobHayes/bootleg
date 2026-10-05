@@ -14,10 +14,11 @@ import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.core.gadget.TransitionPhase
 import dev.jacobhayes.bootleg.core.hid.HidDescriptors
 import dev.jacobhayes.bootleg.core.hid.HidKind
-import dev.jacobhayes.bootleg.core.tether.TetherLimits
+import dev.jacobhayes.bootleg.core.tether.RndisMedium
 import dev.jacobhayes.bootleg.core.tether.UsbTetherController
 import dev.jacobhayes.bootleg.download.BackgroundJobScheduling
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
@@ -40,11 +41,7 @@ class BootlegRootService : RootService() {
     /** Serializes the privileged schedule broadcasts; never held with another lock. */
     private val scheduleBroadcastLock = Any()
 
-    // A re-plug left pending by a tethering change (or a dead root process's) would rebind under a new fd.
-    private val hidRelay =
-        HidRelay(replugPendingUntilMs = {
-            tetherTransitions.load()?.takeIf { it.isPendingAt(clock.nowMs()) }?.let { it.startedAtMs + TetherLimits.TRANSITION_GATE_MS_MAX }
-        })
+    private val hidRelay = HidRelay()
     private val hidHolders = HidNodeHolders()
 
     /** The controller's view of the relay: it closes our hidg fds before any UDC write or hid removal. */
@@ -58,13 +55,20 @@ class BootlegRootService : RootService() {
     private val images = ImageStore()
     private lateinit var controller: DefaultGadgetController
     private val clock = SystemClock()
-    private val tetherTransitions by lazy { FileTetherTransitionStore(clock = clock) }
 
     // Lazy: a device without the tethering service still serves disks and HID.
     private val tether by lazy {
-        val port = RootTetherPort(this)
-        UsbTetherController(port, controller, tetherTransitions, clock, hidNodes, port.rndis(rndisDaemons))
+        val medium =
+            object : RndisMedium {
+                override fun connected() = rndisDaemons.mediaConnected()
+
+                override fun set(connected: Boolean) = rndisDaemons.setMedia(connected)
+            }
+        UsbTetherController(RootTetherPort.create(this, ::queueTetherConverge), controller, clock, medium, FileTetherIntentStore())
     }
+
+    /** At most one [UsbTetherController.converge] waits to run; a report that comes meanwhile is covered by it. */
+    private val tetherConvergeQueued = AtomicBoolean(false)
 
     private lateinit var rndisDaemons: RndisDaemons
 
@@ -110,16 +114,31 @@ class BootlegRootService : RootService() {
         if (!journalStore.exists()) {
             synchronized(gadgetLock) {
                 runCatching {
-                    gadgetChange {
-                        awaitTetherTransition()
-                        adoptableDesired(controller.read())?.let { controller.apply(it) }
-                    }
+                    gadgetChange { adoptableDesired(controller.read())?.let { controller.apply(it) } }
                 }.onFailure { Log.w(TAG, "adopting live gadget state failed", it) }
             }
         } else if (runCatching { journalStore.load().phase != TransitionPhase.IDLE }.getOrDefault(true)) {
             // The last root process died mid-transition: its dead-man only brings ADB back, and nothing
             // else would finish what the journal wants (HID alone keeps no service watching USB).
             thread(name = "bootleg-resume") { reconcileHere("a root process died mid-transition") }
+        }
+        // Registers for Android's tethering reports; the first one converges a tethering a dead root process left on.
+        queueTetherConverge()
+    }
+
+    /**
+     * Stops Bootleg's tethering if Android reports it on while the last request left it off (see
+     * [UsbTetherController.converge]); serialized with every request by the gadget lock.
+     */
+    private fun queueTetherConverge() {
+        if (!tetherConvergeQueued.compareAndSet(false, true)) return
+        thread(name = "bootleg-tether-converge") {
+            synchronized(gadgetLock) {
+                tetherConvergeQueued.set(false)
+                runCatching { tether.converge() }
+                    .onSuccess { failure -> failure?.let { Log.w(TAG, "stopping tethering nobody asked for failed: $it") } }
+                    .onFailure { Log.w(TAG, "tethering convergence failed", it) }
+            }
         }
     }
 
@@ -139,10 +158,7 @@ class BootlegRootService : RootService() {
                 call {
                     val desired = BootlegJson.decodeFromString<Desired>(desiredJson)
                     BootlegJson.encodeToString(
-                        gadgetChange {
-                            awaitTetherTransition()
-                            controller.apply(canonicalize(desired), reconnect)
-                        },
+                        gadgetChange { controller.apply(canonicalize(desired), reconnect) },
                     )
                 }
 
@@ -157,30 +173,21 @@ class BootlegRootService : RootService() {
             ): String =
                 call {
                     BootlegJson.encodeToString(
-                        gadgetChange {
-                            awaitTetherTransition()
-                            controller.reinsert(lun, reconnect)
-                        },
+                        gadgetChange { controller.reinsert(lun, reconnect) },
                     )
                 }
 
             override fun bootlegOff(): String =
                 call {
                     BootlegJson.encodeToString(
-                        gadgetChange {
-                            awaitTetherTransition()
-                            controller.bootlegOff()
-                        },
+                        gadgetChange { controller.bootlegOff() },
                     )
                 }
 
             override fun reconcile(): String =
                 call {
                     BootlegJson.encodeToString(
-                        gadgetChange {
-                            awaitTetherTransition()
-                            controller.reconcile()
-                        },
+                        gadgetChange { controller.reconcile() },
                     )
                 }
 
@@ -245,7 +252,7 @@ class BootlegRootService : RootService() {
                 if (wakeScreen) RootCommands.runChecked(listOf("input", "keyevent", "KEYCODE_WAKEUP"))
             }
 
-            // The HAL's re-plug rebinds every linked hid function: the relay stays closed until it has settled.
+            // On or off changes no USB function; a first use or a mode change sets the prefix up (gadget lock, HID fence).
             override fun setUsbTethering(
                 on: Boolean,
                 mode: String,
@@ -282,10 +289,7 @@ class BootlegRootService : RootService() {
         synchronized(gadgetLock) {
             if (!wanted()) return
             runCatching {
-                gadgetChange {
-                    awaitTetherTransition()
-                    controller.reconcile()
-                }
+                gadgetChange { controller.reconcile() }
             }.onSuccess { Log.i(TAG, "$cause; reconcile: ${it::class.simpleName}") }
                 .onFailure { Log.w(TAG, "reconciling after $cause failed", it) }
         }
@@ -301,14 +305,6 @@ class BootlegRootService : RootService() {
         } finally {
             if (!configFs.udcWriteStuck) hidRelay.endGadgetChange()
         }
-
-    /**
-     * A tethering change a dead root process left behind may still re-plug USB: wait it out (relay
-     * closed) before anything that can export a disk. Only reads a file when there is no marker.
-     */
-    private fun awaitTetherTransition() {
-        if (tetherTransitions.load() != null) tether.awaitPendingTransition()
-    }
 
     private fun hidKind(kind: String): HidKind = requireNotNull(HidKind.fromWireName(kind)) { "unknown HID kind: $kind" }
 

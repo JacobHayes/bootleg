@@ -101,7 +101,13 @@ leading_links() {
     printf '%s\n' "$1" | grep -o '"configLinks":{[^}]*}' | grep -o '"[^"]*":"[^"]*"' |
         sed 's/^"\([^"]*\)":.*$/\1/' | head -3 | paste -sd, -
 }
-PREFIX_LINKS=ffs.bootleg_rndis,hid.bootleg_kbd,hid.bootleg_mouse_wheel
+# The prefix starts with the tethering mode's network function (NCM or RNDIS).
+is_prefix() {
+    case "$1" in
+    ncm.bootleg,hid.bootleg_kbd,hid.bootleg_mouse_wheel | ffs.bootleg_rndis,hid.bootleg_kbd,hid.bootleg_mouse_wheel) return 0 ;;
+    *) return 1 ;;
+    esac
+}
 
 # Links in configs/b.1 that aren't ours, as sorted "target" lines (the HAL renumbers functionN).
 foreign_links() {
@@ -296,7 +302,7 @@ before=$(call STATE)
 case "$before" in *'"udc":"'[!\"]*) ;; *) fail "gadget not bound before the test: $before" ;; esac
 foreign_before=$(foreign_links "$before")
 # Once Bootleg's prefix is set up, its idle keyboard and mouse stay enumerated; before that, any is another app's.
-if [ "$(leading_links "$before")" != "$PREFIX_LINKS" ]; then
+if ! is_prefix "$(leading_links "$before")"; then
     wait_for_host absent || fail "a $VENDOR_ID keyboard/mouse is already enumerated; is another HID app active?"
 fi
 
@@ -349,7 +355,7 @@ fi
 step "turning HID off"
 hid_off
 after=$(call STATE)
-[ "$(leading_links "$after")" = "$PREFIX_LINKS" ] || fail "the prefix isn't linked first after HID_OFF: $after"
+is_prefix "$(leading_links "$after")" || fail "the prefix isn't linked first after HID_OFF: $after"
 [ "$(foreign_links "$after")" = "$foreign_before" ] || fail "foreign links changed: before [$foreign_before] after [$(foreign_links "$after")]"
 wait_for_host present || fail "the Mac dropped the idle keyboard/mouse after HID_OFF (off must not re-enumerate)"
 

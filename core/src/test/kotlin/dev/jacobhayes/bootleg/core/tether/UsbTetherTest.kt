@@ -2,468 +2,279 @@ package dev.jacobhayes.bootleg.core.tether
 
 import dev.jacobhayes.bootleg.core.gadget.ApplyResult
 import dev.jacobhayes.bootleg.core.gadget.Desired
-import dev.jacobhayes.bootleg.core.gadget.FakeClock
-import dev.jacobhayes.bootleg.core.gadget.GadgetController
-import dev.jacobhayes.bootleg.core.gadget.GadgetState
-import dev.jacobhayes.bootleg.core.gadget.HidNodeGuard
-import dev.jacobhayes.bootleg.core.gadget.LunState
+import dev.jacobhayes.bootleg.core.gadget.GadgetRig
+import dev.jacobhayes.bootleg.core.gadget.GadgetRig.Companion.img
+import dev.jacobhayes.bootleg.core.gadget.LinkOrder
+import dev.jacobhayes.bootleg.core.gadget.LunMode
+import dev.jacobhayes.bootleg.core.gadget.RndisState
+import dev.jacobhayes.bootleg.core.gadget.SlotSpec
+import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.boolean
 import io.kotest.property.arbitrary.int
-import io.kotest.property.arbitrary.list
 import io.kotest.property.checkAll
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.IOException
 
+/** Bootleg's USB tethering over its own network function, against the fake kernel, HAL and Android. */
 class UsbTetherTest {
-    private val clock = FakeClock()
-
     /**
-     * Android's tethering plus the HAL as measured: a start tethers `ncm0` [upDelayMs] later, and the
-     * HAL's switch (UDC unbound for [unboundMs], NCM link appearing) lands [switchDelayMs] after the
-     * request; a stop mirrors it. Null [upDelayMs]: nothing ever comes up.
+     * Android's tethering by name as measured and as AOSP has it: one configured virtual interface, a
+     * stop by request ends every virtual request (other apps' too) and untethers the configured one, a
+     * stop matching no request fails with [TetherErrors.UNKNOWN_REQUEST]. An interface is tethered
+     * [TETHER_DELAY_MS] after its start, and only while it exists.
      */
-    private inner class FakeAndroid(
-        var tethered: Boolean = false,
-        val outcomes: ArrayDeque<TetherPort.StartOutcome> = ArrayDeque(),
-        val upDelayMs: Long? = 1_200,
-        val downDelayMs: Long = 1_100,
-        val switchDelayMs: Long = 1_300,
-        val unboundMs: Long = 600,
-    ) : TetherPort {
+    private inner class FakeAndroid : TetherPort {
+        val tethered = mutableMapOf<String, Int>()
+        val requests = mutableSetOf<String>()
+        var configured: String? = null
         val calls = mutableListOf<String>()
-        var ncmLinked = tethered
-        var udcBound = true
 
-        override fun start(timeoutMs: Long): TetherPort.StartOutcome {
-            calls += "start"
-            val outcome = outcomes.removeFirstOrNull() ?: TetherPort.StartOutcome.Started
-            when (outcome) {
-                TetherPort.StartOutcome.Started ->
-                    upDelayMs?.let {
-                        clock.schedule(it) { tethered = true }
-                        halSwitch(linked = true)
-                    }
-                TetherPort.StartOutcome.TimedOut -> clock.sleepMs(timeoutMs)
-                is TetherPort.StartOutcome.Failed -> Unit
+        /** The next start isn't answered in time; Android tethers anyway, [LATE_START_MS] later. */
+        var answerLate = false
+
+        override fun start(
+            interfaceName: String,
+            timeoutMs: Long,
+        ): TetherPort.StartOutcome {
+            calls += "start $interfaceName"
+            if (!exists(interfaceName)) return TetherPort.StartOutcome.Failed(UNKNOWN_INTERFACE)
+            requests += interfaceName
+            configured = interfaceName
+            if (answerLate) {
+                answerLate = false
+                rig.clock.sleepMs(timeoutMs)
+                rig.clock.schedule(LATE_START_MS) { tethered[interfaceName] = TetherPolicy.TETHERING_VIRTUAL }
+                return TetherPort.StartOutcome.TimedOut
             }
-            return outcome
+            rig.clock.schedule(TETHER_DELAY_MS) { tethered[interfaceName] = TetherPolicy.TETHERING_VIRTUAL }
+            return TetherPort.StartOutcome.Started
         }
 
-        override fun stop() {
-            calls += "stop"
-            if (!tethered && !ncmLinked) return
-            clock.schedule(downDelayMs) { tethered = false }
-            halSwitch(linked = false)
+        override fun stop(
+            interfaceName: String,
+            timeoutMs: Long,
+        ): Int? {
+            calls += "stop $interfaceName"
+            if (interfaceName !in requests) return TetherErrors.UNKNOWN_REQUEST
+            stopAll()
+            return null
         }
 
-        private fun halSwitch(linked: Boolean) {
-            clock.schedule(switchDelayMs) {
-                udcBound = false
-                ncmLinked = linked
-            }
-            clock.schedule(switchDelayMs + unboundMs) { udcBound = true }
+        override fun tethered(): Map<String, Int> {
+            // Android untethers an interface that went away (its function or daemon removed).
+            tethered.keys.removeAll { it.startsWith("bootleg_") && !exists(it) }
+            return tethered.toMap()
         }
 
-        override fun usbTethered(): Boolean = tethered
-    }
+        /** Set when a Bootleg interface is untethered (what root's callback sees). */
+        var dropped = false
 
-    private inner class FakeGadget(
-        private val android: FakeAndroid,
-        var luns: Map<Int, String> = emptyMap(),
-    ) : GadgetController {
-        var reconcileCount = 0
-        val reconcileAtMs = mutableListOf<Long>()
+        override fun takeBootlegDropped(): Boolean = dropped.also { dropped = false }
 
-        override fun read(): GadgetState = gadget(luns, android.ncmLinked, android.udcBound)
-
-        override fun apply(desired: Desired): ApplyResult = error("not used")
-
-        override fun eject(
-            lun: Int,
-            force: Boolean,
-        ): ApplyResult = error("not used")
-
-        override fun reconcile(): ApplyResult {
-            reconcileCount++
-            reconcileAtMs += clock.nowMs
-            return ApplyResult.Applied(read(), reenumerated = false)
+        fun foreignStart(name: String) {
+            requests += name
+            configured = name
+            tethered[name] = TetherPolicy.TETHERING_VIRTUAL
         }
 
-        override fun bootlegOff(): ApplyResult = error("not used")
-    }
+        fun foreignStop() = stopAll()
 
-    private class MemoryTransitions : TetherTransitionStore {
-        var marker: TetherTransition? = null
-        val saved = mutableListOf<TetherTransition>()
-
-        override fun load(): TetherTransition? = marker
-
-        override fun save(transition: TetherTransition) {
-            marker = transition
-            saved += transition
-        }
-
-        override fun clear() {
-            marker = null
-        }
-    }
-
-    private val transitions = MemoryTransitions()
-
-    /** The relay as the tether controller sees it: when it closed (as a count of Android calls by then), and who holds a node. */
-    private class RecordingGuard(
-        private val android: FakeAndroid,
-    ) : HidNodeGuard {
-        val closedAtCallCount = mutableListOf<Int>()
-        var heldBy = emptyList<String>()
-
-        override fun closeAll() {
-            closedAtCallCount += android.calls.size
-        }
-
-        override fun holders(functions: Collection<String>): List<String> = heldBy
-    }
-
-    private fun controller(
-        android: FakeAndroid,
-        gadget: FakeGadget = FakeGadget(android),
-        guard: RecordingGuard = RecordingGuard(android),
-    ) = UsbTetherController(android, gadget, transitions, clock, guard)
-
-    @Test
-    fun `turning it on waits for the HAL to settle, then reconciles once`() {
-        val android = FakeAndroid()
-        val gadget = FakeGadget(android)
-        val startMs = clock.nowMs
-        val result = controller(android, gadget).set(on = true)
-        assertTrue(result is TetherResult.Changed && result.active && result.switchSettled, "$result")
-        assertEquals(listOf("start"), android.calls)
-        assertEquals(1, gadget.reconcileCount)
-        // Never before the HAL rebound and held the UDC for the stable window.
-        val reboundAtMs = startMs + 1_300 + 600
-        assertTrue(gadget.reconcileAtMs.single() >= reboundAtMs + TetherLimits.SWITCH_STABLE_BOUND_MS, "${gadget.reconcileAtMs}")
-        assertNull(transitions.marker)
-        assertEquals(listOf(TetherTransition(true, startMs)), transitions.saved)
-    }
-
-    @Test
-    fun `HID is closed before Android is asked, in both directions`() {
-        for (on in listOf(true, false)) {
-            val android = FakeAndroid(tethered = !on)
-            val guard = RecordingGuard(android)
-            assertTrue(controller(android, guard = guard).set(on) is TetherResult.Changed)
-            assertEquals(0, guard.closedAtCallCount.first(), "closed before the first request")
-        }
-    }
-
-    @Test
-    fun `a held hid node refuses the change before Android is asked`() {
-        val android = FakeAndroid()
-        val gadget = FakeGadget(android)
-        val guard = RecordingGuard(android).apply { heldBy = listOf("pid 4242 (hid.bootleg_kbd)") }
-        val result = controller(android, gadget, guard).set(on = true)
-        assertTrue(result is TetherResult.Failed && "pid 4242" in result.reason, "$result")
-        assertTrue(android.calls.isEmpty())
-        assertEquals(0, gadget.reconcileCount)
-        assertTrue(transitions.saved.isEmpty())
-    }
-
-    @Test
-    fun `nothing is closed when nothing is re-plugged`() {
-        for (luns in listOf(emptyMap(), mapOf(0 to "/data/media/0/bootleg/x.iso"))) {
-            val android = FakeAndroid(tethered = luns.isEmpty())
-            val guard = RecordingGuard(android)
-            controller(android, FakeGadget(android, luns), guard).set(on = true)
-            assertTrue(guard.closedAtCallCount.isEmpty(), "$luns")
-        }
-    }
-
-    @Test
-    fun `turning it off waits for the interface and the switch`() {
-        val android = FakeAndroid(tethered = true)
-        val gadget = FakeGadget(android)
-        val result = controller(android, gadget).set(on = false)
-        assertTrue(result is TetherResult.Changed && !result.active && result.switchSettled, "$result")
-        assertEquals(listOf("stop"), android.calls)
-        assertFalse(android.ncmLinked)
-        assertEquals(1, gadget.reconcileCount)
-        assertNull(transitions.marker)
-    }
-
-    @Test
-    fun `asking for the current state does nothing, even with disks exposed`() {
-        for (on in listOf(true, false)) {
-            val android = FakeAndroid(tethered = on)
-            val gadget = FakeGadget(android, mapOf(0 to "/data/media/0/bootleg/x.iso"))
-            assertEquals(TetherResult.Unchanged(on), controller(android, gadget).set(on))
-            assertTrue(android.calls.isEmpty())
-            assertEquals(0, gadget.reconcileCount)
-            assertTrue(transitions.saved.isEmpty())
-        }
-    }
-
-    @Test
-    fun `an exposed disk refuses both directions without touching Android`() {
-        for (on in listOf(true, false)) {
-            val android = FakeAndroid(tethered = !on)
-            val gadget = FakeGadget(android, mapOf(0 to "", 1 to "/data/media/0/bootleg/x.iso"))
-            val result = controller(android, gadget).set(on)
-            assertEquals(TetherResult.Refused(!on, listOf(1), TetherPolicy.DISKS_EXPOSED_REASON), result)
-            assertTrue(android.calls.isEmpty())
-            assertEquals(0, gadget.reconcileCount)
-            assertTrue(transitions.saved.isEmpty())
-        }
-    }
-
-    @Test
-    fun `ejected LUNs do not count as exposed`() {
-        val android = FakeAndroid()
-        val result = controller(android, FakeGadget(android, mapOf(0 to "", 1 to ""))).set(on = true)
-        assertTrue(result is TetherResult.Changed, "$result")
-    }
-
-    @Test
-    fun `a refusal from Android is reported, not retried and leaves nothing to stop`() {
-        val android = FakeAndroid(outcomes = ArrayDeque(listOf(TetherPort.StartOutcome.Failed(11))))
-        val gadget = FakeGadget(android)
-        val result = controller(android, gadget).set(on = true)
-        assertTrue(result is TetherResult.Failed && "entitlement" in result.reason, "$result")
-        assertEquals(listOf("start"), android.calls)
-        assertEquals(0, gadget.reconcileCount)
-        assertNull(transitions.marker)
-    }
-
-    @Test
-    fun `a transient failure is retried once`() {
-        val android = FakeAndroid(outcomes = ArrayDeque(listOf(TetherPort.StartOutcome.Failed(TetherErrors.SERVICE_UNAVAILABLE))))
-        val result = controller(android).set(on = true)
-        assertTrue(result is TetherResult.Changed && result.active, "$result")
-        assertEquals(listOf("start", "start"), android.calls)
-    }
-
-    @Test
-    fun `transient failures stop after the attempt limit`() {
-        val failure = TetherPort.StartOutcome.Failed(TetherErrors.INTERNAL_ERROR)
-        val android = FakeAndroid(outcomes = ArrayDeque(List(5) { failure }))
-        val result = controller(android).set(on = true)
-        assertTrue(result is TetherResult.Failed, "$result")
-        assertEquals(List(TetherLimits.START_ATTEMPT_COUNT_MAX) { "start" }, android.calls)
-    }
-
-    @Test
-    fun `no answer from Android withdraws the request and waits out its unverified marker before returning`() {
-        val android = FakeAndroid(outcomes = ArrayDeque(listOf(TetherPort.StartOutcome.TimedOut)))
-        val gadget = FakeGadget(android)
-        val result = controller(android, gadget).set(on = true)
-        assertTrue(result is TetherResult.Failed, "$result")
-        assertEquals(listOf("start", "stop"), android.calls)
-        assertEquals(0, gadget.reconcileCount)
-        val marker = transitions.saved.last()
-        assertTrue(!marker.verified && !marker.requestedOn, "$marker")
-        assertEquals(marker.startedAtMs + TetherLimits.TRANSITION_GATE_MS_MAX, clock.nowMs, "the start may still be queued: a full window")
-        assertNull(transitions.marker)
-    }
-
-    @Test
-    fun `an interface that never comes up is stopped again and the marker cleared once that settled`() {
-        val android = FakeAndroid(upDelayMs = null)
-        val gadget = FakeGadget(android)
-        val startMs = clock.nowMs
-        val result = controller(android, gadget).set(on = true)
-        assertTrue(result is TetherResult.Failed && !result.active, "$result")
-        assertEquals(listOf("start", "stop"), android.calls)
-        assertEquals(0, gadget.reconcileCount)
-        assertNull(transitions.marker)
-        assertEquals(listOf(true, false), transitions.saved.map { it.requestedOn })
-        assertTrue(clock.nowMs - startMs <= TetherLimits.INTERFACE_WAIT_MS_MAX * 2 + TetherLimits.SWITCH_WAIT_MS_MAX)
-    }
-
-    @Test
-    fun `a host slower than the interface wait (Windows 7 configures ~3-4s late) fails cleanly and leaves no marker`() {
-        // Android tethers ncm0 only once the host configured the device; a slow host misses the 5s wait.
-        val android = FakeAndroid(upDelayMs = TetherLimits.INTERFACE_WAIT_MS_MAX + 500)
-        val gadget = FakeGadget(android)
-        val guard = RecordingGuard(android)
-        val startMs = clock.nowMs
-        val result = controller(android, gadget, guard).set(on = true)
-        assertTrue(result is TetherResult.Failed, "$result")
-        assertEquals(listOf("start", "stop"), android.calls)
-        assertEquals(0, guard.closedAtCallCount.first(), "HID closed before Android was asked")
-        assertNull(transitions.marker, "nothing left to hold HID opens back")
-        assertTrue(clock.nowMs - startMs <= TetherLimits.INTERFACE_WAIT_MS_MAX * 2 + TetherLimits.TRANSITION_GATE_MS_MAX)
-        // Whatever Android does with the late start, the withdrawal's stop has the last word.
-        clock.sleepMs(60_000)
-        assertFalse(android.tethered)
-    }
-
-    @Test
-    fun `a UDC that never stays bound (a host that keeps resetting) still returns within the window, marker cleared`() {
-        val android = FakeAndroid()
-        val gadget = FakeGadget(android)
-        // Drops every 700ms for two minutes: the switch never counts as settled.
-        val flapUntilMs = clock.nowMs + 120_000
-
-        fun flap(atMs: Long) {
-            clock.schedule(atMs) {
-                android.udcBound = false
-                clock.schedule(300) { android.udcBound = true }
-                if (clock.nowMs < flapUntilMs) flap(700)
-            }
-        }
-        flap(2_000)
-        val startMs = clock.nowMs
-        val result = controller(android, gadget).set(on = true)
-        assertTrue(result is TetherResult.Changed && !result.switchSettled, "$result")
-        assertNull(transitions.marker)
-        assertTrue(
-            clock.nowMs - startMs <=
-                TetherLimits.INTERFACE_WAIT_MS_MAX + TetherLimits.SWITCH_WAIT_MS_MAX + TetherLimits.TRANSITION_GATE_MS_MAX,
-            "${clock.nowMs - startMs}ms",
-        )
-    }
-
-    @Test
-    fun `a stop that never lands fails once its marker's window has passed`() {
-        val android = FakeAndroid(tethered = true, downDelayMs = 60_000, switchDelayMs = 60_000)
-        val startMs = clock.nowMs
-        val result = controller(android).set(on = false)
-        assertTrue(result is TetherResult.Failed && result.active, "$result")
-        assertTrue(
-            clock.nowMs - startMs <= TetherLimits.TRANSITION_GATE_MS_MAX + TetherLimits.POLL_INTERVAL_MS,
-            "${clock.nowMs - startMs}ms",
-        )
-        assertEquals(listOf(false), transitions.saved.map { it.requestedOn })
-        assertNull(transitions.marker)
-    }
-
-    @Test
-    fun `a HAL that never finishes its switch still reconciles, and says so`() {
-        val android = FakeAndroid(switchDelayMs = 60_000)
-        val gadget = FakeGadget(android)
-        val result = controller(android, gadget).set(on = true)
-        assertTrue(result is TetherResult.Changed && result.active && !result.switchSettled, "$result")
-        assertEquals(1, gadget.reconcileCount)
-        // The HAL may still re-plug: set returns only after a full, unverified window.
-        val marker = transitions.saved.last()
-        assertTrue(!marker.verified && marker.requestedOn, "$marker")
-        assertTrue(clock.nowMs >= marker.startedAtMs + TetherLimits.TRANSITION_GATE_MS_MAX)
-        assertNull(transitions.marker)
-    }
-
-    @Test
-    fun `a marker is pending only inside its window`() {
-        val marker = TetherTransition(requestedOn = true, startedAtMs = 10_000)
-        assertFalse(marker.isPendingAt(9_999), "from an earlier boot")
-        assertTrue(marker.isPendingAt(10_000))
-        assertTrue(marker.isPendingAt(10_000 + TetherLimits.TRANSITION_GATE_MS_MAX - 1))
-        assertFalse(marker.isPendingAt(10_000 + TetherLimits.TRANSITION_GATE_MS_MAX))
-    }
-
-    @Test
-    fun `the gate closes HID only for a marker still inside its window`() {
-        val android = FakeAndroid(tethered = true)
-        for ((startedAtMs, closes) in listOf(clock.nowMs to true, clock.nowMs + 50_000 to false, clock.nowMs - 50_000 to false)) {
-            val guard = RecordingGuard(android)
-            transitions.marker = TetherTransition(requestedOn = true, startedAtMs = startedAtMs)
-            controller(android, guard = guard).awaitPendingTransition()
-            assertEquals(closes, guard.closedAtCallCount.isNotEmpty(), "marker at $startedAtMs")
-        }
-    }
-
-    @Test
-    fun `the gate waits the full window when a verified marker's change never shows`() {
-        val reportedWithoutLink = FakeAndroid(tethered = true).apply { ncmLinked = false }
-        for (android in listOf(FakeAndroid(tethered = false), reportedWithoutLink)) {
-            // Asked for on: either Android never reports it, or it does but the HAL never links NCM.
-            transitions.marker = TetherTransition(requestedOn = true, startedAtMs = clock.nowMs)
-            val startMs = clock.nowMs
-            controller(android).awaitPendingTransition()
-            assertEquals(TetherLimits.TRANSITION_GATE_MS_MAX, clock.nowMs - startMs)
-            assertNull(transitions.marker)
-        }
-    }
-
-    @Test
-    fun `the gate waits out a verified marker only until the change has settled`() {
-        val android = FakeAndroid()
-        transitions.marker = TetherTransition(requestedOn = true, startedAtMs = clock.nowMs)
-        // A dead root process had asked Android to start: the switch is still to come.
-        clock.schedule(1_200) { android.tethered = true }
-        clock.schedule(1_300) {
-            android.udcBound = false
-            android.ncmLinked = true
-        }
-        clock.schedule(1_900) { android.udcBound = true }
-        val startMs = clock.nowMs
-        controller(android).awaitPendingTransition()
-        val waitedMs = clock.nowMs - startMs
-        assertTrue(waitedMs in 2_900..3_100, "waited ${waitedMs}ms")
-        assertNull(transitions.marker)
-    }
-
-    @Test
-    fun `the gate always waits out an unverified marker's full window`() {
-        val android = FakeAndroid()
-        transitions.marker = TetherTransition(requestedOn = false, startedAtMs = clock.nowMs - 4_000, verified = false)
-        val startMs = clock.nowMs
-        controller(android).awaitPendingTransition()
-        assertEquals(TetherLimits.TRANSITION_GATE_MS_MAX - 4_000, clock.nowMs - startMs)
-        assertNull(transitions.marker)
-    }
-
-    @Test
-    fun `an old or future marker costs at most one check`() {
-        val android = FakeAndroid(tethered = true)
-        for (startedAtMs in listOf(clock.nowMs + 50_000, clock.nowMs - 50_000)) {
-            transitions.marker = TetherTransition(requestedOn = false, startedAtMs = startedAtMs)
-            val startMs = clock.nowMs
-            controller(android).awaitPendingTransition()
-            assertEquals(startMs, clock.nowMs)
-            assertNull(transitions.marker)
-        }
-    }
-
-    @Test
-    fun `set waits out a pending marker before deciding`() {
-        val android = FakeAndroid(tethered = false)
-        transitions.marker = TetherTransition(requestedOn = true, startedAtMs = clock.nowMs, verified = false)
-        val gadget = FakeGadget(android, mapOf(0 to "/data/media/0/bootleg/x.iso"))
-        val startMs = clock.nowMs
-        val result = controller(android, gadget).set(on = true)
-        assertTrue(result is TetherResult.Refused, "$result")
-        assertEquals(TetherLimits.TRANSITION_GATE_MS_MAX, clock.nowMs - startMs)
-    }
-
-    @Test
-    fun `the decision never proceeds while media is loaded`() =
-        runBlocking<Unit> {
-            checkAll(Arb.boolean(), Arb.boolean(), Arb.list(Arb.boolean(), 0..8)) { requestOn, active, loaded ->
-                val state = gadget(loaded.mapIndexed { lun, has -> lun to (if (has) "/data/media/0/bootleg/$lun.img" else "") }.toMap())
-                val decision = TetherPolicy.decide(requestOn, active, state)
-                when {
-                    requestOn == active -> assertEquals(TetherDecision.AlreadyDone, decision)
-                    loaded.any { it } ->
-                        assertEquals(TetherDecision.RefuseDisksExposed(loaded.indices.filter { loaded[it] }), decision)
-                    else -> assertEquals(TetherDecision.Proceed, decision)
+        private fun stopAll() {
+            requests.clear()
+            configured?.let { name ->
+                rig.clock.schedule(TETHER_DELAY_MS) {
+                    tethered.remove(name)
+                    if (TetherPolicy.isBootlegInterface(name)) dropped = true
                 }
             }
+            configured = null
         }
 
-    @Test
-    fun `usb tether interfaces and functions are recognised by name`() {
-        for (name in listOf("ncm0", "rndis0", "usb0", "ncm12")) assertTrue(TetherPolicy.isUsbTetherInterface(name), name)
-        for (name in listOf("wlan0", "ap_br_wlan0", "bt-pan", "ncm", "xncm0", "rmnet0", "")) {
-            assertFalse(TetherPolicy.isUsbTetherInterface(name), name)
+        private fun exists(name: String): Boolean {
+            val state = rig.state()
+            return when {
+                name == TetherPolicy.RNDIS_INTERFACE -> state.rndis == RndisState.READY
+                name.startsWith("bootleg_ncm") -> state.ncmInterface == name
+                else -> true
+            }
         }
-        assertTrue(TetherPolicy.usbTethered(listOf("wlan1", "ncm0")))
-        assertFalse(TetherPolicy.usbTethered(listOf("wlan1")))
-        assertTrue(TetherPolicy.tetherFunctionLinked(gadget(emptyMap(), ncmLinked = true)))
-        assertFalse(TetherPolicy.tetherFunctionLinked(gadget(emptyMap(), ncmLinked = false)))
+    }
+
+    /** The RNDIS daemon's medium; [events] in call order with Android's. */
+    private inner class FakeMedium : RndisMedium {
+        var connected = false
+        var undrained = false
+
+        override fun connected(): Boolean = connected && rig.state().rndis == RndisState.READY
+
+        override fun set(connected: Boolean) {
+            android.calls += "media $connected"
+            check(!connected || TetherPolicy.RNDIS_INTERFACE in android.tethered) { "the medium connected before Android tethered the TAP" }
+            if (!connected && undrained) throw IOException("a frame to the host is still in flight")
+            this.connected = connected
+        }
+    }
+
+    private class MemoryIntent : TetherIntentStore {
+        var on = false
+
+        override fun load(): Boolean = on
+
+        override fun save(on: Boolean) {
+            this.on = on
+        }
+    }
+
+    private val rig = GadgetRig()
+    private val gadget = rig.controller()
+    private val android = FakeAndroid()
+    private val medium = FakeMedium()
+    private val intent = MemoryIntent()
+    private val tether = UsbTetherController(android, gadget, rig.clock, medium, intent)
+    private val disk = Desired(listOf(SlotSpec(0, img(1), LunMode.DISK_RO)))
+
+    /** Our own re-enumerations so far (each opens an unbound window of the executor's). */
+    private fun windows() = rig.fs.executorWindowsUs.size + rig.fs.unbindableWindowsUs.size
+
+    @Test
+    fun `NCM is the default, set up by the first on, and on or off never re-plugs USB, disks exposed or not`() {
+        val on = assertInstanceOf(TetherResult.Changed::class.java, tether.set(true, TetherMode.DEFAULT))
+        assertTrue(on.active)
+        assertInstanceOf(ApplyResult.Applied::class.java, on.setup)
+        assertEquals(
+            LinkOrder.prefix(TetherMode.NCM),
+            rig
+                .state()
+                .configLinks.keys
+                .take(3),
+        )
+        assertEquals(mapOf("bootleg_ncm0" to TetherPolicy.TETHERING_VIRTUAL), android.tethered)
+        assertTrue(intent.on)
+        assertInstanceOf(ApplyResult.Applied::class.java, gadget.apply(disk))
+        val windows = windows()
+        val switches = rig.hal.switchCount
+        repeat(3) {
+            assertFalse(assertInstanceOf(TetherResult.Changed::class.java, tether.set(false, TetherMode.NCM)).active)
+            assertInstanceOf(TetherResult.Unchanged::class.java, tether.set(false, TetherMode.NCM))
+            assertTrue(assertInstanceOf(TetherResult.Changed::class.java, tether.set(true, TetherMode.NCM)).active)
+            assertInstanceOf(TetherResult.Unchanged::class.java, tether.set(true, TetherMode.NCM))
+        }
+        assertEquals(windows, windows(), "no re-enumeration")
+        assertEquals(switches, rig.hal.switchCount)
+        assertEquals(
+            img(1),
+            rig
+                .state()
+                .luns
+                .getValue(0)
+                .file,
+            "the disk stayed",
+        )
+    }
+
+    @Test
+    fun `a mode change is refused with a disk exposed, then stops the old interface before setting the prefix up again`() {
+        tether.set(true, TetherMode.NCM)
+        assertInstanceOf(ApplyResult.Applied::class.java, gadget.apply(disk))
+        val refused = assertInstanceOf(TetherResult.Refused::class.java, tether.set(true, TetherMode.RNDIS))
+        assertEquals(listOf(0), refused.exposedLuns)
+        assertEquals(setOf("bootleg_ncm0"), android.tethered.keys, "a refused switch leaves the old mode on")
+        assertEquals(TetherMode.NCM, rig.journal().desired.network)
+        gadget.eject(0, force = false)
+        android.calls.clear()
+        assertTrue(assertInstanceOf(TetherResult.Changed::class.java, tether.set(true, TetherMode.RNDIS)).active)
+        assertEquals(listOf("stop bootleg_ncm0", "start bootleg_rndis", "media true"), android.calls)
+        assertEquals(
+            LinkOrder.prefix(TetherMode.RNDIS),
+            rig
+                .state()
+                .configLinks.keys
+                .take(3),
+        )
+        assertEquals(setOf(TetherPolicy.RNDIS_INTERFACE), android.tethered.keys)
+        // Off is the medium first (shown drained), then Android; a medium that can't drain fails it.
+        medium.undrained = true
+        assertTrue(assertInstanceOf(TetherResult.Failed::class.java, tether.set(false, TetherMode.RNDIS)).reason.contains("in flight"))
+        assertTrue(TetherPolicy.RNDIS_INTERFACE in android.tethered, "Android keeps tethering until the medium is off")
+        medium.undrained = false
+        android.calls.clear()
+        assertInstanceOf(TetherResult.Changed::class.java, tether.set(false, TetherMode.RNDIS))
+        assertEquals(listOf("media false", "stop bootleg_rndis"), android.calls)
+        assertTrue(android.tethered.isEmpty())
+    }
+
+    @Test
+    fun `another app's virtual tethering is never cut, and a request it erased is stopped through a fresh one`() {
+        android.foreignStart(AVF)
+        assertTrue(assertInstanceOf(TetherResult.Failed::class.java, tether.set(true, TetherMode.NCM)).reason.contains(AVF))
+        assertFalse(android.calls.any { it.startsWith("start") }, "${android.calls}")
+        android.foreignStop()
+        rig.clock.sleepMs(TETHER_DELAY_MS)
+        assertInstanceOf(TetherResult.Changed::class.java, tether.set(true, TetherMode.NCM))
+        // The other app starts after us (its interface is now Android's configured one): off is refused.
+        android.foreignStart(AVF)
+        assertInstanceOf(TetherResult.Failed::class.java, tether.set(false, TetherMode.NCM))
+        assertTrue(AVF in android.tethered && "bootleg_ncm0" in android.tethered)
+        // Its own stop erased our request too; ours stays tethered with no request left.
+        android.foreignStop()
+        rig.clock.sleepMs(TETHER_DELAY_MS)
+        android.calls.clear()
+        assertInstanceOf(TetherResult.Changed::class.java, tether.set(false, TetherMode.NCM))
+        assertEquals(listOf("stop bootleg_ncm0", "start bootleg_ncm0", "stop bootleg_ncm0"), android.calls)
+        assertTrue(android.tethered.isEmpty())
+    }
+
+    @Test
+    fun `a start Android finishes after its answer timed out is stopped while the choice is off, which an external stop sets`() {
+        tether.set(true, TetherMode.NCM)
+        tether.set(false, TetherMode.NCM)
+        android.answerLate = true
+        assertInstanceOf(TetherResult.Failed::class.java, tether.set(true, TetherMode.NCM))
+        rig.clock.sleepMs(LATE_START_MS)
+        assertTrue("bootleg_ncm0" in android.tethered, "Android tethered it anyway")
+        assertNull(tether.converge())
+        assertTrue(android.tethered.isEmpty(), "the choice is off, so it was stopped")
+        tether.set(true, TetherMode.NCM)
+        android.calls.clear()
+        assertNull(tether.converge())
+        assertEquals(emptyList<String>(), android.calls, "nothing to do while the choice is on")
+        // A stop outside Bootleg (another app's ended ours) turns the choice off, so a later late start is
+        // stopped too, even when the late start lands before root gets to look.
+        android.foreignStop()
+        rig.clock.sleepMs(TETHER_DELAY_MS)
+        android.foreignStart("bootleg_ncm0")
+        android.requests.clear()
+        android.configured = null
+        // A request refused in between doesn't wipe out the drop.
+        assertInstanceOf(ApplyResult.Applied::class.java, gadget.apply(disk))
+        assertInstanceOf(TetherResult.Refused::class.java, tether.set(true, TetherMode.RNDIS))
+        assertNull(tether.converge())
+        assertFalse(intent.on)
+        assertTrue(android.tethered.isEmpty(), "the late start was stopped")
+    }
+
+    @Test
+    fun `without the API to tether by name tethering is unsupported`() {
+        val unsupported = UsbTetherController(null, gadget, rig.clock, medium, intent)
+        assertEquals(UsbTetherController.UNSUPPORTED_REASON, (unsupported.set(true, TetherMode.NCM) as TetherResult.Failed).reason)
+        assertNull(unsupported.converge())
+        assertFalse(unsupported.usbTethered())
+    }
+
+    @Test
+    fun `only Bootleg's interfaces count as its tethering`() {
+        for (name in listOf("bootleg_rndis", "bootleg_ncm0", "bootleg_ncm12")) assertTrue(TetherPolicy.isBootlegInterface(name), name)
+        for (name in listOf("ncm0", "rndis0", "usb0", "bootleg_ncm", "bootleg_ncm%d", "avf_tap_fixed", "wlan0", "")) {
+            assertFalse(TetherPolicy.isBootlegInterface(name), name)
+        }
+        assertEquals(listOf(AVF), TetherPolicy.foreignVirtual(mapOf(AVF to 7, "bootleg_ncm0" to 7, "ncm0" to 5)))
     }
 
     @Test
@@ -486,65 +297,20 @@ class UsbTetherTest {
         }
 
     @Test
-    fun `a request sets the choice only when it succeeded`() {
-        val applied = ApplyResult.Applied(gadget(emptyMap()), reenumerated = true)
-        assertEquals(true, TetherChoice.afterRequest(TetherResult.Changed(true, applied, switchSettled = true)))
+    fun `a request sets the choice only when it succeeded, and restore needs both the opt-in and the choice`() {
+        assertEquals(true, TetherChoice.afterRequest(TetherResult.Changed(true)))
         assertEquals(false, TetherChoice.afterRequest(TetherResult.Unchanged(false)))
         assertNull(TetherChoice.afterRequest(TetherResult.Refused(true, listOf(0), "x")))
         assertNull(TetherChoice.afterRequest(TetherResult.Failed(false, "x")))
-    }
-
-    @Test
-    fun `a re-enumeration's ncm0 drop never clears the choice, a real stop does`() {
-        // Bootleg's own re-plug: ncm0 is gone for a few seconds and root's callback may say off,
-        // but the HAL's ncm function stays linked.
-        assertFalse(
-            TetherChoice.externalStopConfirmed(
-                stillOff = true,
-                rootTethered = false,
-                tetherFunctionLinked = true,
-                requestInFlight = false,
-                shuttingDown = false,
-            ),
-        )
-        // ncm0 came back within the confirm window: a broadcast said on again.
-        assertFalse(TetherChoice.externalStopConfirmed(false, false, false, false, false))
-        // Android stopped it (unplug, mode change): off everywhere and the function unlinked.
-        assertTrue(TetherChoice.externalStopConfirmed(true, false, false, false, false))
-        // Any other signal keeps the choice.
-        assertFalse(TetherChoice.externalStopConfirmed(true, true, false, false, false))
-        assertFalse(TetherChoice.externalStopConfirmed(true, false, false, true, false))
-        assertFalse(TetherChoice.externalStopConfirmed(true, false, false, false, true))
-        assertTrue(TetherLimits.EXTERNAL_STOP_CONFIRM_MS > WINDOWS_7_NCM_RETURN_MS, "the wait outlasts ncm0's return")
-    }
-
-    @Test
-    fun `restore needs both the opt-in and the choice`() {
         assertTrue(TetherChoice.restoreOnBoot(restoreAfterReboot = true, choice = true))
         assertFalse(TetherChoice.restoreOnBoot(restoreAfterReboot = true, choice = false))
         assertFalse(TetherChoice.restoreOnBoot(restoreAfterReboot = false, choice = true))
     }
 
-    @Test
-    fun `error codes have names`() {
-        assertEquals("carrier entitlement check failed (11)", TetherErrors.describe(11))
-        assertEquals("error (99)", TetherErrors.describe(99))
-    }
-
     private companion object {
-        /** Measured: ncm0 is back ~4s after a Bootleg re-enumeration with a Windows 7 host. */
-        const val WINDOWS_7_NCM_RETURN_MS = 4_000L
-
-        fun gadget(
-            files: Map<Int, String>,
-            ncmLinked: Boolean = false,
-            udcBound: Boolean = true,
-        ): GadgetState =
-            GadgetState(
-                udc = if (udcBound) "11110000.dwc3" else "",
-                functions = setOf("ffs.adb", "ncm.gs9"),
-                configLinks = mapOf("function0" to "ffs.adb") + (if (ncmLinked) mapOf("function1" to "ncm.gs9") else emptyMap()),
-                luns = files.mapValues { (_, file) -> LunState(file, ro = true, cdrom = false, removable = true, nofua = false) },
-            )
+        const val AVF = "avf_tap_fixed"
+        const val TETHER_DELAY_MS = 100L
+        const val LATE_START_MS = 500L
+        const val UNKNOWN_INTERFACE = 1
     }
 }

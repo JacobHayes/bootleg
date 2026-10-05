@@ -291,13 +291,13 @@ sealed interface DeviceOutcome {
     /** Not started: an earlier operation (one that timed out) is still running on the device lane. */
     data object Busy : DeviceOutcome
 
-    /** USB tethering is now [active]; [warning] when it changed but the gadget then needs attention. */
+    /** USB tethering is now [active]; [warning] when it changed but setting the prefix up left the drives needing attention. */
     data class Tethering(
         val active: Boolean,
         val warning: String?,
     ) : DeviceOutcome
 
-    /** USB tethering refused: a disk is exposed and the re-plug would pull it from the host. */
+    /** USB tethering refused: it needs the prefix set up (a mode change), a disk is exposed and the re-plug would pull it. */
     data class DisksExposed(
         val reason: String,
     ) : DeviceOutcome
@@ -314,18 +314,16 @@ sealed interface DeviceOutcome {
         fun of(result: TetherResult): DeviceOutcome =
             when (result) {
                 is TetherResult.Changed -> {
-                    val warnings =
-                        listOfNotNull(
-                            "the USB switch didn't settle in time".takeUnless { result.switchSettled },
-                            when (val reconcile = result.reconcile) {
-                                is ApplyResult.Applied -> null
-                                is ApplyResult.Partial ->
-                                    "some slots failed: " + reconcile.slotFailures.entries.joinToString { "${it.key}: ${it.value}" }
-                                is ApplyResult.Failed -> "drives failed: ${reconcile.reason}"
-                                is ApplyResult.NeedsAttention -> "drives need attention: ${reconcile.reason}"
-                            },
-                        )
-                    Tethering(result.active, warnings.joinToString("; ").ifEmpty { null })
+                    val warning =
+                        when (val setup = result.setup) {
+                            null, is ApplyResult.Applied -> null
+                            is ApplyResult.Partial ->
+                                "some slots failed: " +
+                                    setup.slotFailures.entries.joinToString { "${it.key}: ${it.value}" }
+                            is ApplyResult.Failed -> "drives failed: ${setup.reason}"
+                            is ApplyResult.NeedsAttention -> "drives need attention: ${setup.reason}"
+                        }
+                    Tethering(result.active, warning)
                 }
                 is TetherResult.Unchanged -> Tethering(result.active, warning = null)
                 is TetherResult.Refused -> DisksExposed(result.reason)

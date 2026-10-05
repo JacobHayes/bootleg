@@ -52,7 +52,6 @@ import dev.jacobhayes.bootleg.RootStatus
 import dev.jacobhayes.bootleg.core.gadget.GadgetLimits
 import dev.jacobhayes.bootleg.core.gadget.LunMode
 import dev.jacobhayes.bootleg.core.gadget.TetherMode
-import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.ui.common.ConfirmDialog
 import dev.jacobhayes.bootleg.ui.common.EmptyState
 import dev.jacobhayes.bootleg.ui.common.NoticeCard
@@ -109,7 +108,6 @@ fun DrivesScreen(
                 tethering = tethering,
                 mode = tetherMode,
                 busy = tetheringBusy,
-                disksExposed = gadget?.let(TetherPolicy::exposedLuns).orEmpty().isNotEmpty(),
                 rootGranted = root is RootStatus.Granted,
                 onToggle = { controller.setUsbTethering(it) },
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
@@ -264,21 +262,16 @@ private const val EJECT_HINT =
         "Drive not showing up? Rescan disks on the computer (Windows: Disk Management, Action, Rescan Disks), " +
         "or turn on Reconnect USB after a disk change in Settings."
 
-/**
- * USB tethering next to the drives, over the mode chosen in Settings: RNDIS (Bootleg's adapter)
- * switches without touching USB; NCM (Android's) re-plugs USB, so it can't change while a disk is exposed.
- */
+/** USB tethering next to the drives, over the mode chosen in Settings; on or off never touches the drives. */
 @Composable
 private fun TetherCard(
     tethering: Boolean?,
     mode: TetherMode,
     busy: Boolean,
-    disksExposed: Boolean,
     rootGranted: Boolean,
     onToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val blocked = disksExposed && mode == TetherMode.NCM
     val status =
         when {
             busy -> "Switching…"
@@ -293,7 +286,7 @@ private fun TetherCard(
                 Text("USB tethering", style = MaterialTheme.typography.titleMedium)
                 Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    if (blocked) "Eject every disk first, or choose RNDIS in Settings" else "Change the mode in Settings",
+                    "Change the mode in Settings",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -302,7 +295,7 @@ private fun TetherCard(
             Switch(
                 checked = tethering == true,
                 onCheckedChange = onToggle,
-                enabled = rootGranted && !busy && tethering != null && !blocked,
+                enabled = rootGranted && !busy && tethering != null,
                 modifier = Modifier.testTag("usb-tethering-switch"),
             )
         }

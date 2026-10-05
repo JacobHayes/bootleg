@@ -20,7 +20,7 @@ whatever computer it's plugged into. You can also drive it from another computer
   - boot-menu key presets for each vendor;
   - paste-as-typing.
 - **USB tethering.** Share the phone's internet with the computer over the same USB connection
-  (Android's own USB tethering), alongside the keyboard and mouse.
+  (Bootleg's own NCM or RNDIS adapter, which Android tethers), alongside the disks, keyboard and mouse.
 - **Remote control.**
   - The phone runs an embedded Tailscale node with no VPN slot. Any approved device on your
     tailnet can use the web UI or the `bootleg` CLI to mount images, type, send boot keys,

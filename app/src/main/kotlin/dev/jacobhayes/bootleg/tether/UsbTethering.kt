@@ -22,7 +22,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Android's USB tethering as the app sees it: the sticky `TETHER_STATE_CHANGED` broadcast for
+ * Bootleg's USB tethering as the app sees it: the sticky `TETHER_STATE_CHANGED` broadcast for
  * display (no polling), the root call for changes, and the remembered choice ([TetherChoice]) that
  * restore after reboot reads. Everything that touches [requestCount], the state or the choice runs
  * on the main thread, so observations and request completions are applied one at a time.
@@ -33,8 +33,6 @@ class UsbTethering(
     private val scope: CoroutineScope,
     private val rootSet: suspend (on: Boolean) -> TetherResult,
     private val rootTethered: suspend () -> Boolean,
-    /** Whether the live gadget still links the HAL's tethering function (`ncm.*`/`rndis.*`). */
-    private val tetherFunctionLinked: suspend () -> Boolean,
 ) {
     /** The pending confirmation of an on-to-off broadcast; main thread only. */
     private var confirmJob: Job? = null
@@ -102,7 +100,7 @@ class UsbTethering(
             return
         }
         val interfaces = intent.getStringArrayListExtra(EXTRA_ACTIVE_TETHER).orEmpty()
-        val active = TetherPolicy.usbTethered(interfaces)
+        val active = TetherPolicy.bootlegTethered(interfaces)
         val wasActive = stateFlow.value
         stateFlow.value = active
         val choice = prefs.usbTetherChoice.value
@@ -110,28 +108,26 @@ class UsbTethering(
         if (after != choice) {
             confirmExternalStop()
         } else if (active) {
-            // On again (ncm0 came back after a re-enumeration): the earlier off was no stop.
+            // On again: the earlier off was no stop.
             confirmJob?.cancel()
             confirmJob = null
         }
     }
 
     /**
-     * A broadcast can be stale (sent before a request that has since turned tethering on), and every
-     * re-enumeration of ours drops `ncm0` for a few seconds without stopping tethering. So the stop is
-     * confirmed only after [TetherLimits.EXTERNAL_STOP_CONFIRM_MS], with no broadcast since saying
-     * on, root's own view still off and the HAL's tethering function unlinked
-     * ([TetherChoice.externalStopConfirmed]). A newer broadcast cancels a pending confirmation.
+     * A broadcast can be stale (sent before a request that has since turned tethering on), so the stop
+     * is confirmed only after [TetherLimits.EXTERNAL_STOP_CONFIRM_MS], with no broadcast since saying
+     * on and root's own view still off ([TetherChoice.externalStopConfirmed]). A newer broadcast
+     * cancels a pending confirmation.
      */
     private fun confirmExternalStop() {
         confirmJob?.cancel()
         confirmJob =
             scope.launch(Dispatchers.Main) {
                 delay(TetherLimits.EXTERNAL_STOP_CONFIRM_MS)
-                // The gadget first: a start racing the reads shows in root's callback (~1.2s) before the HAL links its function.
-                val (functionLinked, tethered) =
+                val tethered =
                     try {
-                        tetherFunctionLinked() to rootTethered()
+                        rootTethered()
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -142,7 +138,6 @@ class UsbTethering(
                     TetherChoice.externalStopConfirmed(
                         stillOff = stateFlow.value == false,
                         rootTethered = tethered,
-                        tetherFunctionLinked = functionLinked,
                         requestInFlight = requestCount > 0,
                         shuttingDown = shuttingDown,
                     )

@@ -383,7 +383,7 @@ func TestCLITether(t *testing.T) {
 	})
 	code, _, stderr = phone.run(t, "", "tether", "on")
 	if code != exitDevice || !strings.Contains(stderr, "Eject every disk first") {
-		t.Fatalf("tether with a disk exposed: %d %q", code, stderr)
+		t.Fatalf("tether mode switch with a disk exposed: %d %q", code, stderr)
 	}
 }
 

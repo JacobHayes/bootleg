@@ -286,7 +286,7 @@ class GadgetSimulationTest {
         // The kernel refused our link into the HAL-bound gadget; the controller unbound, linked and rebound.
         assertEquals(listOf("${FakeConfigFs.EXECUTOR} configs/b.1/mass_storage.bootleg"), rig.fs.boundSymlinkRejections)
         assertEquals(2, rig.deadMan.arms.size - armsBefore, "unbound again after the HAL's bind")
-        assertTrue(LinkOrder.prefixFirst(rig.state().configLinks, TetherMode.RNDIS), "the HAL's switch only appends after the prefix")
+        assertTrue(LinkOrder.prefixFirst(rig.state().configLinks, TetherMode.DEFAULT), "the HAL's switch only appends after the prefix")
         assertTrue((result as ApplyResult.Applied).reenumerated)
         rig.assertConverged("HAL mid-transition")
     }

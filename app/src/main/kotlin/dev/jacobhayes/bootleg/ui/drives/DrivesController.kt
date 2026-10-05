@@ -178,7 +178,7 @@ class DrivesController(
         if (backend.usbTethering.value == true) setUsbTethering(true) { if (it is TetherResult.Refused) backend.setUsbTetherMode(previous) }
     }
 
-    /** Turns USB tethering on (over the mode) or off; the root side refuses an NCM change while a disk is exposed. */
+    /** Turns USB tethering on (over the mode) or off; the root side refuses a mode change while a disk is exposed. */
     fun setUsbTethering(
         on: Boolean,
         afterResult: (TetherResult) -> Unit = {},
@@ -291,9 +291,9 @@ class DrivesController(
             when (result) {
                 is TetherResult.Changed -> {
                     val change = if (result.active) "USB tethering on" else "USB tethering off"
-                    when (val reconcile = result.reconcile) {
-                        is ApplyResult.Applied -> change
-                        else -> "$change. Drives: ${describe(reconcile)}"
+                    when (val setup = result.setup) {
+                        null, is ApplyResult.Applied -> change
+                        else -> "$change. Drives: ${describe(setup)}"
                     }
                 }
                 is TetherResult.Unchanged -> if (result.active) "USB tethering is already on" else "USB tethering is already off"

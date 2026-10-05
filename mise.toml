@@ -57,13 +57,9 @@ run = "sh scripts/check-device-hid.sh"
 description = "L4 remote: the real bootleg CLI over the tailnet: pending, approve, RO mount, harmless HID, revoke (needs `mise run deploy` and an enrolled node)"
 run = "bash scripts/check-device-remote.sh"
 
-[tasks."check:device:tether"]
-description = "L4 tethering: USB tethering on with HID, the Mac's NCM interface reaches the internet, a disk mounts alongside, switching is refused while it is exposed, then everything off (needs `mise run deploy`)"
-run = "bash scripts/check-device-tether.sh"
-
-[tasks."check:device:rndis"]
-description = "L4 RNDIS: the prefix first on the phone and as interfaces 0-3 on the Mac, kept through a HAL round trip with no hidg fd open, a disk after it, RNDIS tethering on/off without re-enumerating (needs `mise run deploy`; Windows: scripts/rndis-windows-checklist.md)"
-run = "bash scripts/check-device-rndis.sh"
+[tasks."check:device:net"]
+description = "L4 tethering over both network functions: NCM sets the prefix up, the Mac's interface reaches the internet and DNS, the prefix and tethering survive a HAL round trip, NCM and RNDIS on/off with a disk mounted never re-enumerate, a mode change is refused while the disk is exposed (needs `mise run deploy`; RNDIS on Windows: scripts/rndis-windows-checklist.md)"
+run = "bash scripts/check-device-net.sh"
 
 [tasks."check:device:web"]
 description = "L4 web: the phone's web UI in Chrome over the tailnet: pending, approve, RO mount + eject, F24, tab-switch release, paste prepare/cancel, takeover, revoke (needs `mise run deploy`, Chrome and node)"

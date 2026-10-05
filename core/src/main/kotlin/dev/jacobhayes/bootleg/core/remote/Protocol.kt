@@ -407,7 +407,7 @@ data class HidSetRequest(
     val ifRev: Long? = null,
 ) : RequestBody
 
-/** USB tethering on or off in the phone's mode; NCM re-plugs USB, so the phone refuses it while a disk is exposed. */
+/** USB tethering on or off in the phone's mode, without a re-plug; switching the mode re-plugs, so the phone refuses that while a disk is exposed. */
 @Serializable
 @SerialName("tether.set")
 data class TetherSetRequest(

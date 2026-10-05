@@ -86,7 +86,7 @@ data class Desired(
     val slots: List<SlotSpec> = emptyList(),
     val hid: HidSpec = HidSpec(),
     val prefix: Boolean = false,
-    val network: TetherMode = TetherMode.RNDIS,
+    val network: TetherMode = TetherMode.DEFAULT,
 ) {
     val isEmpty: Boolean get() = slots.isEmpty() && !hid.keyboard && !hid.mouse && !prefix
 

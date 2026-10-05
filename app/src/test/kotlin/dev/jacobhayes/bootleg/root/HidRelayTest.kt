@@ -5,7 +5,6 @@ import dev.jacobhayes.bootleg.core.gadget.DefaultGadgetController
 import dev.jacobhayes.bootleg.core.hid.HidKind
 import dev.jacobhayes.bootleg.core.hid.HidLimits
 import dev.jacobhayes.bootleg.core.hid.MouseReport
-import dev.jacobhayes.bootleg.core.tether.TetherLimits
 import dev.jacobhayes.bootleg.hid.HidWriteResult
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -115,11 +114,7 @@ class HidRelayTest {
             gadgetBound = { gadgetBound },
             nowMs = { clockMs },
             startWatch = { watches += it },
-            replugPendingUntilMs = { replugPendingUntil() },
         ).also { notifier.sender = it }
-
-    /** The tethering marker's window end as root reads it; null when there is no pending marker. */
-    private var replugPendingUntil: () -> Long? = { null }
 
     /** Runs the watch every [HidRelay.WATCH_INTERVAL_MS] for [durationMs]; false once it stopped. */
     private fun poll(durationMs: Long): Boolean {
@@ -451,74 +446,6 @@ class HidRelayTest {
         relay.closeAllForGadgetChange()
         relay.endGadgetChange()
         assertEquals(listOf("closed(app, ${HidRelay.QUARANTINED_MESSAGE}, reopenFollows=false, restartRequired=true)"), notifier.sent)
-    }
-
-    private val replugWaits = "closed(app, ${HidRelay.TETHER_REPLUG_MESSAGE}, reopenFollows=true, restartRequired=false)"
-
-    @Test
-    fun `an open during a tethering re-plug waits, and is told to reopen when the marker is cleared`() {
-        val watched = watchedRelay()
-        val client = token("app")
-        var markerUntil: Long? = clockMs + 8_000
-        replugPendingUntil = { markerUntil?.takeIf { it > clockMs } }
-        assertThrows<IllegalStateException> { watched.open(HidKind.KEYBOARD, client) }
-        // Told at once that a reopen follows, so it waits instead of spending its retries.
-        assertEquals(listOf(replugWaits), notifier.sent)
-        assertTrue(opened.isEmpty())
-        assertTrue(poll(1_000), "the watch keeps polling while the marker is pending")
-        assertThrows<IllegalStateException> { watched.open(HidKind.KEYBOARD, client) }
-        markerUntil = null
-        poll(HidRelay.WATCH_INTERVAL_MS)
-        assertEquals("reopenable(app)", notifier.sent.last())
-        watched.open(HidKind.KEYBOARD, client)
-        assertEquals(1, opened.size)
-    }
-
-    @Test
-    fun `the wait for a tethering re-plug ends with the marker's window even if the marker stays`() {
-        val watched = watchedRelay()
-        val client = token("app")
-        val windowEnd = clockMs + 3_000
-        replugPendingUntil = { windowEnd.takeIf { it > clockMs } }
-        assertThrows<IllegalStateException> { watched.open(HidKind.MOUSE, client) }
-        poll(3_000 - HidRelay.WATCH_INTERVAL_MS)
-        assertEquals(listOf(replugWaits), notifier.sent)
-        poll(HidRelay.WATCH_INTERVAL_MS)
-        assertEquals(listOf(replugWaits, "reopenable(app)"), notifier.sent)
-        assertFalse(poll(HidRelay.WATCH_INTERVAL_MS), "nothing left to watch")
-        watched.open(HidKind.MOUSE, client)
-    }
-
-    @Test
-    fun `a marker that can't be read waits one full window, not forever`() {
-        val watched = watchedRelay()
-        val client = token("app")
-        replugPendingUntil = { error("unreadable") }
-        val startMs = clockMs
-        assertThrows<IllegalStateException> { watched.open(HidKind.KEYBOARD, client) }
-        assertTrue(poll(TetherLimits.TRANSITION_GATE_MS_MAX - HidRelay.WATCH_INTERVAL_MS))
-        assertEquals(listOf(replugWaits), notifier.sent)
-        poll(HidRelay.WATCH_INTERVAL_MS * 2)
-        assertEquals("reopenable(app)", notifier.sent.last())
-        assertTrue(clockMs - startMs <= TetherLimits.TRANSITION_GATE_MS_MAX + HidRelay.WATCH_INTERVAL_MS * 2)
-    }
-
-    @Test
-    fun `a tethering call that clears its marker reopens the waiter when the call ends`() {
-        val watched = watchedRelay()
-        val client = token("app")
-        watched.open(HidKind.KEYBOARD, client)
-        var marker: Long? = null
-        replugPendingUntil = { marker }
-        // The tethering call: fence, write the marker; an open meanwhile is refused by the fence.
-        watched.closeAllForGadgetChange()
-        marker = clockMs + TetherLimits.TRANSITION_GATE_MS_MAX
-        assertThrows<IllegalStateException> { watched.open(HidKind.KEYBOARD, client) }
-        // It clears the marker before it returns; the end of the call then reopens at once.
-        marker = null
-        watched.endGadgetChange()
-        assertEquals("reopenable(app)", notifier.sent.last())
-        watched.open(HidKind.KEYBOARD, client)
     }
 
     private companion object {

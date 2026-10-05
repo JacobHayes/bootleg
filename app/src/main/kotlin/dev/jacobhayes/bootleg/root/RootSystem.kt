@@ -11,8 +11,7 @@ import dev.jacobhayes.bootleg.core.gadget.GadgetNames
 import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.JournalStore
 import dev.jacobhayes.bootleg.core.gadget.UsbProps
-import dev.jacobhayes.bootleg.core.tether.TetherTransition
-import dev.jacobhayes.bootleg.core.tether.TetherTransitionStore
+import dev.jacobhayes.bootleg.core.tether.TetherIntentStore
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.reflect.Method
@@ -154,51 +153,17 @@ fun functionFsReady(function: String): Boolean {
     return File("/proc/1/root$mountPoint/ep1").exists()
 }
 
-/**
- * The tethering transition marker next to the journal. An unreadable marker counts as unverified
- * and written now, so the gate waits its full window instead of trusting it.
- */
-class FileTetherTransitionStore(
-    private val file: File = File("/data/adb/bootleg/tether-transition.json"),
-    private val clock: Clock,
-) : TetherTransitionStore {
-    /**
-     * When this process first found the marker unreadable. An unreadable marker counts as written then,
-     * not at every load, so its window ends (HID opens wait on it too, and they load it every 50ms).
-     */
-    private var unreadableSinceMs: Long? = null
+/** Root's copy of the tethering choice next to the journal: `1` or `0`; missing or unreadable reads as off. */
+class FileTetherIntentStore(
+    private val file: File = File("/data/adb/bootleg/tether-on"),
+) : TetherIntentStore {
+    override fun load(): Boolean = runCatching { file.readText() == ON }.getOrDefault(false)
 
-    @Synchronized
-    override fun load(): TetherTransition? {
-        if (!file.exists()) {
-            unreadableSinceMs = null
-            return null
-        }
-        return runCatching { BootlegJson.decodeFromString<TetherTransition>(file.readText()) }
-            .onSuccess { unreadableSinceMs = null }
-            .getOrElse {
-                val sinceMs = unreadableSinceMs ?: clock.nowMs().also { nowMs -> unreadableSinceMs = nowMs }
-                Log.w(TAG, "tethering marker at $file is unreadable; waiting it out", it)
-                TetherTransition(requestedOn = false, startedAtMs = sinceMs, verified = false)
-            }
-    }
-
-    @Synchronized
-    override fun save(transition: TetherTransition) {
-        unreadableSinceMs = null
-        writeAtomically(file, BootlegJson.encodeToString(transition).toByteArray())
-    }
-
-    @Synchronized
-    override fun clear() {
-        unreadableSinceMs = null
-        if (!file.exists()) return
-        if (!file.delete() && file.exists()) error("cannot delete $file")
-        fsyncDirectory(checkNotNull(file.parentFile))
-    }
+    override fun save(on: Boolean) = writeAtomically(file, (if (on) ON else OFF).toByteArray())
 
     private companion object {
-        const val TAG = "BootlegTether"
+        const val ON = "1"
+        const val OFF = "0"
     }
 }
 

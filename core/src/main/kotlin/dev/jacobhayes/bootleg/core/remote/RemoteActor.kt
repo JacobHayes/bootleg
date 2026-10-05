@@ -403,7 +403,7 @@ class RemoteActor(
         }
     }
 
-    /** Tethering waits on Android and the HAL as well as the gadget, so it gets the longer deadline (scaled like [deviceTimeoutMs]). */
+    /** Tethering may set the prefix up and then waits on Android, so it gets the longer deadline (scaled like [deviceTimeoutMs]). */
     private fun timeoutMsFor(op: DeviceOp): Long =
         if (op is DeviceOp.SetUsbTethering) {
             deviceTimeoutMs * RemoteLimits.TETHER_OP_TIMEOUT_MS / RemoteLimits.DEVICE_OP_TIMEOUT_MS

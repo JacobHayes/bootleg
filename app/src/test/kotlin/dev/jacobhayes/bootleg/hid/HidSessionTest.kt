@@ -554,22 +554,22 @@ class HidSessionTest {
         }
 
     @Test
-    fun `an open refused while tethering re-plugs USB waits for root's word instead of giving up`() =
+    fun `an open refused with word that a reopen follows waits for it instead of giving up`() =
         runTest {
             val tuning = HidSessionTuning(reopenAttemptCountMax = 3, reopenBackoffInitialMs = 100, reopenBackoffMaxMs = 100)
             lateinit var session: HidSession
-            var replugging = true
+            var waiting = true
             var refusals = 0
             val opener =
                 object : HidEndpointOpener {
                     val inner = FakeOpener()
 
                     override suspend fun open(kind: HidKind): HidEndpoint {
-                        if (!replugging) return inner.open(kind)
+                        if (!waiting) return inner.open(kind)
                         refusals++
                         // Root refuses and tells the client a reopen follows (oneway, so it may land first).
-                        session.onRelayNotice(HidRelayNotice.Closed("waiting for tethering", reopenFollows = true, restartRequired = false))
-                        error("keyboard and mouse wait while USB tethering re-plugs USB")
+                        session.onRelayNotice(HidRelayNotice.Closed("waiting for USB", reopenFollows = true, restartRequired = false))
+                        error("keyboard and mouse wait for USB")
                     }
                 }
             session = HidSession(opener, backgroundScope, bothKinds, { testScheduler.currentTime }, tuning)
@@ -579,7 +579,7 @@ class HidSessionTest {
             runCurrent()
             assertTrue(session.state.value is HidLinkState.Reconnecting, "${session.state.value}")
             assertEquals(1, refusals, "no retries while root said a reopen follows")
-            replugging = false
+            waiting = false
             session.onRelayNotice(HidRelayNotice.Reopenable)
             runCurrent()
             assertEquals(HidLinkState.Open(), session.state.value)

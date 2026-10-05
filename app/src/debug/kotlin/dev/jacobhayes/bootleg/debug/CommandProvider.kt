@@ -147,7 +147,7 @@ class CommandProvider : ContentProvider() {
                                     put("link", sent.link.toString())
                                 }.toString()
                             }
-                            // USB tethering (L4 check:device:tether): the same path as the Drives switch.
+                            // USB tethering (L4 check:device:net): the same path as the Drives switch.
                             "TETHER_ON" -> BootlegJson.encodeToString(backend.setUsbTethering(true))
                             "TETHER_OFF" -> BootlegJson.encodeToString(backend.setUsbTethering(false))
                             "TETHER_MODE" -> {

@@ -72,8 +72,8 @@ class BootlegService : Service() {
             ACTION_EJECT_ALL -> scope.launch { ejectAllWithFeedback(this@BootlegService, backend) }
             ACTION_RESTORE ->
                 scope.launch {
-                    // Tethering first, while no disk is exposed yet; its reconcile (and the USB_STATE one after it)
-                    // brings back the journal's disks and HID.
+                    // Tethering first, while no disk is exposed yet (setting the prefix up is refused with disks);
+                    // the USB_STATE reconcile after it brings back the journal's disks and HID.
                     restoreUsbTethering()
                     watchUsbState()
                 }

@@ -50,9 +50,8 @@ private const val REPOSITORY_URL = "https://github.com/JacobHayes/bootleg"
 /** RNDIS has inbox drivers from Windows 7 on (and Linux) but none on macOS; NCM from Windows 10 2004. */
 private fun tetherModeBody(mode: TetherMode): String =
     when (mode) {
-        TetherMode.RNDIS ->
-            "Windows 7 and later, and Linux. Not macOS. Switches without re-plugging USB, so it works while disks are exposed."
-        TetherMode.NCM -> "macOS, Linux, and Windows 10 (2004) and later. Re-plugs USB, so it's refused while a disk is exposed."
+        TetherMode.RNDIS -> "Windows 7 and later, and Linux. Not macOS."
+        TetherMode.NCM -> "macOS, Linux, and Windows 10 (2004) and later."
     }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -126,6 +125,12 @@ fun SettingsScreen(
                             .testTag("usb-tethering-mode-${mode.wireName}"),
                 )
             }
+            Text(
+                "Switching the mode re-plugs USB once, the next time tethering turns on, so eject every disk first.",
+                Modifier.padding(horizontal = 16.dp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             SectionHeader("About")
             ListItem(

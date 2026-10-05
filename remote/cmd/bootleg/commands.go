@@ -438,8 +438,9 @@ func tetherStatusCommand(ctx context.Context, call *invocation, c *client) error
 	return nil
 }
 
-// tetherCommand turns the phone's USB tethering on or off. The phone refuses
-// (disks_exposed) while a disk is exposed in NCM mode: either way USB re-plugs.
+// tetherCommand turns the phone's USB tethering on or off. Turning it on in a
+// mode the phone's USB functions aren't set up with re-plugs USB, so the phone
+// refuses that (disks_exposed) while a disk is exposed.
 func tetherCommand(ctx context.Context, call *invocation, c *client) error {
 	on := call.args[0] == "on"
 	if !on {
@@ -449,7 +450,7 @@ func tetherCommand(ctx context.Context, call *invocation, c *client) error {
 	if err != nil {
 		var failure *protocolError
 		if errors.As(err, &failure) && failure.body.Code == protocol.ErrorDisksExposed {
-			fmt.Fprintln(call.stderr, "Eject every disk first (bootleg eject <lun>): switching USB tethering re-plugs USB.")
+			fmt.Fprintln(call.stderr, "Eject every disk first (bootleg eject <lun>): switching the tethering mode re-plugs USB.")
 		}
 		return err
 	}

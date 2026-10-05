@@ -23,7 +23,6 @@ import dev.jacobhayes.bootleg.core.gadget.Journal
 import dev.jacobhayes.bootleg.core.gadget.SlotIntent
 import dev.jacobhayes.bootleg.core.gadget.TetherMode
 import dev.jacobhayes.bootleg.core.hid.HidKind
-import dev.jacobhayes.bootleg.core.tether.TetherPolicy
 import dev.jacobhayes.bootleg.core.tether.TetherResult
 import dev.jacobhayes.bootleg.hid.HidEndpoint
 import dev.jacobhayes.bootleg.hid.HidRelayNotice
@@ -75,10 +74,6 @@ class BootlegBackendImpl(
             scope = scope,
             rootSet = { on -> userTetherCall(on) },
             rootTethered = { call { it.usbTethered() } },
-            tetherFunctionLinked = {
-                refreshGadget()
-                TetherPolicy.tetherFunctionLinked(checkNotNull(gadgetStateFlow.value) { "no gadget state after a refresh" })
-            },
         ).also { it.start() }
 
     override val usbTethering: StateFlow<Boolean?> = tethering.state
@@ -152,10 +147,10 @@ class BootlegBackendImpl(
 
     override suspend fun setUsbTethering(on: Boolean): TetherResult = tethering.set(on)
 
-    /** Root's own view (its TetheringManager callback, either transport), not the broadcast-fed [usbTethering]. */
+    /** Root's own view (its TetheringManager callback), not the broadcast-fed [usbTethering]. */
     suspend fun usbTethered(): Boolean = call { it.usbTethered() }
 
-    /** Like a gadget call: the root side reconciles after the HAL's re-plug, so the journal belongs to this boot. */
+    /** Like a gadget call: a first use or a mode change sets the prefix up, so the journal belongs to this boot. */
     private suspend fun userTetherCall(on: Boolean): TetherResult {
         withContext(Dispatchers.IO) { BootGeneration.markJournalCurrent(context) }
         val result = call { BootlegJson.decodeFromString<TetherResult>(it.setUsbTethering(on, prefs.usbTetherMode.value.wireName)) }

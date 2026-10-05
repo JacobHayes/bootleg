@@ -12,11 +12,11 @@ import org.junit.jupiter.api.assertThrows
 class GadgetInvariantsTest {
     private val roots = GadgetInvariants.ALLOWED_ROOTS_DEFAULT
     private val lun = LunState(img(1), ro = false, cdrom = false, removable = true, nofua = false)
-    private val prefix = LinkOrder.prefix(TetherMode.RNDIS).associateWith { it }
+    private val prefix = LinkOrder.prefix(TetherMode.DEFAULT).associateWith { it }
     private val good =
         GadgetState(
             udc = FakeConfigFs.PIXEL_UDC,
-            functions = setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION) + LinkOrder.prefix(TetherMode.RNDIS),
+            functions = setOf("ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION) + LinkOrder.prefix(TetherMode.DEFAULT),
             configLinks = prefix + mapOf("function0" to "ffs.adb", GadgetNames.MASS_STORAGE_FUNCTION to GadgetNames.MASS_STORAGE_FUNCTION),
             luns = mapOf(0 to lun),
             rndis = RndisState.READY,
@@ -39,7 +39,11 @@ class GadgetInvariantsTest {
                 "the prefix isn't first" to good.copy(configLinks = mapOf("function0" to "ffs.adb") + prefix),
                 "links out of order" to
                     good.copy(configLinks = mapOf(GadgetNames.MASS_STORAGE_FUNCTION to GadgetNames.MASS_STORAGE_FUNCTION) + prefix),
-                "the RNDIS function is HELD" to good.copy(rndis = RndisState.HELD),
+                "the RNDIS function is HELD" to
+                    good.copy(
+                        configLinks = good.configLinks + (GadgetNames.RNDIS_FUNCTION to GadgetNames.RNDIS_FUNCTION),
+                        rndis = RndisState.HELD,
+                    ),
                 "cdrom without ro" to good.copy(luns = mapOf(0 to lun.copy(cdrom = true))),
                 "not dense" to good.copy(luns = mapOf(1 to lun)),
                 "exceeds" to good.copy(luns = (0..GadgetLimits.LUN_COUNT_MAX).associateWith { lun.copy(ro = true, file = img(it)) }),

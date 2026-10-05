@@ -5,7 +5,7 @@
 
 const PROTOCOL_VERSION = 1;
 const REQUEST_TIMEOUT_MS = 15000;
-// The phone allows tether.set 75 s (Android, the USB re-plug and a drive check).
+// The phone allows tether.set 75 s (setting its USB functions up, then Android).
 const TETHER_REQUEST_TIMEOUT_MS = 80000;
 const RECONNECT_DELAY_MIN_MS = 1000;
 const RECONNECT_DELAY_MAX_MS = 15000;
@@ -569,17 +569,13 @@ function renderState() {
   const values = luns.filter((element) => !element.disabled).map((element) => element.value);
   lunSelect.value = values.includes(selectedLun) ? selectedLun : (existing.length < LUN_COUNT_MAX ? "new" : "");
 
-  // Absent until the phone knows. NCM (not RNDIS) re-plugs USB, so the phone refuses it while a disk has media.
+  // Absent until the phone knows.
   const tether = state.tether;
   const mode = tether && tether.mode ? ` (${tether.mode.toUpperCase()})` : "";
   $("tether-state").textContent = tether ? (tether.on ? "On" : "Off") + mode : "Unknown";
-  const blocked = (state.slots || []).some((slot) => slot.status === "exported") && !(tether && tether.mode === "rndis");
   $("tether-on").hidden = !!(tether && tether.on);
   $("tether-off").hidden = !(tether && tether.on);
-  for (const id of ["tether-on", "tether-off"]) {
-    $(id).disabled = !holdsLease() || blocked;
-    $(id).title = blocked ? "Eject every disk first: switching NCM re-plugs USB" : "";
-  }
+  for (const id of ["tether-on", "tether-off"]) $(id).disabled = !holdsLease();
 
   const hid = state.hid || {};
   if (document.activeElement !== $("hid-keyboard")) $("hid-keyboard").checked = !!hid.keyboard;

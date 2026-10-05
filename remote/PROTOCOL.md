@@ -177,14 +177,14 @@ Details:
   the phone), `timeout` (10 s). A started operation finishes atomically even if the session ends;
   its reply then goes nowhere, and every session sees the result in `state`.
 - **`tether.set`** turns the phone's USB tethering on or off, in the mode set on the phone
-  (`Tether.mode`). RNDIS doesn't re-plug USB (once Bootleg's functions are set up); NCM does, so the
-  phone then refuses it with `disks_exposed` while any LUN holds media (it checks the live gadget, so
-  a slot the host already ejected doesn't count); HID may stay on and loses the host for about a
-  second, as with `hid.set`. Asking for the current state answers at once without a re-plug (also
-  with disks exposed). Android failures (carrier entitlement, unsupported, nothing came up within
-  5 s) are `device`. The reply carries the state Android reports afterwards, and `warning` (a
-  string) when tethering changed but the gadget then needs attention on the phone (slot failures
-  are named in it). It can take up to 75 s (`timeout` after that; it still finishes). Turning it
+  (`Tether.mode`). On and off don't re-plug USB. Turning it on in a mode Bootleg's USB functions
+  aren't set up with (the mode was changed on the phone, or a first use) does, so the phone then
+  refuses it with `disks_exposed` while any LUN holds media (it checks the live gadget, so a slot
+  the host already ejected doesn't count). Asking for the current state answers at once. Android
+  failures (unsupported, another app's virtual tethering, nothing came up within 3 s) are `device`.
+  The reply carries the state Android reports afterwards, and `warning` (a string) when tethering
+  changed but setting the USB functions up left the drives needing attention on the phone (slot
+  failures are named in it). It can take up to 75 s (`timeout` after that; it still finishes). Turning it
   off may cut the remote; clients always warn first, since they can't tell whether they reach the
   phone over that USB link.
 - **`bootkey.run`**: `vendor` is a lower-case `BootVendor` (`generic`, `dell`, `lenovo`, `hp`,
@@ -262,7 +262,7 @@ Details:
 | `pairing_locked` | Too many pairing attempts; reset on the phone. |
 | `bad_code` | Wrong pairing code. |
 | `device` | The gadget operation failed. |
-| `disks_exposed` | `tether.set` while a disk is exposed. |
+| `disks_exposed` | `tether.set` that would switch the tethering mode while a disk is exposed. |
 | `device_attention` | The gadget needs the user's attention on the phone. |
 | `timeout` | The device didn't answer within 10 s (75 s for `tether.set`). |
 | `too_many_downloads` | 4 downloads are already queued or running. |
@@ -284,7 +284,7 @@ Image = {imageId: string, name: string, sizeBytes: int, defaultMode: "cdrom"|"di
 Hid   = {keyboard: bool, mouse: bool, wheel: bool, status?: "release_pending",
          link?: "stopped"|"connecting"|"open"|"reconnecting"|"failed"|"restart_required",
          notReading?: ["keyboard"|"mouse"]}
-Tether = {on: bool, mode?: "rndis"|"ncm"}   // on: either transport, as Android reports it; absent until known.
+Tether = {on: bool, mode?: "rndis"|"ncm"}   // on: Bootleg's tethering, as Android reports it; absent until known.
   // mode: the phone's tethering mode (absent in tether.set replies and from older phones).
 
 Catalog  = {catalogRev: int, refreshing: bool, truncated: bool, distros: [Distro]}

@@ -138,7 +138,7 @@ data class GadgetTarget(
     val prefix: Boolean,
     val lunMarker: String? = null,
     val usbRoundTrip: Boolean = false,
-    val network: TetherMode = TetherMode.RNDIS,
+    val network: TetherMode = TetherMode.DEFAULT,
 ) {
     init {
         require(luns.size <= GadgetLimits.LUN_COUNT_MAX) { "at most ${GadgetLimits.LUN_COUNT_MAX} LUNs, got ${luns.size}" }
