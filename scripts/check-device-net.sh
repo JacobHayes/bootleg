@@ -13,7 +13,8 @@
 # - Finally the prefix goes back to the mode the phone had (one more re-plug, nothing exposed).
 #
 # Needs the debug app (`mise run deploy`); uses wireless adb (the prefix re-plugs USB). Takes the
-# device lock unless BOOTLEG_DEVICE_LOCK_HELD=1. Sends no HID input. Mac side: read-only commands,
+# device lock unless BOOTLEG_DEVICE_LOCK_HELD=1. Keeps the screen on while it runs (the phone must be
+# unlocked at the start; scripts/stay-awake.sh). Sends no HID input. Mac side: read-only commands,
 # `curl --interface` and `dig`; macOS adds a "Pixel 6" network service the first time and may route
 # through it while it is active.
 set -euo pipefail
@@ -21,6 +22,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=scripts/device-lock.sh
 source scripts/device-lock.sh
+# shellcheck source=scripts/stay-awake.sh
+source scripts/stay-awake.sh
 WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh)}
 USB_SERIAL=${BOOTLEG_USB_SERIAL:-$(scripts/usb-serial.sh)}
 LOCK_WAIT_S_MAX=120
@@ -198,6 +201,7 @@ cleanup() {
             echo "check-device-net: WARN: HID not put back to $hid_before" >&2
     fi
     [[ -z $mode_before ]] || call TETHER_MODE --extra "mode:s:$mode_before" >/dev/null || true
+    stay_awake_restore "$WIFI_SERIAL"
     device_lock_release
     exit "$status"
 }
@@ -208,6 +212,7 @@ trap 'exit 129' HUP
 
 [[ $(wadb shell dumpsys window | tr -d '\r' | grep -o 'isKeyguardShowing=[a-z]*' | head -1) == isKeyguardShowing=false ]] ||
     fail "the phone is locked; unlock it first"
+stay_awake_on "$WIFI_SERIAL"
 vendor_hex=$(root "cat /config/usb_gadget/g1/idVendor" | sed 's/^0[xX]//')
 [[ $vendor_hex =~ ^[0-9a-fA-F]{1,4}$ ]] || fail "cannot read the gadget's idVendor: '$vendor_hex'"
 VENDOR_DECIMAL=$((16#$vendor_hex))

@@ -2,8 +2,9 @@
 # Runs the on-device UI end-to-end tests (scripts/e2e-ui/*.sh) against the real app, with this Mac
 # as USB host. Each test checks one behaviour, runs in its own subshell and puts back what it
 # changed, so any selection runs alone or in any order. One setup per run: device lock, adb
-# serials (USB adb only when a selected test runs over it, [usb adb] in --list), the resident
-# uiautomator dump server; shared fixtures (netboot.xyz.iso, a FAT blank)
+# serials (USB adb only when a selected test runs over it, [usb adb] in --list), the screen kept on
+# (scripts/stay-awake.sh; the phone must be unlocked at the start), the resident uiautomator dump
+# server; shared fixtures (netboot.xyz.iso, a FAT blank)
 # are made on first use and kept on the phone for later runs.
 #
 # Usage: scripts/e2e-ui.sh [--list] [--install] [TEST...]
@@ -138,6 +139,7 @@ suite_finish() {
     elif [[ -n ${WIFI_SERIAL:-} ]]; then
         use_transport wifi
         ui_server_stop
+        stay_awake_restore "$WIFI_SERIAL"
         [[ -z ${UI_PORT_USB:-} ]] || adb -s "$USB_SERIAL" forward --remove "tcp:$UI_PORT_USB" >/dev/null 2>&1 || true
     fi
     release_lock
@@ -193,6 +195,7 @@ WIFI_SERIAL=${BOOTLEG_WIFI_SERIAL:-$(scripts/wifi-serial.sh ${USB_SERIAL:+"$USB_
 export USB_SERIAL WIFI_SERIAL
 use_transport wifi
 phone_awake_and_unlocked || die "the phone is locked: unlock it and run again (the tests never unlock it)"
+stay_awake_on "$WIFI_SERIAL"
 $install && install_app
 [[ -n $(adb shell pm path "$PACKAGE" | tr -d '\r') ]] || die "$PACKAGE is not installed (mise run deploy, or --install)"
 if [[ ${BOOTLEG_UI_SERVER:-1} == 1 ]]; then

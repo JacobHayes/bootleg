@@ -16,6 +16,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 source scripts/ui.sh
 # shellcheck source=scripts/device-lock.sh
 source scripts/device-lock.sh
+# shellcheck source=scripts/stay-awake.sh
+source scripts/stay-awake.sh
 
 LOCK_WAIT_S=600
 PACKAGE=dev.jacobhayes.bootleg

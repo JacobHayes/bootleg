@@ -47,6 +47,9 @@ Run the fastest rung that covers your change, then climb. All of L0–L4 should 
 - L4 scripts bound every adb call (`timeout`; wireless adb can hang), release the device lock on
   EXIT, INT, TERM and HUP, and never change HID or the gadget while a change they started is still
   in flight (debug calls are synchronous; a tethering change is waited out first).
+- Runners that need the phone unlocked (`check:device:ui`, `check:device:net`) keep its screen on
+  while they run and put the setting back afterwards, or on the next run after a killed one
+  (`scripts/stay-awake.sh`). The phone must be unlocked when they start; they never unlock it.
 - Tests for network code are tagged `live` and stay out of the default run. Offline tests replay
   recorded fixtures.
 - A change isn't done until `mise run check` passes. Changes that touch the device run
